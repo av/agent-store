@@ -72,6 +72,17 @@
 - label: agent-store supports JSON output with --json flag
   command: cd /tmp/as-test-pipe && agent-store query --json | python3 -c "import sys,json; json.load(sys.stdin)" && echo "OK"
 
+## cli/skills @spec
+
+- label: agent-store skills lists available skills with descriptions
+  command: agent-store skills list 2>&1 | grep -q "core" && echo "OK"
+- label: agent-store skills get core prints the core usage guide
+  command: agent-store skills get core 2>&1 | grep -q "agent-store" && echo "OK"
+- label: agent-store skills get core --full includes references and templates
+  command: LINES=$(agent-store skills get core --full 2>&1 | wc -l); SHORT=$(agent-store skills get core 2>&1 | wc -l); test "$LINES" -gt "$SHORT" && echo "OK"
+- label: agent-store skills path core prints the skill data path
+  command: agent-store skills path core 2>&1 | grep -q "core" && echo "OK"
+
 ## cli/config @implemented
 
 - label: agent-store uses .agent-store/ in current directory by default
