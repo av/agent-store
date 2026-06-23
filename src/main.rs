@@ -34,7 +34,10 @@ enum Command {
         quiet: bool,
     },
     /// Pull an entry by ID and print to stdout
-    Pull,
+    Pull {
+        /// Entry ID to retrieve
+        id: String,
+    },
     /// List and filter entries
     Query {
         /// Filter by label
@@ -214,6 +217,28 @@ fn query(label: Option<String>, entity_type: Option<String>) {
     }
 }
 
+fn pull(id: &str) {
+    let conn = open_db();
+
+    let result: Result<String, _> = conn.query_row(
+        "SELECT data FROM entries WHERE id = ?1",
+        rusqlite::params![id],
+        |row| row.get(0),
+    );
+
+    match result {
+        Ok(data) => print!("{data}"),
+        Err(rusqlite::Error::QueryReturnedNoRows) => {
+            eprintln!("error: entry not found: {id}");
+            process::exit(1);
+        }
+        Err(e) => {
+            eprintln!("error: failed to query entry: {e}");
+            process::exit(1);
+        }
+    }
+}
+
 fn not_implemented(name: &str) {
     eprintln!("{name}: not yet implemented");
     process::exit(1);
@@ -229,7 +254,7 @@ fn main() {
             entity_type,
             quiet,
         } => push(label, entity_type, quiet),
-        Command::Pull => not_implemented("pull"),
+        Command::Pull { id } => pull(&id),
         Command::Query { label, entity_type } => query(label, entity_type),
         Command::Schema => not_implemented("schema"),
         Command::Stats => not_implemented("stats"),
