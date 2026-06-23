@@ -126,6 +126,9 @@ fn init() {
             value TEXT NOT NULL,
             PRIMARY KEY (entry_id, key)
         );
+
+        CREATE INDEX IF NOT EXISTS idx_labels_label ON labels(label);
+        CREATE INDEX IF NOT EXISTS idx_attributes_key_value ON attributes(key, value);
     ";
 
     if let Err(e) = conn.execute_batch(schema) {
@@ -147,6 +150,27 @@ fn parse_attr(attr: &str) -> (&str, &str) {
 }
 
 fn push(labels: Vec<String>, entity_type: Option<String>, quiet: bool, attrs: Vec<String>) {
+    // Validate empty strings before any DB work
+    for label in &labels {
+        if label.trim().is_empty() {
+            eprintln!("error: label cannot be empty");
+            process::exit(1);
+        }
+    }
+    if let Some(ref t) = entity_type {
+        if t.trim().is_empty() {
+            eprintln!("error: type cannot be empty");
+            process::exit(1);
+        }
+    }
+    let parsed_attrs: Vec<(&str, &str)> = attrs.iter().map(|a| parse_attr(a)).collect();
+    for (key, _) in &parsed_attrs {
+        if key.trim().is_empty() {
+            eprintln!("error: attribute key cannot be empty");
+            process::exit(1);
+        }
+    }
+
     let mut data = String::new();
     if let Err(e) = io::stdin().read_to_string(&mut data) {
         eprintln!("error: failed to read stdin: {e}");
@@ -161,10 +185,17 @@ fn push(labels: Vec<String>, entity_type: Option<String>, quiet: bool, attrs: Ve
     let id = Uuid::new_v4().to_string();
     let conn = open_db();
 
+    // Wrap entire push in a transaction for atomicity
+    if let Err(e) = conn.execute("BEGIN", []) {
+        eprintln!("error: failed to begin transaction: {e}");
+        process::exit(1);
+    }
+
     if let Err(e) = conn.execute(
         "INSERT INTO entries (id, data, entity_type) VALUES (?1, ?2, ?3)",
         rusqlite::params![id, data, entity_type],
     ) {
+        let _ = conn.execute("ROLLBACK", []);
         eprintln!("error: failed to insert entry: {e}");
         process::exit(1);
     }
@@ -174,20 +205,27 @@ fn push(labels: Vec<String>, entity_type: Option<String>, quiet: bool, attrs: Ve
             "INSERT INTO labels (entry_id, label) VALUES (?1, ?2)",
             rusqlite::params![id, label],
         ) {
+            let _ = conn.execute("ROLLBACK", []);
             eprintln!("error: failed to insert label: {e}");
             process::exit(1);
         }
     }
 
-    for attr in &attrs {
-        let (key, value) = parse_attr(attr);
+    for (key, value) in &parsed_attrs {
         if let Err(e) = conn.execute(
             "INSERT INTO attributes (entry_id, key, value) VALUES (?1, ?2, ?3)",
             rusqlite::params![id, key, value],
         ) {
+            let _ = conn.execute("ROLLBACK", []);
             eprintln!("error: failed to insert attribute: {e}");
             process::exit(1);
         }
+    }
+
+    if let Err(e) = conn.execute("COMMIT", []) {
+        let _ = conn.execute("ROLLBACK", []);
+        eprintln!("error: failed to commit transaction: {e}");
+        process::exit(1);
     }
 
     if quiet {
@@ -225,10 +263,10 @@ fn query(label: Option<String>, entity_type: Option<String>, attrs: Vec<String>,
     let mut param_idx = 1u32;
 
     // Label join + condition
-    if label.is_some() {
+    if let Some(ref l) = label {
         sql.push_str(" JOIN labels l ON e.id = l.entry_id");
         conditions.push(format!("l.label = ?{param_idx}"));
-        params.push(Box::new(label.clone().unwrap()));
+        params.push(Box::new(l.clone()));
         param_idx += 1;
     }
 
@@ -242,7 +280,9 @@ fn query(label: Option<String>, entity_type: Option<String>, attrs: Vec<String>,
     // Attribute joins + conditions (one join per attr filter, AND logic)
     for (i, (key, value)) in parsed_attrs.iter().enumerate() {
         let alias = format!("a{i}");
-        sql.push_str(&format!(" JOIN attributes {alias} ON e.id = {alias}.entry_id"));
+        sql.push_str(&format!(
+            " JOIN attributes {alias} ON e.id = {alias}.entry_id"
+        ));
         conditions.push(format!("{alias}.key = ?{param_idx}"));
         params.push(Box::new(key.to_string()));
         param_idx += 1;
@@ -289,28 +329,43 @@ fn query(label: Option<String>, entity_type: Option<String>, attrs: Vec<String>,
                 Ok((id, data, etype, created_at)) => {
                     // Fetch labels for this entry
                     let labels = {
-                        let mut lstmt = conn
-                            .prepare("SELECT label FROM labels WHERE entry_id = ?1")
-                            .unwrap();
-                        lstmt
-                            .query_map(rusqlite::params![id], |r| r.get::<_, String>(0))
-                            .unwrap()
-                            .filter_map(|r| r.ok())
-                            .collect()
+                        let mut lstmt =
+                            match conn.prepare("SELECT label FROM labels WHERE entry_id = ?1") {
+                                Ok(s) => s,
+                                Err(e) => {
+                                    eprintln!("error: failed to query labels: {e}");
+                                    process::exit(1);
+                                }
+                            };
+                        match lstmt.query_map(rusqlite::params![id], |r| r.get::<_, String>(0)) {
+                            Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
+                            Err(e) => {
+                                eprintln!("error: failed to query labels: {e}");
+                                process::exit(1);
+                            }
+                        }
                     };
 
                     // Fetch attributes for this entry
                     let attributes = {
-                        let mut astmt = conn
+                        let mut astmt = match conn
                             .prepare("SELECT key, value FROM attributes WHERE entry_id = ?1")
-                            .unwrap();
-                        astmt
-                            .query_map(rusqlite::params![id], |r| {
-                                Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
-                            })
-                            .unwrap()
-                            .filter_map(|r| r.ok())
-                            .collect()
+                        {
+                            Ok(s) => s,
+                            Err(e) => {
+                                eprintln!("error: failed to query attributes: {e}");
+                                process::exit(1);
+                            }
+                        };
+                        match astmt.query_map(rusqlite::params![id], |r| {
+                            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+                        }) {
+                            Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
+                            Err(e) => {
+                                eprintln!("error: failed to query attributes: {e}");
+                                process::exit(1);
+                            }
+                        }
                     };
 
                     entries.push(EntryJson {
@@ -404,11 +459,13 @@ fn schema() {
         }
     };
 
-    let types: Vec<(String, i64)> = stmt
-        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
-        .unwrap()
-        .filter_map(|r| r.ok())
-        .collect();
+    let types: Vec<(String, i64)> = match stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?))) {
+        Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
+        Err(e) => {
+            eprintln!("error: failed to query entity types: {e}");
+            process::exit(1);
+        }
+    };
 
     println!("Entity Types:");
     if types.is_empty() {
@@ -421,9 +478,9 @@ fn schema() {
     }
 
     // Labels with counts
-    let mut stmt = match conn.prepare(
-        "SELECT label, COUNT(*) FROM labels GROUP BY label ORDER BY COUNT(*) DESC",
-    ) {
+    let mut stmt = match conn
+        .prepare("SELECT label, COUNT(*) FROM labels GROUP BY label ORDER BY COUNT(*) DESC")
+    {
         Ok(s) => s,
         Err(e) => {
             eprintln!("error: failed to query labels: {e}");
@@ -431,11 +488,14 @@ fn schema() {
         }
     };
 
-    let labels: Vec<(String, i64)> = stmt
-        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
-        .unwrap()
-        .filter_map(|r| r.ok())
-        .collect();
+    let labels: Vec<(String, i64)> = match stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+    {
+        Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
+        Err(e) => {
+            eprintln!("error: failed to query labels: {e}");
+            process::exit(1);
+        }
+    };
 
     println!();
     println!("Labels:");
@@ -453,9 +513,13 @@ fn stats() {
     let conn = open_db();
 
     // Total entry count
-    let count: i64 = conn
-        .query_row("SELECT COUNT(*) FROM entries", [], |row| row.get(0))
-        .unwrap_or(0);
+    let count: i64 = match conn.query_row("SELECT COUNT(*) FROM entries", [], |row| row.get(0)) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("error: failed to count entries: {e}");
+            process::exit(1);
+        }
+    };
 
     let word = if count == 1 { "entry" } else { "entries" };
     println!("{count} {word}");
@@ -475,15 +539,30 @@ fn stats() {
     }
 
     // Entity type count
-    let type_count: i64 = conn
-        .query_row("SELECT COUNT(DISTINCT entity_type) FROM entries WHERE entity_type IS NOT NULL", [], |row| row.get(0))
-        .unwrap_or(0);
+    let type_count: i64 = match conn.query_row(
+        "SELECT COUNT(DISTINCT entity_type) FROM entries WHERE entity_type IS NOT NULL",
+        [],
+        |row| row.get(0),
+    ) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("error: failed to count entity types: {e}");
+            process::exit(1);
+        }
+    };
     println!("{type_count} entity types");
 
     // Label count
-    let label_count: i64 = conn
-        .query_row("SELECT COUNT(DISTINCT label) FROM labels", [], |row| row.get(0))
-        .unwrap_or(0);
+    let label_count: i64 =
+        match conn.query_row("SELECT COUNT(DISTINCT label) FROM labels", [], |row| {
+            row.get(0)
+        }) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("error: failed to count labels: {e}");
+                process::exit(1);
+            }
+        };
     println!("{label_count} labels");
 }
 
@@ -499,7 +578,12 @@ fn main() {
             attr,
         } => push(label, entity_type, quiet, attr),
         Command::Pull { id } => pull(&id),
-        Command::Query { label, entity_type, attr, json } => query(label, entity_type, attr, json),
+        Command::Query {
+            label,
+            entity_type,
+            attr,
+            json,
+        } => query(label, entity_type, attr, json),
         Command::Schema => schema(),
         Command::Stats => stats(),
     }
