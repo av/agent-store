@@ -72,7 +72,7 @@
 - label: agent-store supports JSON output with --json flag
   command: cd /tmp/as-test-pipe && agent-store query --json | python3 -c "import sys,json; json.load(sys.stdin)" && echo "OK"
 
-## cli/skills @spec
+## cli/skills @implemented
 
 - label: agent-store skills lists available skills with descriptions
   command: agent-store skills list 2>&1 | grep -q "core" && echo "OK"
