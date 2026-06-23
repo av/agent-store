@@ -1,5 +1,7 @@
 use clap::{Parser, Subcommand};
 use rusqlite::Connection;
+use serde::Serialize;
+use std::collections::HashMap;
 use std::fs;
 use std::io::{self, Read};
 use std::path::PathBuf;
@@ -52,6 +54,9 @@ enum Command {
         /// Filter by attribute key=value pair (can be repeated, AND logic)
         #[arg(long = "attr")]
         attr: Vec<String>,
+        /// Output as JSON array
+        #[arg(long)]
+        json: bool,
     },
     /// Show entity types and label counts
     Schema,
@@ -192,14 +197,29 @@ fn push(labels: Vec<String>, entity_type: Option<String>, quiet: bool, attrs: Ve
     }
 }
 
-fn query(label: Option<String>, entity_type: Option<String>, attrs: Vec<String>) {
+#[derive(Serialize)]
+struct EntryJson {
+    id: String,
+    data: String,
+    entity_type: Option<String>,
+    created_at: String,
+    labels: Vec<String>,
+    attributes: HashMap<String, String>,
+}
+
+fn query(label: Option<String>, entity_type: Option<String>, attrs: Vec<String>, json: bool) {
     let conn = open_db();
 
     // Parse attribute filters
     let parsed_attrs: Vec<(&str, &str)> = attrs.iter().map(|a| parse_attr(a)).collect();
 
-    // Build query dynamically
-    let mut sql = String::from("SELECT DISTINCT e.data FROM entries e");
+    // Build query dynamically — select all fields when --json, only data otherwise
+    let select_cols = if json {
+        "e.id, e.data, e.entity_type, e.created_at"
+    } else {
+        "DISTINCT e.data"
+    };
+    let mut sql = format!("SELECT {select_cols} FROM entries e");
     let mut conditions: Vec<String> = Vec::new();
     let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
     let mut param_idx = 1u32;
@@ -236,31 +256,113 @@ fn query(label: Option<String>, entity_type: Option<String>, attrs: Vec<String>)
         sql.push_str(&conditions.join(" AND "));
     }
 
-    let mut stmt = match conn.prepare(&sql) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("error: failed to prepare query: {e}");
-            process::exit(1);
-        }
-    };
-
-    let params_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
-    let rows = match stmt.query_map(params_refs.as_slice(), |row| {
-        row.get::<_, String>(0)
-    }) {
-        Ok(r) => r,
-        Err(e) => {
-            eprintln!("error: failed to execute query: {e}");
-            process::exit(1);
-        }
-    };
-
-    for row in rows {
-        match row {
-            Ok(data) => print!("{data}"),
+    if json {
+        // JSON output: collect full entry objects
+        let mut stmt = match conn.prepare(&sql) {
+            Ok(s) => s,
             Err(e) => {
-                eprintln!("error: failed to read row: {e}");
+                eprintln!("error: failed to prepare query: {e}");
                 process::exit(1);
+            }
+        };
+
+        let params_refs: Vec<&dyn rusqlite::types::ToSql> =
+            params.iter().map(|p| p.as_ref()).collect();
+        let rows = match stmt.query_map(params_refs.as_slice(), |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<String>>(2)?,
+                row.get::<_, String>(3)?,
+            ))
+        }) {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("error: failed to execute query: {e}");
+                process::exit(1);
+            }
+        };
+
+        let mut entries: Vec<EntryJson> = Vec::new();
+        for row in rows {
+            match row {
+                Ok((id, data, etype, created_at)) => {
+                    // Fetch labels for this entry
+                    let labels = {
+                        let mut lstmt = conn
+                            .prepare("SELECT label FROM labels WHERE entry_id = ?1")
+                            .unwrap();
+                        lstmt
+                            .query_map(rusqlite::params![id], |r| r.get::<_, String>(0))
+                            .unwrap()
+                            .filter_map(|r| r.ok())
+                            .collect()
+                    };
+
+                    // Fetch attributes for this entry
+                    let attributes = {
+                        let mut astmt = conn
+                            .prepare("SELECT key, value FROM attributes WHERE entry_id = ?1")
+                            .unwrap();
+                        astmt
+                            .query_map(rusqlite::params![id], |r| {
+                                Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+                            })
+                            .unwrap()
+                            .filter_map(|r| r.ok())
+                            .collect()
+                    };
+
+                    entries.push(EntryJson {
+                        id,
+                        data,
+                        entity_type: etype,
+                        created_at,
+                        labels,
+                        attributes,
+                    });
+                }
+                Err(e) => {
+                    eprintln!("error: failed to read row: {e}");
+                    process::exit(1);
+                }
+            }
+        }
+
+        match serde_json::to_string(&entries) {
+            Ok(json_str) => println!("{json_str}"),
+            Err(e) => {
+                eprintln!("error: failed to serialize JSON: {e}");
+                process::exit(1);
+            }
+        }
+    } else {
+        // Default: newline-delimited data output
+        let mut stmt = match conn.prepare(&sql) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("error: failed to prepare query: {e}");
+                process::exit(1);
+            }
+        };
+
+        let params_refs: Vec<&dyn rusqlite::types::ToSql> =
+            params.iter().map(|p| p.as_ref()).collect();
+        let rows = match stmt.query_map(params_refs.as_slice(), |row| row.get::<_, String>(0)) {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("error: failed to execute query: {e}");
+                process::exit(1);
+            }
+        };
+
+        for row in rows {
+            match row {
+                Ok(data) => print!("{data}"),
+                Err(e) => {
+                    eprintln!("error: failed to read row: {e}");
+                    process::exit(1);
+                }
             }
         }
     }
@@ -397,7 +499,7 @@ fn main() {
             attr,
         } => push(label, entity_type, quiet, attr),
         Command::Pull { id } => pull(&id),
-        Command::Query { label, entity_type, attr } => query(label, entity_type, attr),
+        Command::Query { label, entity_type, attr, json } => query(label, entity_type, attr, json),
         Command::Schema => schema(),
         Command::Stats => stats(),
     }
