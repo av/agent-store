@@ -239,9 +239,101 @@ fn pull(id: &str) {
     }
 }
 
-fn not_implemented(name: &str) {
-    eprintln!("{name}: not yet implemented");
-    process::exit(1);
+fn schema() {
+    let conn = open_db();
+
+    // Entity types with counts
+    let mut stmt = match conn.prepare(
+        "SELECT COALESCE(entity_type, '(none)'), COUNT(*) FROM entries GROUP BY entity_type ORDER BY COUNT(*) DESC",
+    ) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("error: failed to query entity types: {e}");
+            process::exit(1);
+        }
+    };
+
+    let types: Vec<(String, i64)> = stmt
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+        .unwrap()
+        .filter_map(|r| r.ok())
+        .collect();
+
+    println!("Entity Types:");
+    if types.is_empty() {
+        println!("  (none)");
+    } else {
+        for (t, count) in &types {
+            let word = if *count == 1 { "entry" } else { "entries" };
+            println!("  {t}: {count} {word}");
+        }
+    }
+
+    // Labels with counts
+    let mut stmt = match conn.prepare(
+        "SELECT label, COUNT(*) FROM labels GROUP BY label ORDER BY COUNT(*) DESC",
+    ) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("error: failed to query labels: {e}");
+            process::exit(1);
+        }
+    };
+
+    let labels: Vec<(String, i64)> = stmt
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+        .unwrap()
+        .filter_map(|r| r.ok())
+        .collect();
+
+    println!();
+    println!("Labels:");
+    if labels.is_empty() {
+        println!("  (none)");
+    } else {
+        for (l, count) in &labels {
+            let word = if *count == 1 { "entry" } else { "entries" };
+            println!("  {l}: {count} {word}");
+        }
+    }
+}
+
+fn stats() {
+    let conn = open_db();
+
+    // Total entry count
+    let count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM entries", [], |row| row.get(0))
+        .unwrap_or(0);
+
+    let word = if count == 1 { "entry" } else { "entries" };
+    println!("{count} {word}");
+
+    // Store file size
+    let db_path = store_db();
+    if let Ok(meta) = fs::metadata(&db_path) {
+        let size = meta.len();
+        let formatted = if size < 1024 {
+            format!("{} B", size)
+        } else if size < 1024 * 1024 {
+            format!("{:.1} KB", size as f64 / 1024.0)
+        } else {
+            format!("{:.1} MB", size as f64 / (1024.0 * 1024.0))
+        };
+        println!("store size: {formatted}");
+    }
+
+    // Entity type count
+    let type_count: i64 = conn
+        .query_row("SELECT COUNT(DISTINCT entity_type) FROM entries WHERE entity_type IS NOT NULL", [], |row| row.get(0))
+        .unwrap_or(0);
+    println!("{type_count} entity types");
+
+    // Label count
+    let label_count: i64 = conn
+        .query_row("SELECT COUNT(DISTINCT label) FROM labels", [], |row| row.get(0))
+        .unwrap_or(0);
+    println!("{label_count} labels");
 }
 
 fn main() {
@@ -256,7 +348,7 @@ fn main() {
         } => push(label, entity_type, quiet),
         Command::Pull { id } => pull(&id),
         Command::Query { label, entity_type } => query(label, entity_type),
-        Command::Schema => not_implemented("schema"),
-        Command::Stats => not_implemented("stats"),
+        Command::Schema => schema(),
+        Command::Stats => stats(),
     }
 }
