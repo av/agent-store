@@ -32,6 +32,9 @@ enum Command {
         /// Only print the entry ID (for scripting/piping)
         #[arg(long)]
         quiet: bool,
+        /// Set attribute key=value pair (can be repeated)
+        #[arg(long = "attr")]
+        attr: Vec<String>,
     },
     /// Pull an entry by ID and print to stdout
     Pull {
@@ -46,6 +49,9 @@ enum Command {
         /// Filter by entity type
         #[arg(long = "type")]
         entity_type: Option<String>,
+        /// Filter by attribute key=value pair (can be repeated, AND logic)
+        #[arg(long = "attr")]
+        attr: Vec<String>,
     },
     /// Show entity types and label counts
     Schema,
@@ -125,7 +131,17 @@ fn init() {
     println!("initialized store at {}", db_path.display());
 }
 
-fn push(labels: Vec<String>, entity_type: Option<String>, quiet: bool) {
+fn parse_attr(attr: &str) -> (&str, &str) {
+    match attr.split_once('=') {
+        Some((k, v)) => (k, v),
+        None => {
+            eprintln!("error: invalid attribute format '{attr}', expected key=value");
+            process::exit(1);
+        }
+    }
+}
+
+fn push(labels: Vec<String>, entity_type: Option<String>, quiet: bool, attrs: Vec<String>) {
     let mut data = String::new();
     if let Err(e) = io::stdin().read_to_string(&mut data) {
         eprintln!("error: failed to read stdin: {e}");
@@ -158,6 +174,17 @@ fn push(labels: Vec<String>, entity_type: Option<String>, quiet: bool) {
         }
     }
 
+    for attr in &attrs {
+        let (key, value) = parse_attr(attr);
+        if let Err(e) = conn.execute(
+            "INSERT INTO attributes (entry_id, key, value) VALUES (?1, ?2, ?3)",
+            rusqlite::params![id, key, value],
+        ) {
+            eprintln!("error: failed to insert attribute: {e}");
+            process::exit(1);
+        }
+    }
+
     if quiet {
         println!("{id}");
     } else {
@@ -165,27 +192,49 @@ fn push(labels: Vec<String>, entity_type: Option<String>, quiet: bool) {
     }
 }
 
-fn query(label: Option<String>, entity_type: Option<String>) {
+fn query(label: Option<String>, entity_type: Option<String>, attrs: Vec<String>) {
     let conn = open_db();
 
-    let (sql, params): (String, Vec<Box<dyn rusqlite::types::ToSql>>) = match (&label, &entity_type) {
-        (Some(l), Some(t)) => (
-            "SELECT DISTINCT e.data FROM entries e JOIN labels l ON e.id = l.entry_id WHERE l.label = ?1 AND e.entity_type = ?2".to_string(),
-            vec![Box::new(l.clone()) as Box<dyn rusqlite::types::ToSql>, Box::new(t.clone())],
-        ),
-        (Some(l), None) => (
-            "SELECT DISTINCT e.data FROM entries e JOIN labels l ON e.id = l.entry_id WHERE l.label = ?1".to_string(),
-            vec![Box::new(l.clone()) as Box<dyn rusqlite::types::ToSql>],
-        ),
-        (None, Some(t)) => (
-            "SELECT data FROM entries WHERE entity_type = ?1".to_string(),
-            vec![Box::new(t.clone()) as Box<dyn rusqlite::types::ToSql>],
-        ),
-        (None, None) => (
-            "SELECT data FROM entries".to_string(),
-            vec![],
-        ),
-    };
+    // Parse attribute filters
+    let parsed_attrs: Vec<(&str, &str)> = attrs.iter().map(|a| parse_attr(a)).collect();
+
+    // Build query dynamically
+    let mut sql = String::from("SELECT DISTINCT e.data FROM entries e");
+    let mut conditions: Vec<String> = Vec::new();
+    let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+    let mut param_idx = 1u32;
+
+    // Label join + condition
+    if label.is_some() {
+        sql.push_str(" JOIN labels l ON e.id = l.entry_id");
+        conditions.push(format!("l.label = ?{param_idx}"));
+        params.push(Box::new(label.clone().unwrap()));
+        param_idx += 1;
+    }
+
+    // Entity type condition
+    if let Some(ref t) = entity_type {
+        conditions.push(format!("e.entity_type = ?{param_idx}"));
+        params.push(Box::new(t.clone()));
+        param_idx += 1;
+    }
+
+    // Attribute joins + conditions (one join per attr filter, AND logic)
+    for (i, (key, value)) in parsed_attrs.iter().enumerate() {
+        let alias = format!("a{i}");
+        sql.push_str(&format!(" JOIN attributes {alias} ON e.id = {alias}.entry_id"));
+        conditions.push(format!("{alias}.key = ?{param_idx}"));
+        params.push(Box::new(key.to_string()));
+        param_idx += 1;
+        conditions.push(format!("{alias}.value = ?{param_idx}"));
+        params.push(Box::new(value.to_string()));
+        param_idx += 1;
+    }
+
+    if !conditions.is_empty() {
+        sql.push_str(" WHERE ");
+        sql.push_str(&conditions.join(" AND "));
+    }
 
     let mut stmt = match conn.prepare(&sql) {
         Ok(s) => s,
@@ -345,9 +394,10 @@ fn main() {
             label,
             entity_type,
             quiet,
-        } => push(label, entity_type, quiet),
+            attr,
+        } => push(label, entity_type, quiet, attr),
         Command::Pull { id } => pull(&id),
-        Command::Query { label, entity_type } => query(label, entity_type),
+        Command::Query { label, entity_type, attr } => query(label, entity_type, attr),
         Command::Schema => schema(),
         Command::Stats => stats(),
     }
