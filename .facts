@@ -1,0 +1,80 @@
+# agent-store facts
+
+## domain
+
+# agent-store is a CLI tool for agents to store and query unstructured data.
+# Core entities: store (SQLite database), entry (a data record), label (tag on an entry),
+# entity-type (classification of an entry), attribute (key-value pair on an entry).
+# A store is per-project (default: .agent-store/store.db in current directory).
+
+## project
+
+- label: project compiles successfully
+  command: cargo check
+- label: all tests pass
+  command: cargo test --quiet
+- label: code is formatted
+  command: cargo fmt --check
+
+## cli/init @spec
+
+- label: agent-store init creates a new store in .agent-store/store.db
+  command: cd /tmp/as-test-init && rm -rf .agent-store && agent-store init && test -f .agent-store/store.db && echo "OK"
+- label: agent-store --help prints usage information
+  command: agent-store --help 2>&1 | grep -q "agent-store" && echo "OK"
+- label: agent-store init in existing store is idempotent
+  command: cd /tmp/as-test-init && agent-store init && agent-store init && echo "OK"
+
+## cli/push @spec
+
+- label: agent-store push stores data from stdin
+  command: cd /tmp/as-test-push && rm -rf .agent-store && agent-store init && echo '{"name":"test"}' | agent-store push && echo "OK"
+- label: agent-store push accepts --label flag to tag entry
+  command: cd /tmp/as-test-push && echo "hello" | agent-store push --label greeting && agent-store query --label greeting | grep -q "hello" && echo "OK"
+- label: agent-store push accepts --type flag to set entity type
+  command: cd /tmp/as-test-push && echo "config data" | agent-store push --type config && agent-store query --type config | grep -q "config data" && echo "OK"
+
+## cli/pull @spec
+
+- label: agent-store pull retrieves entry by ID
+  command: cd /tmp/as-test-pull && rm -rf .agent-store && agent-store init && ID=$(echo "payload" | agent-store push --quiet) && agent-store pull "$ID" | grep -q "payload" && echo "OK"
+- label: agent-store pull outputs entry data to stdout for piping
+  command: cd /tmp/as-test-pull && ID=$(echo "pipe-test" | agent-store push --quiet) && agent-store pull "$ID" | cat | grep -q "pipe-test" && echo "OK"
+
+## cli/query @spec
+
+- label: agent-store query lists entries with optional filters
+  command: cd /tmp/as-test-query && rm -rf .agent-store && agent-store init && echo "a" | agent-store push --label x && echo "b" | agent-store push --label y && agent-store query --label x | grep -q "a" && echo "OK"
+- label: agent-store query --type filters by entity type
+  command: cd /tmp/as-test-query && agent-store query --type config 2>&1 | head -1 && echo "OK"
+- label: agent-store query with no filters lists all entries
+  command: cd /tmp/as-test-query && agent-store query | wc -l | xargs test 0 -lt && echo "OK"
+
+## cli/schema @spec
+
+- label: agent-store schema shows entity types and label counts
+  command: cd /tmp/as-test-schema && rm -rf .agent-store && agent-store init && echo "d1" | agent-store push --type note --label important && agent-store schema | grep -q "note" && echo "OK"
+
+## cli/stats @spec
+
+- label: agent-store stats shows total entry count and store size
+  command: cd /tmp/as-test-stats && rm -rf .agent-store && agent-store init && echo "x" | agent-store push && agent-store stats | grep -qE "[0-9]+ entr" && echo "OK"
+
+## cli/attributes @spec
+
+- label: agent-store push accepts --attr key=value pairs
+  command: cd /tmp/as-test-attr && rm -rf .agent-store && agent-store init && echo "item" | agent-store push --attr priority=high --attr status=open && agent-store query --attr priority=high | grep -q "item" && echo "OK"
+
+## cli/pipeline @spec
+
+- label: agent-store query output is newline-delimited for piping
+  command: cd /tmp/as-test-pipe && rm -rf .agent-store && agent-store init && echo "line1" | agent-store push && echo "line2" | agent-store push && agent-store query | wc -l | xargs test 1 -lt && echo "OK"
+- label: agent-store supports JSON output with --json flag
+  command: cd /tmp/as-test-pipe && agent-store query --json | python3 -c "import sys,json; json.load(sys.stdin)" && echo "OK"
+
+## cli/config @spec
+
+- label: agent-store uses .agent-store/ in current directory by default
+  command: cd /tmp/as-test-config && rm -rf .agent-store && agent-store init && test -d .agent-store && echo "OK"
+- label: AGENT_STORE_PATH env var overrides default store location
+  command: rm -rf /tmp/as-custom-store && AGENT_STORE_PATH=/tmp/as-custom-store agent-store init && test -f /tmp/as-custom-store/store.db && echo "OK"
