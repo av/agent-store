@@ -62,6 +62,107 @@ enum Command {
     Schema,
     /// Show entry count and store size
     Stats,
+    /// Manage built-in usage guides for AI agents
+    Skills {
+        #[command(subcommand)]
+        action: SkillsAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum SkillsAction {
+    /// List available skills
+    List,
+    /// Print a skill guide
+    Get {
+        /// Skill name
+        name: String,
+        /// Include references and templates
+        #[arg(long)]
+        full: bool,
+    },
+    /// Print skill data path
+    Path {
+        /// Skill name
+        name: String,
+    },
+}
+
+// Embedded skill content (compiled into binary)
+const CORE_SKILL: &str = include_str!("../skills/core/SKILL.md");
+const CORE_COMMANDS_REF: &str = include_str!("../skills/core/references/commands.md");
+
+struct SkillInfo {
+    name: &'static str,
+    description: &'static str,
+    content: &'static str,
+    references: &'static [(&'static str, &'static str)],
+    path: &'static str,
+}
+
+fn get_skills() -> Vec<SkillInfo> {
+    vec![SkillInfo {
+        name: "core",
+        description: "Core agent-store usage guide. Read this before using agent-store. Covers initializing stores, pushing data, pulling by ID, querying with filters, inspecting schema and stats, and composing CLI pipelines.",
+        content: CORE_SKILL,
+        references: &[("commands", CORE_COMMANDS_REF)],
+        path: "skills/core",
+    }]
+}
+
+fn strip_frontmatter(content: &str) -> &str {
+    if content.starts_with("---") {
+        if let Some(end) = content[3..].find("---") {
+            let after = &content[3 + end + 3..];
+            return after.trim_start_matches('\n');
+        }
+    }
+    content
+}
+
+fn skills_list() {
+    let skills = get_skills();
+    for skill in &skills {
+        println!("{:<12} {}", skill.name, skill.description);
+    }
+}
+
+fn skills_get(name: &str, full: bool) {
+    let skills = get_skills();
+    let skill = match skills.iter().find(|s| s.name == name) {
+        Some(s) => s,
+        None => {
+            eprintln!("error: unknown skill '{name}'");
+            eprintln!("available skills:");
+            for s in &skills {
+                eprintln!("  {}", s.name);
+            }
+            process::exit(1);
+        }
+    };
+
+    print!("{}", strip_frontmatter(skill.content));
+
+    if full {
+        for (ref_name, ref_content) in skill.references {
+            println!("\n---\n");
+            println!("## Reference: {ref_name}\n");
+            print!("{ref_content}");
+        }
+    }
+}
+
+fn skills_path(name: &str) {
+    let skills = get_skills();
+    let skill = match skills.iter().find(|s| s.name == name) {
+        Some(s) => s,
+        None => {
+            eprintln!("error: unknown skill '{name}'");
+            process::exit(1);
+        }
+    };
+
+    println!("{}", skill.path);
 }
 
 fn store_dir() -> PathBuf {
@@ -586,5 +687,10 @@ fn main() {
         } => query(label, entity_type, attr, json),
         Command::Schema => schema(),
         Command::Stats => stats(),
+        Command::Skills { action } => match action {
+            SkillsAction::List => skills_list(),
+            SkillsAction::Get { name, full } => skills_get(&name, full),
+            SkillsAction::Path { name } => skills_path(&name),
+        },
     }
 }
