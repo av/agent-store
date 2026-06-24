@@ -124,3 +124,8 @@
 - label: agent-store skills get agent-store-pipelines prints shell composition guide
   command: agent-store skills get agent-store-pipelines 2>&1 | grep -q "Batch import" && echo "OK"
   tags: [spec, implemented]
+
+## resilience
+- label: Piping output to head or other short-consuming commands exits cleanly without panicking on broken pipe
+  command: agent-store stats 2>/tmp/sigpipe-stderr | head -1 && [ ! -s /tmp/sigpipe-stderr ]
+  tags: [spec, implemented]

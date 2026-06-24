@@ -986,6 +986,13 @@ fn stats() {
 }
 
 fn main() {
+    // Reset SIGPIPE to default so piping to head/tail/etc. exits cleanly
+    // instead of panicking with "Broken pipe".
+    #[cfg(unix)]
+    unsafe {
+        libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+    }
+
     let cli = Cli::parse();
 
     match cli.command {
