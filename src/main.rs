@@ -600,6 +600,17 @@ fn push(labels: Vec<String>, entity_type: Option<String>, quiet: bool, attrs: Ve
         }
     }
 
+    // Check for duplicate attribute keys
+    {
+        let mut seen = std::collections::HashSet::new();
+        for (key, _) in &parsed_attrs {
+            if !seen.insert(*key) {
+                eprintln!("error: duplicate attribute key '{key}'");
+                process::exit(1);
+            }
+        }
+    }
+
     let mut data = String::new();
     if let Err(e) = io::stdin().read_to_string(&mut data) {
         eprintln!("error: failed to read stdin: {e}");
@@ -675,6 +686,20 @@ struct EntryJson {
 }
 
 fn query(labels: Vec<String>, entity_type: Option<String>, attrs: Vec<String>, json: bool) {
+    // Validate empty strings before any DB work
+    for label in &labels {
+        if label.trim().is_empty() {
+            eprintln!("error: label cannot be empty");
+            process::exit(1);
+        }
+    }
+    if let Some(ref t) = entity_type {
+        if t.trim().is_empty() {
+            eprintln!("error: type cannot be empty");
+            process::exit(1);
+        }
+    }
+
     let conn = open_db();
 
     // Parse attribute filters
