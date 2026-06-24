@@ -431,13 +431,18 @@ fn open_db() -> Connection {
         eprintln!("error: store not initialized (run `agent-store init` first)");
         process::exit(1);
     }
-    match Connection::open(&db_path) {
+    let conn = match Connection::open(&db_path) {
         Ok(c) => c,
         Err(e) => {
             eprintln!("error: failed to open database: {e}");
             process::exit(1);
         }
+    };
+    if let Err(e) = conn.execute_batch("PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;") {
+        eprintln!("error: failed to set database pragmas: {e}");
+        process::exit(1);
     }
+    conn
 }
 
 fn ensure_gitignore(root: &Path) {
@@ -508,6 +513,11 @@ fn init() {
             process::exit(1);
         }
     };
+
+    if let Err(e) = conn.execute_batch("PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;") {
+        eprintln!("error: failed to set database pragmas: {e}");
+        process::exit(1);
+    }
 
     let schema = "
         CREATE TABLE IF NOT EXISTS entries (
