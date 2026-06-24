@@ -436,6 +436,59 @@ fn open_db() -> Connection {
     }
 }
 
+fn ensure_gitignore(root: &Path) {
+    // Only add .gitignore protection in git repos
+    if !root.join(".git").exists() {
+        return;
+    }
+
+    let gitignore_path = root.join(".gitignore");
+    let entry = ".agent-store/";
+
+    if gitignore_path.exists() {
+        let content = match fs::read_to_string(&gitignore_path) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("  error  reading .gitignore: {e}");
+                return;
+            }
+        };
+
+        // Check if already ignored (match .agent-store/ or .agent-store as a line)
+        let already_ignored = content.lines().any(|line| {
+            let trimmed = line.trim();
+            trimmed == ".agent-store/" || trimmed == ".agent-store"
+        });
+
+        if already_ignored {
+            println!("  skip  .gitignore (.agent-store/ already ignored)");
+            return;
+        }
+
+        // Append to existing .gitignore
+        let mut new_content = content.clone();
+        if !new_content.is_empty() && !new_content.ends_with('\n') {
+            new_content.push('\n');
+        }
+        new_content.push_str(entry);
+        new_content.push('\n');
+
+        if let Err(e) = fs::write(&gitignore_path, new_content) {
+            eprintln!("  error  writing .gitignore: {e}");
+            return;
+        }
+        println!("  update  .gitignore (added .agent-store/)");
+    } else {
+        // Create new .gitignore
+        let content = format!("{entry}\n");
+        if let Err(e) = fs::write(&gitignore_path, content) {
+            eprintln!("  error  creating .gitignore: {e}");
+            return;
+        }
+        println!("  create  .gitignore (added .agent-store/)");
+    }
+}
+
 fn init() {
     let dir = store_dir();
     if let Err(e) = fs::create_dir_all(&dir) {
@@ -485,6 +538,8 @@ fn init() {
     println!("initialized store at {}", db_path.display());
 
     let root = find_project_root().unwrap_or_else(|| std::env::current_dir().unwrap());
+
+    ensure_gitignore(&root);
 
     for (name, content) in INSTALLABLE_SKILLS {
         install_skill(&root, name, content);
