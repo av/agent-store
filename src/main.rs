@@ -10,7 +10,7 @@ use uuid::Uuid;
 
 /// CLI-first unstructured data store for agents
 #[derive(Parser)]
-#[command(name = "agent-store")]
+#[command(name = "agent-store", version)]
 #[command(
     about = "CLI-first unstructured data store for agents. Push, pull, and query arbitrary data with no schema.",
     before_help = "\
