@@ -124,6 +124,9 @@
 - label: agent-store skills get agent-store-pipelines prints shell composition guide
   command: agent-store skills get agent-store-pipelines 2>&1 | grep -q "Batch import" && echo "OK"
   tags: [spec, implemented]
+- label: `skills path <name>` returns `.agents/skills/<name>` — the actual installed location
+  command: target/release/agent-store skills path agent-store | grep -qx ".agents/skills/agent-store"
+  tags: [spec, implemented]
 
 ## resilience
 - label: Piping output to head or other short-consuming commands exits cleanly without panicking on broken pipe

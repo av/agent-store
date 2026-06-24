@@ -124,21 +124,21 @@ fn get_skills() -> Vec<SkillInfo> {
             description: "Core reference — data model, commands, configuration. Read this first.",
             content: AGENT_STORE_SKILL,
             references: &[("commands", AGENT_STORE_COMMANDS_REF)],
-            path: "skills/agent-store",
+            path: ".agents/skills/agent-store",
         },
         SkillInfo {
             name: "agent-store-patterns",
             description: "Workflow recipes — scratchpad, task tracking, decision log, caching, knowledge base, cross-agent comms.",
             content: PATTERNS_SKILL,
             references: &[],
-            path: "skills/agent-store-patterns",
+            path: ".agents/skills/agent-store-patterns",
         },
         SkillInfo {
             name: "agent-store-pipelines",
             description: "Shell composition — batch import/export, tool chaining, aggregation, multi-store, large data.",
             content: PIPELINES_SKILL,
             references: &[],
-            path: "skills/agent-store-pipelines",
+            path: ".agents/skills/agent-store-pipelines",
         },
     ]
 }
