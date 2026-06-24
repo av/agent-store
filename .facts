@@ -89,6 +89,9 @@
   command: cd /tmp/as-test-config && rm -rf .agent-store && agent-store init && test -d .agent-store && echo "OK"
 - label: AGENT_STORE_PATH env var overrides default store location
   command: rm -rf /tmp/as-custom-store && AGENT_STORE_PATH=/tmp/as-custom-store agent-store init && test -f /tmp/as-custom-store/store.db && echo "OK"
+- label: store resolves to project root .agent-store/ regardless of CWD within the repo
+  command: rm -rf /tmp/as-h2-test && mkdir -p /tmp/as-h2-test/.git /tmp/as-h2-test/sub/deep && cd /tmp/as-h2-test && agent-store init && echo "rootdata" | agent-store push --quiet && cd /tmp/as-h2-test/sub/deep && echo "subdata" | agent-store push --label fromdeep --quiet && agent-store query --label fromdeep | grep -q "subdata" && echo "OK"
+  tags: [spec, implemented]
 
 # cli
 

@@ -413,7 +413,11 @@ fn find_project_root() -> Option<PathBuf> {
 fn store_dir() -> PathBuf {
     match std::env::var("AGENT_STORE_PATH") {
         Ok(p) => PathBuf::from(p),
-        Err(_) => PathBuf::from(".agent-store"),
+        Err(_) => {
+            let root = find_project_root()
+                .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+            root.join(".agent-store")
+        }
     }
 }
 
