@@ -75,13 +75,13 @@
 ## cli/skills @implemented
 
 - label: agent-store skills lists available skills with descriptions
-  command: agent-store skills list 2>&1 | grep -q "core" && echo "OK"
-- label: agent-store skills get core prints the core usage guide
-  command: agent-store skills get core 2>&1 | grep -q "agent-store" && echo "OK"
-- label: agent-store skills get core --full includes references and templates
-  command: LINES=$(agent-store skills get core --full 2>&1 | wc -l); SHORT=$(agent-store skills get core 2>&1 | wc -l); test "$LINES" -gt "$SHORT" && echo "OK"
-- label: agent-store skills path core prints the skill data path
-  command: agent-store skills path core 2>&1 | grep -q "core" && echo "OK"
+  command: agent-store skills list 2>&1 | grep -q "agent-store" && echo "OK"
+- label: agent-store skills get agent-store prints the core usage guide
+  command: agent-store skills get agent-store 2>&1 | grep -q "agent-store" && echo "OK"
+- label: agent-store skills get agent-store --full includes references
+  command: LINES=$(agent-store skills get agent-store --full 2>&1 | wc -l); SHORT=$(agent-store skills get agent-store 2>&1 | wc -l); test "$LINES" -gt "$SHORT" && echo "OK"
+- label: agent-store skills path agent-store prints the skill data path
+  command: agent-store skills path agent-store 2>&1 | grep -q "agent-store" && echo "OK"
 
 ## cli/config @implemented
 
@@ -89,3 +89,32 @@
   command: cd /tmp/as-test-config && rm -rf .agent-store && agent-store init && test -d .agent-store && echo "OK"
 - label: AGENT_STORE_PATH env var overrides default store location
   command: rm -rf /tmp/as-custom-store && AGENT_STORE_PATH=/tmp/as-custom-store agent-store init && test -f /tmp/as-custom-store/store.db && echo "OK"
+
+# cli
+
+## init
+- label: agent-store init installs skills to .agents/skills/
+  command: cd /tmp/as-test-skills && rm -rf .agent-store .agents .claude AGENTS.md && mkdir -p .git && agent-store init && test -f .agents/skills/agent-store/SKILL.md && echo "OK"
+  tags: [spec, implemented]
+- label: agent-store init adds agent docs section to AGENTS.md
+  command: cd /tmp/as-test-skills && cat AGENTS.md | grep -q "agent-store:start" && echo "OK"
+  tags: [spec, implemented]
+- label: agent-store init is idempotent for skills and agent docs
+  command: cd /tmp/as-test-skills && agent-store init && agent-store init && test -f .agents/skills/agent-store/SKILL.md && echo "OK"
+  tags: [spec, implemented]
+- label: agent-store init prints error and skips file when agent docs section has start marker without end marker
+  command: cd /tmp/as-test-malformed && rm -rf .agent-store .agents AGENTS.md && mkdir -p .git && agent-store init && printf "<!-- agent-store:start -->\nold content\n" > AGENTS.md && agent-store init 2>&1 | grep -q "missing end marker" && echo "OK"
+  tags: [spec, implemented]
+
+## help
+- label: agent-store --help shows Start here section directing agents to skills
+  command: agent-store --help 2>&1 | grep -q "Start here" && echo "OK"
+  tags: [spec, implemented]
+
+## skills
+- label: agent-store skills get agent-store-patterns prints workflow recipes
+  command: agent-store skills get agent-store-patterns 2>&1 | grep -q "scratchpad" && echo "OK"
+  tags: [spec, implemented]
+- label: agent-store skills get agent-store-pipelines prints shell composition guide
+  command: agent-store skills get agent-store-pipelines 2>&1 | grep -q "Batch import" && echo "OK"
+  tags: [spec, implemented]

@@ -4,7 +4,7 @@ use serde::Serialize;
 use std::collections::HashMap;
 use std::fs;
 use std::io::{self, Read};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process;
 use uuid::Uuid;
 
@@ -12,7 +12,22 @@ use uuid::Uuid;
 #[derive(Parser)]
 #[command(name = "agent-store")]
 #[command(
-    about = "CLI-first unstructured data store for agents. Push, pull, and query arbitrary data with no schema."
+    about = "CLI-first unstructured data store for agents. Push, pull, and query arbitrary data with no schema.",
+    before_help = "\
+agent-store - CLI-first unstructured data store for agents
+
+Start here (for AI agents):
+  agent-store skills get agent-store --full
+
+  Skills ship with the CLI (always version-matched) and include workflow
+  patterns, command reference, and copy-paste examples. Prefer this over
+  guessing commands from flag docs alone.
+
+  skills list                              List available skills
+  skills get agent-store --full            Core reference + command docs
+  skills get agent-store-patterns          Workflow recipes (scratchpad, tasks, caching)
+  skills get agent-store-pipelines         Shell composition (import, export, chaining)
+  skills path [name]                       Print skill directory path"
 )]
 struct Cli {
     #[command(subcommand)]
@@ -21,7 +36,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Initialize a new store in .agent-store/store.db
+    /// Initialize store, install agent skills, and set up project docs
     Init,
     /// Push data from stdin into the store
     Push {
@@ -89,8 +104,10 @@ enum SkillsAction {
 }
 
 // Embedded skill content (compiled into binary)
-const CORE_SKILL: &str = include_str!("../skills/core/SKILL.md");
-const CORE_COMMANDS_REF: &str = include_str!("../skills/core/references/commands.md");
+const AGENT_STORE_SKILL: &str = include_str!("../skills/agent-store/SKILL.md");
+const AGENT_STORE_COMMANDS_REF: &str = include_str!("../skills/agent-store/references/commands.md");
+const PATTERNS_SKILL: &str = include_str!("../skills/agent-store-patterns/SKILL.md");
+const PIPELINES_SKILL: &str = include_str!("../skills/agent-store-pipelines/SKILL.md");
 
 struct SkillInfo {
     name: &'static str,
@@ -101,13 +118,29 @@ struct SkillInfo {
 }
 
 fn get_skills() -> Vec<SkillInfo> {
-    vec![SkillInfo {
-        name: "core",
-        description: "Core agent-store usage guide. Read this before using agent-store. Covers initializing stores, pushing data, pulling by ID, querying with filters, inspecting schema and stats, and composing CLI pipelines.",
-        content: CORE_SKILL,
-        references: &[("commands", CORE_COMMANDS_REF)],
-        path: "skills/core",
-    }]
+    vec![
+        SkillInfo {
+            name: "agent-store",
+            description: "Core reference — data model, commands, configuration. Read this first.",
+            content: AGENT_STORE_SKILL,
+            references: &[("commands", AGENT_STORE_COMMANDS_REF)],
+            path: "skills/agent-store",
+        },
+        SkillInfo {
+            name: "agent-store-patterns",
+            description: "Workflow recipes — scratchpad, task tracking, decision log, caching, knowledge base, cross-agent comms.",
+            content: PATTERNS_SKILL,
+            references: &[],
+            path: "skills/agent-store-patterns",
+        },
+        SkillInfo {
+            name: "agent-store-pipelines",
+            description: "Shell composition — batch import/export, tool chaining, aggregation, multi-store, large data.",
+            content: PIPELINES_SKILL,
+            references: &[],
+            path: "skills/agent-store-pipelines",
+        },
+    ]
 }
 
 fn strip_frontmatter(content: &str) -> &str {
@@ -163,6 +196,218 @@ fn skills_path(name: &str) {
     };
 
     println!("{}", skill.path);
+}
+
+// ---------------------------------------------------------------------------
+// Skill installation & agent docs (used by init)
+// ---------------------------------------------------------------------------
+
+const INSTALLABLE_SKILLS: &[(&str, &str)] = &[
+    ("agent-store", AGENT_STORE_SKILL),
+    ("agent-store-patterns", PATTERNS_SKILL),
+    ("agent-store-pipelines", PIPELINES_SKILL),
+];
+
+const SECTION_START: &str = "<!-- agent-store:start -->";
+const SECTION_END: &str = "<!-- agent-store:end -->";
+
+const AGENT_DOCS_SECTION: &str = "\
+<!-- agent-store:start -->
+## Agent data store
+
+This project uses [agent-store](https://github.com/av/agent-store) for persistent data storage. Agents can push, pull, and query arbitrary data with no schema.
+
+**Getting started:** Run `agent-store skills get agent-store --full` for the complete usage guide.
+
+```bash
+agent-store init                              # Initialize store + install skills
+echo \"data\" | agent-store push --label tag    # Store data
+agent-store query --label tag                 # Find it
+agent-store pull <id>                         # Retrieve by ID
+```
+
+**Skills** (invoke via `agent-store skills get <name>`):
+- `agent-store` — Core reference: data model, commands, configuration
+- `agent-store-patterns` — Workflow recipes: scratchpad, task tracking, caching, knowledge base
+- `agent-store-pipelines` — Shell composition: batch import/export, tool chaining, aggregation
+<!-- agent-store:end -->";
+
+const AGENT_MD_FILES: &[&str] = &["CLAUDE.md", "AGENTS.md"];
+
+fn install_skill(root: &Path, name: &str, content: &str) {
+    let skill_dir = root.join(".agents").join("skills").join(name);
+    let skill_path = skill_dir.join("SKILL.md");
+
+    if skill_path.exists() {
+        let existing = match fs::read_to_string(&skill_path) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("  error  .agents/skills/{name}/SKILL.md: {e}");
+                return;
+            }
+        };
+        if existing == content {
+            println!("  skip  .agents/skills/{name}/SKILL.md (up to date)");
+        } else {
+            if let Err(e) = fs::write(&skill_path, content) {
+                eprintln!("  error  .agents/skills/{name}/SKILL.md: {e}");
+                return;
+            }
+            println!("  update  .agents/skills/{name}/SKILL.md");
+        }
+    } else {
+        if let Err(e) = fs::create_dir_all(&skill_dir) {
+            eprintln!("  error  creating .agents/skills/{name}/: {e}");
+            return;
+        }
+        if let Err(e) = fs::write(&skill_path, content) {
+            eprintln!("  error  .agents/skills/{name}/SKILL.md: {e}");
+            return;
+        }
+        println!("  create  .agents/skills/{name}/SKILL.md");
+    }
+}
+
+fn is_claude_available(root: &Path) -> bool {
+    if root.join(".claude").exists() {
+        return true;
+    }
+    if let Ok(home) = std::env::var("HOME") {
+        if Path::new(&home).join(".claude").exists() {
+            return true;
+        }
+    }
+    which_exists("claude")
+}
+
+fn which_exists(name: &str) -> bool {
+    std::process::Command::new("which")
+        .arg(name)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success())
+}
+
+#[cfg(unix)]
+fn link_skill_for_claude(root: &Path, name: &str) {
+    let link_dir = root.join(".claude").join("skills");
+    let link_path = link_dir.join(name);
+    let target = Path::new("..")
+        .join("..")
+        .join(".agents")
+        .join("skills")
+        .join(name);
+
+    if link_path.is_symlink() {
+        if let Ok(current) = fs::read_link(&link_path) {
+            if current == target {
+                println!("  skip  .claude/skills/{name} (link up to date)");
+                return;
+            }
+        }
+        let _ = fs::remove_file(&link_path);
+    } else if link_path.exists() {
+        println!("  skip  .claude/skills/{name} (exists, not a symlink)");
+        return;
+    }
+
+    if let Err(e) = fs::create_dir_all(&link_dir) {
+        eprintln!("  error  creating .claude/skills/: {e}");
+        return;
+    }
+    match std::os::unix::fs::symlink(&target, &link_path) {
+        Ok(()) => println!("  link  .claude/skills/{name} -> .agents/skills/{name}"),
+        Err(e) => eprintln!("  error  .claude/skills/{name}: {e}"),
+    }
+}
+
+#[cfg(not(unix))]
+fn link_skill_for_claude(_root: &Path, name: &str) {
+    println!("  skip  .claude/skills/{name} (symlinks not supported on this platform)");
+}
+
+fn install_agent_docs(root: &Path) {
+    let mut installed = false;
+
+    for name in AGENT_MD_FILES {
+        let path = root.join(name);
+        if !path.is_file() {
+            continue;
+        }
+        let content = match fs::read_to_string(&path) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("  error  reading {name}: {e}");
+                continue;
+            }
+        };
+        if content.contains(SECTION_START) {
+            let start = content.find(SECTION_START).unwrap();
+            let end_marker = match content[start..].find(SECTION_END) {
+                Some(pos) => pos,
+                None => {
+                    eprintln!("  error  malformed agent-store section in {name} (missing end marker)");
+                    continue;
+                }
+            };
+            let end = start + end_marker + SECTION_END.len();
+            let existing_section = &content[start..end];
+            if existing_section == AGENT_DOCS_SECTION {
+                println!("  skip  {name} (agent-store section up to date)");
+            } else {
+                let mut new_content = String::new();
+                new_content.push_str(&content[..start]);
+                new_content.push_str(AGENT_DOCS_SECTION);
+                new_content.push_str(&content[end..]);
+                if let Err(e) = fs::write(&path, new_content) {
+                    eprintln!("  error  writing {name}: {e}");
+                    continue;
+                }
+                println!("  update  {name} (agent-store section updated)");
+            }
+        } else {
+            let mut new_content = content.clone();
+            if !new_content.ends_with('\n') && !new_content.is_empty() {
+                new_content.push('\n');
+            }
+            if !new_content.is_empty() {
+                new_content.push('\n');
+            }
+            new_content.push_str(AGENT_DOCS_SECTION);
+            new_content.push('\n');
+            if let Err(e) = fs::write(&path, new_content) {
+                eprintln!("  error  writing {name}: {e}");
+                continue;
+            }
+            println!("  update  {name} (added agent-store section)");
+        }
+        installed = true;
+    }
+
+    if !installed {
+        let name = AGENT_MD_FILES.last().unwrap();
+        let path = root.join(name);
+        let mut content = String::from(AGENT_DOCS_SECTION);
+        content.push('\n');
+        if let Err(e) = fs::write(&path, content) {
+            eprintln!("  error  creating {name}: {e}");
+            return;
+        }
+        println!("  create  {name} (with agent-store section)");
+    }
+}
+
+fn find_project_root() -> Option<PathBuf> {
+    let mut dir = std::env::current_dir().ok()?;
+    loop {
+        if dir.join(".git").exists() {
+            return Some(dir);
+        }
+        if !dir.pop() {
+            return None;
+        }
+    }
 }
 
 fn store_dir() -> PathBuf {
@@ -238,6 +483,20 @@ fn init() {
     }
 
     println!("initialized store at {}", db_path.display());
+
+    let root = find_project_root().unwrap_or_else(|| std::env::current_dir().unwrap());
+
+    for (name, content) in INSTALLABLE_SKILLS {
+        install_skill(&root, name, content);
+    }
+
+    if is_claude_available(&root) {
+        for (name, _) in INSTALLABLE_SKILLS {
+            link_skill_for_claude(&root, name);
+        }
+    }
+
+    install_agent_docs(&root);
 }
 
 fn parse_attr(attr: &str) -> (&str, &str) {
