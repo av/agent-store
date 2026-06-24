@@ -60,9 +60,9 @@ enum Command {
     },
     /// List and filter entries
     Query {
-        /// Filter by label
+        /// Filter by label (can be repeated, AND logic)
         #[arg(long)]
-        label: Option<String>,
+        label: Vec<String>,
         /// Filter by entity type
         #[arg(long = "type")]
         entity_type: Option<String>,
@@ -674,7 +674,7 @@ struct EntryJson {
     attributes: HashMap<String, String>,
 }
 
-fn query(label: Option<String>, entity_type: Option<String>, attrs: Vec<String>, json: bool) {
+fn query(labels: Vec<String>, entity_type: Option<String>, attrs: Vec<String>, json: bool) {
     let conn = open_db();
 
     // Parse attribute filters
@@ -691,10 +691,13 @@ fn query(label: Option<String>, entity_type: Option<String>, attrs: Vec<String>,
     let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
     let mut param_idx = 1u32;
 
-    // Label join + condition
-    if let Some(ref l) = label {
-        sql.push_str(" JOIN labels l ON e.id = l.entry_id");
-        conditions.push(format!("l.label = ?{param_idx}"));
+    // Label joins + conditions (one join per label filter, AND logic)
+    for (i, l) in labels.iter().enumerate() {
+        let alias = format!("l{i}");
+        sql.push_str(&format!(
+            " JOIN labels {alias} ON e.id = {alias}.entry_id"
+        ));
+        conditions.push(format!("{alias}.label = ?{param_idx}"));
         params.push(Box::new(l.clone()));
         param_idx += 1;
     }
@@ -1022,6 +1025,7 @@ fn main() {
             attr,
             json,
         } => query(label, entity_type, attr, json),
+
         Command::Schema => schema(),
         Command::Stats => stats(),
         Command::Skills { action } => match action {

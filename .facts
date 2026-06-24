@@ -138,6 +138,11 @@
   command: dir=/tmp/test-m6-$$ && mkdir -p "$dir" && cd "$dir" && git init -q && AGENT_STORE_PATH=.agent-store /home/everlier/code/agent-store/target/release/agent-store init 2>/dev/null 1>/dev/null && echo "d" | AGENT_STORE_PATH=.agent-store /home/everlier/code/agent-store/target/release/agent-store push --type t --label l --quiet 2>/dev/null 1>/dev/null && stats=$(AGENT_STORE_PATH=.agent-store /home/everlier/code/agent-store/target/release/agent-store stats 2>&1) && cd / && rm -rf "$dir" && echo "$stats" | grep -q "1 entity type" && echo "$stats" | grep -q "1 label$" && echo "PASS"
   tags: [spec, implemented]
 
+## query
+- label: query --label accepts multiple values with AND semantics, matching push repeatable --label
+  command: cd /tmp/as-test-m3 && rm -rf .agent-store && agent-store init > /dev/null && echo "ab" | agent-store push --label a --label b --quiet > /dev/null && echo "a-only" | agent-store push --label a --quiet > /dev/null && echo "b-only" | agent-store push --label b --quiet > /dev/null && result=$(agent-store query --label a --label b) && [ "$result" = "ab" ]
+  tags: [spec, implemented]
+
 # resilience
 - PRAGMA foreign_keys = ON is set on every database connection so ON DELETE CASCADE is enforced @spec @implemented
 - label: PRAGMA busy_timeout = 5000 is set on every database connection so concurrent writes retry instead of failing with database locked
