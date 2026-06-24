@@ -62,7 +62,7 @@ Check before pushing to avoid duplicates (see also Idempotent operations below):
 
 ```bash
 while IFS= read -r line; do
-  EXISTS=$(agent-store query --type log --json | jq -r --arg d "$line" '[.[] | select(.data == $d)] | length')
+  EXISTS=$(agent-store query --type log --json | jq -r --arg d "$line" '[.[] | select(.data | rtrimstr("\n") == $d)] | length')
   if [ "$EXISTS" = "0" ]; then
     echo "$line" | agent-store push --type log --label imported
   fi
@@ -112,12 +112,16 @@ jq -c '.[]' backup.json | while IFS= read -r entry; do
   DATA=$(echo "$entry" | jq -r '.data')
   TYPE=$(echo "$entry" | jq -r '.entity_type // empty')
   LABELS=$(echo "$entry" | jq -r '.labels[]' 2>/dev/null)
+  ATTRS=$(echo "$entry" | jq -r '.attributes // {} | to_entries[] | "--attr " + .key + "=" + .value' 2>/dev/null)
   
   CMD="echo $(printf '%q' "$DATA") | agent-store push"
   [ -n "$TYPE" ] && CMD="$CMD --type $TYPE"
   while IFS= read -r label; do
     [ -n "$label" ] && CMD="$CMD --label $label"
   done <<< "$LABELS"
+  while IFS= read -r attr_flag; do
+    [ -n "$attr_flag" ] && CMD="$CMD $attr_flag"
+  done <<< "$ATTRS"
   
   eval "$CMD"
 done
@@ -299,17 +303,21 @@ AGENT_STORE_PATH=./source agent-store query --type task --json \
   done
 ```
 
-### Sync with label preservation
+### Sync with label and attribute preservation
 
 ```bash
 AGENT_STORE_PATH=./source agent-store query --label shared --json \
   | jq -c '.[]' | while IFS= read -r entry; do
     DATA=$(echo "$entry" | jq -r '.data')
     LABELS=$(echo "$entry" | jq -r '.labels[]')
+    ATTRS=$(echo "$entry" | jq -r '.attributes // {} | to_entries[] | "--attr " + .key + "=" + .value' 2>/dev/null)
     CMD="echo $(printf '%q' "$DATA") | AGENT_STORE_PATH=./dest agent-store push --type synced"
     while IFS= read -r label; do
       [ -n "$label" ] && CMD="$CMD --label $label"
     done <<< "$LABELS"
+    while IFS= read -r attr_flag; do
+      [ -n "$attr_flag" ] && CMD="$CMD $attr_flag"
+    done <<< "$ATTRS"
     eval "$CMD"
   done
 ```
@@ -413,7 +421,7 @@ push_unique() {
   local data="$1" type="$2" label="$3"
   local exists
   exists=$(agent-store query --type "$type" --label "$label" --json \
-    | jq -r --arg d "$data" '[.[] | select(.data == $d)] | length')
+    | jq -r --arg d "$data" '[.[] | select(.data | rtrimstr("\n") == $d)] | length')
   if [ "$exists" = "0" ]; then
     echo "$data" | agent-store push --type "$type" --label "$label"
   fi
