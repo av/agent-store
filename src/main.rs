@@ -979,7 +979,8 @@ fn stats() {
             process::exit(1);
         }
     };
-    println!("{type_count} entity types");
+    let type_word = if type_count == 1 { "entity type" } else { "entity types" };
+    println!("{type_count} {type_word}");
 
     // Label count
     let label_count: i64 =
@@ -992,7 +993,8 @@ fn stats() {
                 process::exit(1);
             }
         };
-    println!("{label_count} labels");
+    let label_word = if label_count == 1 { "label" } else { "labels" };
+    println!("{label_count} {label_word}");
 }
 
 fn main() {

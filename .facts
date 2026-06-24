@@ -133,6 +133,11 @@
   command: agent-store stats 2>/tmp/sigpipe-stderr | head -1 && [ ! -s /tmp/sigpipe-stderr ]
   tags: [spec, implemented]
 
+## stats
+- label: stats uses correct singular/plural for entity type and label counts
+  command: dir=/tmp/test-m6-$$ && mkdir -p "$dir" && cd "$dir" && git init -q && AGENT_STORE_PATH=.agent-store /home/everlier/code/agent-store/target/release/agent-store init 2>/dev/null 1>/dev/null && echo "d" | AGENT_STORE_PATH=.agent-store /home/everlier/code/agent-store/target/release/agent-store push --type t --label l --quiet 2>/dev/null 1>/dev/null && stats=$(AGENT_STORE_PATH=.agent-store /home/everlier/code/agent-store/target/release/agent-store stats 2>&1) && cd / && rm -rf "$dir" && echo "$stats" | grep -q "1 entity type" && echo "$stats" | grep -q "1 label$" && echo "PASS"
+  tags: [spec, implemented]
+
 # resilience
 - PRAGMA foreign_keys = ON is set on every database connection so ON DELETE CASCADE is enforced @spec @implemented
 - label: PRAGMA busy_timeout = 5000 is set on every database connection so concurrent writes retry instead of failing with database locked
