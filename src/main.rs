@@ -316,6 +316,30 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Set an attribute on an existing entry
+    #[command(name = "set-attr")]
+    SetAttr {
+        /// Entry ID (or unambiguous prefix)
+        id: String,
+        /// Attribute key
+        key: String,
+        /// Attribute value
+        value: String,
+        /// Output result as JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Remove an attribute from an existing entry
+    #[command(name = "unset-attr")]
+    UnsetAttr {
+        /// Entry ID (or unambiguous prefix)
+        id: String,
+        /// Attribute key to remove
+        key: String,
+        /// Output result as JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// Show chronological history of entries with a given label
     History {
         /// Label to show history for
@@ -3132,6 +3156,72 @@ fn untag(id: &str, labels: Vec<String>, json: bool) {
     }
 }
 
+fn set_attr(id: &str, key: &str, value: &str, json: bool) {
+    if key.trim().is_empty() {
+        eprintln!("error: key cannot be empty");
+        process::exit(1);
+    }
+
+    let conn = open_db();
+    let id = resolve_entry_id(&conn, id);
+
+    match conn.execute(
+        "INSERT OR REPLACE INTO attributes (entry_id, key, value) VALUES (?1, ?2, ?3)",
+        rusqlite::params![id, key, value],
+    ) {
+        Ok(_) => {}
+        Err(e) => {
+            eprintln!("error: failed to set attribute: {e}");
+            process::exit(1);
+        }
+    }
+
+    if json {
+        println!(
+            "{}",
+            serde_json::json!({"id": id, "key": key, "value": value})
+        );
+    } else {
+        let short_id = &id[..7.min(id.len())];
+        eprintln!("Set {key}={value} on {short_id}");
+    }
+}
+
+fn unset_attr(id: &str, key: &str, json: bool) {
+    if key.trim().is_empty() {
+        eprintln!("error: key cannot be empty");
+        process::exit(1);
+    }
+
+    let conn = open_db();
+    let id = resolve_entry_id(&conn, id);
+
+    let removed = match conn.execute(
+        "DELETE FROM attributes WHERE entry_id = ?1 AND key = ?2",
+        rusqlite::params![id, key],
+    ) {
+        Ok(n) => n > 0,
+        Err(e) => {
+            eprintln!("error: failed to remove attribute: {e}");
+            process::exit(1);
+        }
+    };
+
+    if json {
+        println!(
+            "{}",
+            serde_json::json!({"id": id, "key": key, "removed": removed})
+        );
+    } else {
+        let short_id = &id[..7.min(id.len())];
+        if removed {
+            eprintln!("Removed {key} from {short_id}");
+        } else {
+            eprintln!("No attribute {key} on {short_id} (no-op)");
+        }
+    }
+}
+
 fn history(label: &str, json: bool, limit: Option<u64>, data_filter: Option<String>) {
     let conn = open_db();
 
@@ -3810,6 +3900,13 @@ fn main() {
         Command::Attrs { json, count } => attrs_cmd(json, count),
         Command::Tag { id, label, json } => tag(&id, label, json),
         Command::Untag { id, label, json } => untag(&id, label, json),
+        Command::SetAttr {
+            id,
+            key,
+            value,
+            json,
+        } => set_attr(&id, &key, &value, json),
+        Command::UnsetAttr { id, key, json } => unset_attr(&id, &key, json),
         Command::History {
             label,
             json,
