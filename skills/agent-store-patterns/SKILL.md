@@ -348,44 +348,29 @@ agent-store schema
 agent-store query --type scratch --json | jq 'length'
 agent-store query --type cache   --json | jq 'length'
 
-# Export before cleanup (backup)
-agent-store query --type scratch --json > /tmp/scratch-backup.json
+# Delete old cache entries
+agent-store delete --type cache --before "2024-01-01" --confirm
 
-# Identify stale cache entries (manual review via JSON)
-agent-store query --type cache --json | \
-  jq '.[] | {id, created: .created_at, labels, attrs: .attributes}'
+# Delete scratch entries from a completed task
+agent-store delete --label step1 --attr task=refactor-auth --confirm
 
-# There is no delete command — agent-store is append-only by design.
-# For cleanup, re-initialize:
-#   1. Export what you want to keep
-#   2. Remove the store directory
-#   3. Re-init and re-import
+# Delete by label — preview first, then confirm
+agent-store delete --label stale
+# Would delete 5 entries. Run with --confirm to proceed.
+agent-store delete --label stale --confirm
 
-# Export keepers (JSONL format preserves all metadata including timestamps)
-agent-store export --type decision > /tmp/decisions.jsonl
-agent-store export --type knowledge > /tmp/knowledge.jsonl
+# Delete a single entry by ID (no --confirm needed)
+agent-store delete $ID
 
-# Nuke and rebuild
-rm -rf .agent-store
-agent-store init
-
-# Re-import (preserves timestamps, labels, attributes — only IDs change)
-cat /tmp/decisions.jsonl /tmp/knowledge.jsonl | agent-store import
+# For a full reset, use purge instead
+agent-store purge --confirm
 ```
 
-**Gotcha:** The re-init approach loses entry IDs (timestamps are preserved by import). If
-other entries reference IDs (e.g., "see entry abc123"), those references
-break. For stores where referential integrity matters, prefer growing
-the store and using labels/attributes to mark entries as superseded
-rather than deleting:
-
-```bash
-# Mark an entry as superseded instead of deleting
-# Push a new version and tag it
-echo "updated auth docs — tokens now expire in 2 hours" | \
-  agent-store push --type knowledge --label auth --label current
-# The old entry still exists but won't match --label current
-```
+**Gotcha:** Single-ID delete needs no confirmation, but filter-based
+delete always requires `--confirm`. Without it, the command prints how
+many entries would be deleted and exits 1 — use this as a dry-run
+preview before committing. For selective cleanup, prefer `delete` with
+filters over `purge` (which removes everything).
 
 ## Putting it together
 

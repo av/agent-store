@@ -2111,14 +2111,14 @@ fn delete(
 
         let params_refs: Vec<&dyn rusqlite::types::ToSql> =
             params.iter().map(|p| p.as_ref()).collect();
-        let count: i64 =
-            match conn.query_row(&count_sql, params_refs.as_slice(), |row| row.get(0)) {
-                Ok(c) => c,
-                Err(e) => {
-                    eprintln!("error: failed to count matching entries: {e}");
-                    process::exit(1);
-                }
-            };
+        let count: i64 = match conn.query_row(&count_sql, params_refs.as_slice(), |row| row.get(0))
+        {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("error: failed to count matching entries: {e}");
+                process::exit(1);
+            }
+        };
 
         if !confirm {
             let word = if count == 1 { "entry" } else { "entries" };
@@ -2146,15 +2146,14 @@ fn delete(
 
         let params_refs: Vec<&dyn rusqlite::types::ToSql> =
             params.iter().map(|p| p.as_ref()).collect();
-        let ids: Vec<String> = match stmt.query_map(params_refs.as_slice(), |row| {
-            row.get::<_, String>(0)
-        }) {
-            Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
-            Err(e) => {
-                eprintln!("error: failed to query matching entries: {e}");
-                process::exit(1);
-            }
-        };
+        let ids: Vec<String> =
+            match stmt.query_map(params_refs.as_slice(), |row| row.get::<_, String>(0)) {
+                Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
+                Err(e) => {
+                    eprintln!("error: failed to query matching entries: {e}");
+                    process::exit(1);
+                }
+            };
 
         // Delete in FK-safe order for each matched entry
         for entry_id in &ids {
