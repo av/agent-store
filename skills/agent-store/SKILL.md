@@ -98,6 +98,7 @@ agent-store stats     # entry count and store size
 | `stats` | Show entry count and store size. Flags: `--json` |
 | `skills` | List and read built-in usage guides |
 | `export` | Export entries as JSONL (one JSON object per line). Filter: `--label` (repeat), `--type`, `--attr key=value` (repeat) |
+| `import` | Import entries from JSONL on stdin (complement of export). Generates fresh IDs. |
 | `completions <shell>` | Generate shell completions (bash, zsh, fish, elvish, powershell) |
 
 ## Pushing data
@@ -229,6 +230,29 @@ agent-store export | jq -r '.id'
 
 Each line is a complete JSON object with the same fields as `query --json`:
 `id`, `data`, `entity_type`, `created_at`, `labels`, `attributes`.
+
+## Import
+
+Import entries from JSONL on stdin. This is the complement of `export` —
+together they enable backup/restore, migration, and cross-store data transfer.
+
+```bash
+# Round-trip: export then re-import
+agent-store export --label important | agent-store import
+
+# Import from a backup file
+cat backup.jsonl | agent-store import
+
+# Import with error tolerance (errors are reported but don't abort)
+cat mixed-data.jsonl | agent-store import
+```
+
+Each input line must be a JSON object. The `data` field is required; `entity_type`,
+`labels`, and `attributes` are optional (default to null, [], and {} respectively).
+The `id` and `created_at` fields from the input are ignored — fresh values are
+always generated to prevent ID conflicts and preserve append-only semantics.
+
+Output: `Imported N entries (M errors)` on stderr.
 
 ## Shell completions
 

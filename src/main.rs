@@ -119,6 +119,8 @@ enum Command {
         #[arg(long = "attr")]
         attr: Vec<String>,
     },
+    /// Import entries from JSONL on stdin (complement of export)
+    Import,
     /// Generate shell completions for bash, zsh, fish, elvish, or powershell
     Completions {
         /// Shell to generate completions for
@@ -186,11 +188,11 @@ fn get_skills() -> Vec<SkillInfo> {
 }
 
 fn strip_frontmatter(content: &str) -> &str {
-    if content.starts_with("---") {
-        if let Some(end) = content[3..].find("---") {
-            let after = &content[3 + end + 3..];
-            return after.trim_start_matches('\n');
-        }
+    if let Some(stripped) = content.strip_prefix("---")
+        && let Some(end) = stripped.find("---")
+    {
+        let after = &stripped[end + 3..];
+        return after.trim_start_matches('\n');
     }
     content
 }
@@ -316,11 +318,10 @@ fn is_claude_available(root: &Path) -> bool {
     if root.join(".claude").exists() {
         return true;
     }
-    if let Ok(home) = std::env::var("HOME") {
-        if Path::new(&home).join(".claude").exists() {
+    if let Ok(home) = std::env::var("HOME")
+        && Path::new(&home).join(".claude").exists() {
             return true;
         }
-    }
     which_exists("claude")
 }
 
@@ -345,12 +346,11 @@ fn link_skill_for_claude(root: &Path, name: &str) -> bool {
         .join(name);
 
     if link_path.is_symlink() {
-        if let Ok(current) = fs::read_link(&link_path) {
-            if current == target {
+        if let Ok(current) = fs::read_link(&link_path)
+            && current == target {
                 println!("  skip  .claude/skills/{name} (link up to date)");
                 return true;
             }
-        }
         let _ = fs::remove_file(&link_path);
     } else if link_path.exists() {
         println!("  skip  .claude/skills/{name} (exists, not a symlink)");
@@ -667,12 +667,11 @@ fn push(labels: Vec<String>, entity_type: Option<String>, quiet: bool, id_only: 
             process::exit(1);
         }
     }
-    if let Some(ref t) = entity_type {
-        if t.trim().is_empty() {
+    if let Some(ref t) = entity_type
+        && t.trim().is_empty() {
             eprintln!("error: type cannot be empty");
             process::exit(1);
         }
-    }
     let parsed_attrs: Vec<(&str, &str)> = attrs.iter().map(|a| parse_attr(a)).collect();
     for (key, _) in &parsed_attrs {
         if key.trim().is_empty() {
@@ -766,6 +765,7 @@ struct EntryJson {
     attributes: HashMap<String, String>,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn query(
     labels: Vec<String>,
     entity_type: Option<String>,
@@ -784,12 +784,11 @@ fn query(
             process::exit(1);
         }
     }
-    if let Some(ref t) = entity_type {
-        if t.trim().is_empty() {
+    if let Some(ref t) = entity_type
+        && t.trim().is_empty() {
             eprintln!("error: type cannot be empty");
             process::exit(1);
         }
-    }
 
     // Parse and validate attribute filters
     let parsed_attrs: Vec<(&str, &str)> = attrs.iter().map(|a| parse_attr(a)).collect();
@@ -862,14 +861,13 @@ fn query(
     // Add LIMIT/OFFSET
     if latest {
         sql.push_str(" LIMIT 1");
-    } else if !count {
-        if let Some(lim) = limit {
+    } else if !count
+        && let Some(lim) = limit {
             sql.push_str(&format!(" LIMIT {lim}"));
             if let Some(off) = offset {
                 sql.push_str(&format!(" OFFSET {off}"));
             }
         }
-    }
 
     // Wrap in COUNT subquery when both --count and --latest are set
     if count && latest {
@@ -1023,12 +1021,11 @@ fn export(labels: Vec<String>, entity_type: Option<String>, attrs: Vec<String>) 
             process::exit(1);
         }
     }
-    if let Some(ref t) = entity_type {
-        if t.trim().is_empty() {
+    if let Some(ref t) = entity_type
+        && t.trim().is_empty() {
             eprintln!("error: type cannot be empty");
             process::exit(1);
         }
-    }
 
     let parsed_attrs: Vec<(&str, &str)> = attrs.iter().map(|a| parse_attr(a)).collect();
     for (key, _) in &parsed_attrs {
@@ -1367,6 +1364,153 @@ fn stats(json: bool) {
     }
 }
 
+fn import() {
+    let conn = open_db();
+
+    let stdin = io::stdin();
+    let mut imported = 0u64;
+    let mut errors = 0u64;
+
+    for (line_num, line_result) in io::BufRead::lines(stdin.lock()).enumerate() {
+        let line_num = line_num + 1; // 1-based
+        let line = match line_result {
+            Ok(l) => l,
+            Err(e) => {
+                eprintln!("error: line {line_num}: failed to read: {e}");
+                errors += 1;
+                continue;
+            }
+        };
+
+        // Skip empty lines
+        if line.trim().is_empty() {
+            continue;
+        }
+
+        // Parse JSON
+        let obj: serde_json::Value = match serde_json::from_str(&line) {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("error: line {line_num}: {e}");
+                errors += 1;
+                continue;
+            }
+        };
+
+        let obj = match obj.as_object() {
+            Some(o) => o,
+            None => {
+                eprintln!("error: line {line_num}: expected JSON object");
+                errors += 1;
+                continue;
+            }
+        };
+
+        // Extract fields with defaults
+        let data = match obj.get("data").and_then(|v| v.as_str()) {
+            Some(s) => s.to_string(),
+            None => {
+                eprintln!("error: line {line_num}: missing or invalid \"data\" field");
+                errors += 1;
+                continue;
+            }
+        };
+
+        let entity_type = obj
+            .get("entity_type")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
+        let labels: Vec<String> = obj
+            .get("labels")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let attributes: Vec<(String, String)> = obj
+            .get("attributes")
+            .and_then(|v| v.as_object())
+            .map(|m| {
+                m.iter()
+                    .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        // Generate fresh ID (always — skip imported id/created_at)
+        let id = Uuid::new_v4().to_string();
+
+        // Insert within a transaction
+        if let Err(e) = conn.execute("BEGIN", []) {
+            eprintln!("error: line {line_num}: failed to begin transaction: {e}");
+            errors += 1;
+            continue;
+        }
+
+        let mut failed = false;
+
+        if let Err(e) = conn.execute(
+            "INSERT INTO entries (id, data, entity_type) VALUES (?1, ?2, ?3)",
+            rusqlite::params![id, data, entity_type],
+        ) {
+            eprintln!("error: line {line_num}: failed to insert entry: {e}");
+            failed = true;
+        }
+
+        if !failed {
+            for label in &labels {
+                if let Err(e) = conn.execute(
+                    "INSERT INTO labels (entry_id, label) VALUES (?1, ?2)",
+                    rusqlite::params![id, label],
+                ) {
+                    eprintln!("error: line {line_num}: failed to insert label: {e}");
+                    failed = true;
+                    break;
+                }
+            }
+        }
+
+        if !failed {
+            for (key, value) in &attributes {
+                if let Err(e) = conn.execute(
+                    "INSERT INTO attributes (entry_id, key, value) VALUES (?1, ?2, ?3)",
+                    rusqlite::params![id, key, value],
+                ) {
+                    eprintln!("error: line {line_num}: failed to insert attribute: {e}");
+                    failed = true;
+                    break;
+                }
+            }
+        }
+
+        if failed {
+            let _ = conn.execute("ROLLBACK", []);
+            errors += 1;
+            continue;
+        }
+
+        if let Err(e) = conn.execute("COMMIT", []) {
+            let _ = conn.execute("ROLLBACK", []);
+            eprintln!("error: line {line_num}: failed to commit: {e}");
+            errors += 1;
+            continue;
+        }
+
+        imported += 1;
+    }
+
+    let error_part = if errors == 1 {
+        "1 error".to_string()
+    } else {
+        format!("{errors} errors")
+    };
+    eprintln!("Imported {imported} entries ({error_part})");
+}
+
 fn main() {
     // Reset SIGPIPE to default so piping to head/tail/etc. exits cleanly
     // instead of panicking with "Broken pipe".
@@ -1404,6 +1548,7 @@ fn main() {
             entity_type,
             attr,
         } => export(label, entity_type, attr),
+        Command::Import => import(),
         Command::Schema => schema(),
         Command::Stats { json } => stats(json),
         Command::Skills { action } => match action {

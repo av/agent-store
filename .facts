@@ -197,6 +197,17 @@
   command: echo "test-export-filter" | agent-store push --label unique-export-test-label -q && COUNT=$(agent-store export --label unique-export-test-label | wc -l) && test "$COUNT" -ge 1 && echo PASS || echo FAIL
   tags: [spec, implemented]
 
+## import
+- label: agent-store import reads JSONL from stdin and inserts entries into the store, printing a summary of imported entries and errors
+  command: echo "test data" | agent-store push --label import-test && agent-store export --label import-test | agent-store import 2>&1 | grep -q "Imported"
+  tags: [spec, implemented]
+- label: agent-store import reports parse errors with line numbers and continues processing remaining lines
+  command: echo "{\"invalid" | agent-store import 2>&1 | grep -qE "line 1.*error|1 error"
+  tags: [spec, implemented]
+- label: agent-store export | agent-store import round-trips entries — exported entries can be re-imported as new entries with fresh IDs
+  command: echo "test-roundtrip" | agent-store push --label rt-test && BEFORE=$(agent-store query --label rt-test --count) && agent-store export --label rt-test | agent-store import && AFTER=$(agent-store query --label rt-test --count) && [ "$AFTER" -gt "$BEFORE" ]
+  tags: [spec, implemented]
+
 # resilience
 - PRAGMA foreign_keys = ON is set on every database connection so ON DELETE CASCADE is enforced @spec @implemented
 - label: PRAGMA busy_timeout = 5000 is set on every database connection so concurrent writes retry instead of failing with database locked

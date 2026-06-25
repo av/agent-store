@@ -157,6 +157,36 @@ agent-store export --label important > important.jsonl
 agent-store export | jq -r '.id'
 ```
 
+## agent-store import
+
+Import entries from JSONL on stdin. Complement of `export`.
+
+```
+agent-store import
+```
+
+Reads JSONL from stdin (one JSON object per line). For each valid line,
+inserts a new entry with a fresh UUID and timestamp. The `id` and
+`created_at` fields from the input are ignored to prevent ID conflicts.
+
+Required fields: `data` (string).
+Optional fields: `entity_type` (string), `labels` (array of strings),
+`attributes` (object of string key-value pairs).
+
+On parse errors or missing `data`, prints the error with line number to
+stderr and continues processing. Empty lines are skipped.
+
+Output: `Imported N entries (M errors)` on stderr.
+
+```bash
+# Round-trip backup/restore
+agent-store export > backup.jsonl
+cat backup.jsonl | agent-store import
+
+# Import filtered entries from another store
+AGENT_STORE_PATH=./other agent-store export --label shared | agent-store import
+```
+
 ## agent-store completions
 
 Generate shell completion scripts.
