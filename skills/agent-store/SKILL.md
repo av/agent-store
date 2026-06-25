@@ -104,8 +104,8 @@ agent-store stats     # entry count and store size
 | `schema` | Show entity types and label counts |
 | `stats` | Show entry count and store size. Flags: `--json` |
 | `skills` | List and read built-in usage guides |
-| `export` | Export entries as JSONL (one JSON object per line). Filter: `--label` (repeat), `--type`, `--attr key=value` (repeat) |
-| `import` | Import entries from JSONL on stdin (complement of export). Generates fresh IDs. |
+| `export` | Export entries as JSONL (one JSON object per line). Filter: `--label` (repeat), `--not-label` (repeat), `--type`, `--attr key=value` (repeat), `--data`, `--after`, `--before` |
+| `import` | Import entries from JSONL on stdin (complement of export). Generates fresh IDs. Flags: `--dry-run` |
 | `purge` | Delete ALL entries (destructive). Requires `--confirm` flag. |
 | `completions <shell>` | Generate shell completions (bash, zsh, fish, elvish, powershell) |
 
@@ -245,6 +245,15 @@ agent-store export > backup.jsonl
 agent-store export --label important > important.jsonl
 agent-store export --type note --label active > notes.jsonl
 
+# Exclude entries with a label
+agent-store export --not-label archived > active.jsonl
+
+# Export entries matching a data substring
+agent-store export --data "error" > errors.jsonl
+
+# Export entries from a date range
+agent-store export --after "2024-06-01" --before "2024-07-01" > june.jsonl
+
 # Count exported entries
 agent-store export | wc -l
 
@@ -269,6 +278,9 @@ cat backup.jsonl | agent-store import
 
 # Import with error tolerance (errors are reported but don't abort)
 cat mixed-data.jsonl | agent-store import
+
+# Dry run: validate JSONL without inserting anything
+cat data.jsonl | agent-store import --dry-run
 ```
 
 Each input line must be a JSON object. The `data` field is required; `entity_type`,
@@ -277,6 +289,7 @@ The `id` and `created_at` fields from the input are ignored — fresh values are
 always generated to prevent ID conflicts and preserve append-only semantics.
 
 Output: `Imported N entries (M errors)` on stderr.
+With `--dry-run`: `Dry run: N entries would be imported (M errors)` on stderr. Nothing is inserted.
 
 ## Purge
 

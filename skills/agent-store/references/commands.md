@@ -155,8 +155,14 @@ agent-store export [OPTIONS]
 | Flag | Description |
 |------|-------------|
 | `--label <LABEL>` | Filter by label (can be repeated, AND logic) |
+| `--not-label <LABEL>` | Exclude entries with this label (can be repeated) |
 | `--type <TYPE>` | Filter by entity type |
 | `--attr <KEY=VALUE>` | Filter by attribute (can be repeated, AND logic) |
+| `--data <SUBSTRING>` | Filter by substring match in entry data |
+| `--after <DATETIME>` | Only entries created after this timestamp (ISO 8601) |
+| `--before <DATETIME>` | Only entries created before this timestamp (ISO 8601) |
+
+All filters match `query` — see `query` docs for filter semantics.
 
 Output goes to stdout. Each line is a self-contained JSON object with
 fields: `id`, `data`, `entity_type`, `created_at`, `labels`, `attributes`.
@@ -164,6 +170,8 @@ fields: `id`, `data`, `entity_type`, `created_at`, `labels`, `attributes`.
 ```bash
 agent-store export > backup.jsonl
 agent-store export --label important > important.jsonl
+agent-store export --not-label archived > active.jsonl
+agent-store export --data "error" --after "2024-06-01" > recent-errors.jsonl
 agent-store export | jq -r '.id'
 ```
 
@@ -172,8 +180,13 @@ agent-store export | jq -r '.id'
 Import entries from JSONL on stdin. Complement of `export`.
 
 ```
-agent-store import
+agent-store import [--dry-run]
 ```
+
+Options:
+- `--dry-run` — Parse and validate without inserting anything. Prints
+  `Dry run: N entries would be imported (M errors)` on stderr. Does not
+  require an initialized store.
 
 Reads JSONL from stdin (one JSON object per line). For each valid line,
 inserts a new entry with a fresh UUID and timestamp. The `id` and
@@ -192,6 +205,9 @@ Output: `Imported N entries (M errors)` on stderr.
 # Round-trip backup/restore
 agent-store export > backup.jsonl
 cat backup.jsonl | agent-store import
+
+# Validate JSONL before committing
+cat data.jsonl | agent-store import --dry-run
 
 # Import filtered entries from another store
 AGENT_STORE_PATH=./other agent-store export --label shared | agent-store import

@@ -127,15 +127,31 @@ enum Command {
         /// Filter by label (can be repeated, AND logic)
         #[arg(long)]
         label: Vec<String>,
+        /// Exclude entries with this label (can be repeated)
+        #[arg(long = "not-label")]
+        not_label: Vec<String>,
         /// Filter by entity type
         #[arg(long = "type")]
         entity_type: Option<String>,
         /// Filter by attribute key=value pair (can be repeated, AND logic)
         #[arg(long = "attr")]
         attr: Vec<String>,
+        /// Filter by substring match in entry data
+        #[arg(long)]
+        data: Option<String>,
+        /// Only entries created after this timestamp (ISO 8601)
+        #[arg(long)]
+        after: Option<String>,
+        /// Only entries created before this timestamp (ISO 8601)
+        #[arg(long)]
+        before: Option<String>,
     },
     /// Import entries from JSONL on stdin (complement of export)
-    Import,
+    Import {
+        /// Parse and validate without inserting; print summary only
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Delete ALL entries from the store (destructive, requires --confirm)
     Purge {
         /// Confirm you want to delete all data
@@ -1067,7 +1083,15 @@ fn query(
     }
 }
 
-fn export(labels: Vec<String>, entity_type: Option<String>, attrs: Vec<String>) {
+fn export(
+    labels: Vec<String>,
+    not_labels: Vec<String>,
+    entity_type: Option<String>,
+    attrs: Vec<String>,
+    data_filter: Option<String>,
+    after: Option<String>,
+    before: Option<String>,
+) {
     // Validate empty strings before any DB work
     for label in &labels {
         if label.trim().is_empty() {
@@ -1123,6 +1147,35 @@ fn export(labels: Vec<String>, entity_type: Option<String>, attrs: Vec<String>) 
         params.push(Box::new(value.to_string()));
         param_idx += 1;
     }
+
+    // Data substring filter
+    if let Some(ref substr) = data_filter {
+        conditions.push(format!("e.data LIKE '%' || ?{param_idx} || '%'"));
+        params.push(Box::new(substr.clone()));
+        param_idx += 1;
+    }
+
+    // Not-label exclusion conditions
+    for nl in &not_labels {
+        conditions.push(format!(
+            "e.id NOT IN (SELECT entry_id FROM labels WHERE label = ?{param_idx})"
+        ));
+        params.push(Box::new(nl.clone()));
+        param_idx += 1;
+    }
+
+    // Date range filters
+    if let Some(ref ts) = after {
+        conditions.push(format!("e.created_at > ?{param_idx}"));
+        params.push(Box::new(ts.clone()));
+        param_idx += 1;
+    }
+    if let Some(ref ts) = before {
+        conditions.push(format!("e.created_at < ?{param_idx}"));
+        params.push(Box::new(ts.clone()));
+        param_idx += 1;
+    }
+    let _ = param_idx; // suppress unused assignment warning
 
     if !conditions.is_empty() {
         sql.push_str(" WHERE ");
@@ -1494,8 +1547,8 @@ fn stats(json: bool) {
     }
 }
 
-fn import() {
-    let conn = open_db();
+fn import(dry_run: bool) {
+    let conn = if dry_run { None } else { Some(open_db()) };
 
     let stdin = io::stdin();
     let mut imported = 0u64;
@@ -1571,8 +1624,17 @@ fn import() {
             })
             .unwrap_or_default();
 
+        // In dry-run mode, we validated the line — count it and move on
+        if dry_run {
+            // Suppress unused variable warnings by using them
+            let _ = (data, entity_type, labels, attributes);
+            imported += 1;
+            continue;
+        }
+
         // Generate fresh ID (always — skip imported id/created_at)
         let id = Uuid::new_v4().to_string();
+        let conn = conn.as_ref().unwrap();
 
         // Insert within a transaction
         if let Err(e) = conn.execute("BEGIN", []) {
@@ -1638,7 +1700,12 @@ fn import() {
     } else {
         format!("{errors} errors")
     };
-    eprintln!("Imported {imported} entries ({error_part})");
+    if dry_run {
+        let word = if imported == 1 { "entry" } else { "entries" };
+        eprintln!("Dry run: {imported} {word} would be imported ({error_part})");
+    } else {
+        eprintln!("Imported {imported} entries ({error_part})");
+    }
 }
 
 fn purge(confirm: bool) {
@@ -1714,10 +1781,14 @@ fn main() {
 
         Command::Export {
             label,
+            not_label,
             entity_type,
             attr,
-        } => export(label, entity_type, attr),
-        Command::Import => import(),
+            data,
+            after,
+            before,
+        } => export(label, not_label, entity_type, attr, data, after, before),
+        Command::Import { dry_run } => import(dry_run),
         Command::Purge { confirm } => purge(confirm),
         Command::Schema => schema(),
         Command::Stats { json } => stats(json),

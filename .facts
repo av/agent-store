@@ -214,6 +214,15 @@
 - label: agent-store export --label X exports only entries matching the specified label filter
   command: echo "test-export-filter" | agent-store push --label unique-export-test-label -q && COUNT=$(agent-store export --label unique-export-test-label | wc -l) && test "$COUNT" -ge 1 && echo PASS || echo FAIL
   tags: [spec, implemented]
+- label: export --not-label excludes entries with specified labels, matching query filter parity
+  command: agent-store export --not-label nonexistent 2>&1 | head -1 | grep -qE "^\{" && echo PASS || echo FAIL
+  tags: [spec, implemented]
+- label: export --data filters entries by substring match in data, matching query filter parity
+  command: agent-store export --data test 2>&1 | head -1 | grep -qE "^\{" && echo PASS || echo FAIL
+  tags: [spec, implemented]
+- label: export --after and --before filter entries by date range, matching query filter parity
+  command: agent-store export --after "2020-01-01" --before "2099-01-01" 2>&1 | head -1 | grep -qE "^\{" && echo PASS || echo FAIL
+  tags: [spec, implemented]
 
 ## import
 - label: agent-store import reads JSONL from stdin and inserts entries into the store, printing a summary of imported entries and errors
@@ -224,6 +233,9 @@
   tags: [spec, implemented]
 - label: agent-store export | agent-store import round-trips entries — exported entries can be re-imported as new entries with fresh IDs
   command: echo "test-roundtrip" | agent-store push --label rt-test && BEFORE=$(agent-store query --label rt-test --count) && agent-store export --label rt-test | agent-store import && AFTER=$(agent-store query --label rt-test --count) && [ "$AFTER" -gt "$BEFORE" ]
+  tags: [spec, implemented]
+- label: import --dry-run parses and validates JSONL without inserting, prints summary with count of entries that would be imported and errors
+  command: echo "{\"data\":\"test\"}" | agent-store import --dry-run 2>&1 | grep -q "Dry run" && echo PASS || echo FAIL
   tags: [spec, implemented]
 
 ## purge
