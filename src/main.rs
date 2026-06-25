@@ -78,7 +78,7 @@ enum Command {
         /// replace data of an existing entry in-place (ID or prefix)
         #[arg(long, conflicts_with = "upsert")]
         update: Option<String>,
-        /// atomic find-or-create: if filters match 0 entries, create; if 1, update; if 2+, error
+        /// atomic find-or-create: update matching entry or create a new one
         #[arg(long, conflicts_with = "update")]
         upsert: bool,
         /// create a link from this entry to target (format: rel:id, repeatable)
@@ -95,7 +95,7 @@ enum Command {
         /// omit trailing newline for binary-safe piping
         #[arg(long)]
         raw: bool,
-        /// include outgoing and incoming links in JSON output
+        /// include outgoing and incoming links in JSON output (requires --json)
         #[arg(long = "with-links")]
         with_links: bool,
     },
@@ -158,10 +158,10 @@ enum Command {
         /// include only entries created before this timestamp (ISO 8601)
         #[arg(long)]
         before: Option<String>,
-        /// find entries that link TO this entry (entries where to_id matches)
+        /// find entries that link to this entry (ID or prefix)
         #[arg(long = "linked-to")]
         linked_to: Option<String>,
-        /// find entries that this entry links TO (entries where from_id matches)
+        /// find entries linked from this entry (ID or prefix)
         #[arg(long = "linked-from")]
         linked_from: Option<String>,
         /// filter linked results by relationship type (requires --linked-to or --linked-from)
@@ -438,7 +438,7 @@ enum Command {
     },
     /// Apply compound metadata mutations (tag/untag/set/unset) atomically
     Update {
-        /// entry ID or prefix (single-ID mode, skips --confirm)
+        /// entry ID or unambiguous prefix (single-entry mode, no --confirm needed)
         id: Option<String>,
         /// add a label (repeatable)
         #[arg(long)]
@@ -458,7 +458,7 @@ enum Command {
         /// preview matching entries without applying mutations
         #[arg(long, conflicts_with = "confirm")]
         dry_run: bool,
-        /// require this label (repeatable, AND logic) — bulk filter
+        /// require this label (repeatable, AND logic)
         #[arg(long)]
         label: Vec<String>,
         /// exclude entries with this label (repeatable)
@@ -470,7 +470,7 @@ enum Command {
         /// exclude entries with this entity type (repeatable)
         #[arg(long = "not-type", action = clap::ArgAction::Append)]
         not_type: Vec<String>,
-        /// require this attribute key=value (repeatable, AND logic) — bulk filter
+        /// require this attribute key=value (repeatable, AND logic)
         #[arg(long = "attr")]
         attr: Vec<String>,
         /// exclude entries with this attribute key=value (repeatable)
@@ -479,7 +479,7 @@ enum Command {
         /// filter by substring match in entry data
         #[arg(long)]
         data: Option<String>,
-        /// full-text search (FTS5 syntax)
+        /// full-text search (FTS5 syntax: terms, "phrases", OR, NOT, prefix*)
         #[arg(long)]
         search: Option<String>,
         /// include only entries created after this timestamp (ISO 8601)
@@ -494,11 +494,11 @@ enum Command {
     },
     /// Create a directional link between two entries
     Link {
-        /// source entry ID or prefix
+        /// source entry ID or unambiguous prefix
         from: String,
-        /// target entry ID or prefix
+        /// target entry ID or unambiguous prefix
         to: String,
-        /// relationship type (optional, defaults to empty)
+        /// relationship type
         rel: Option<String>,
         /// output as JSON
         #[arg(long)]
@@ -506,9 +506,9 @@ enum Command {
     },
     /// Remove a link between two entries
     Unlink {
-        /// source entry ID or prefix
+        /// source entry ID or unambiguous prefix
         from: String,
-        /// target entry ID or prefix
+        /// target entry ID or unambiguous prefix
         to: String,
         /// relationship type (if omitted, removes ALL links from->to)
         rel: Option<String>,
@@ -554,7 +554,7 @@ enum Command {
     },
     /// Show audit trail of mutations (tag, untag, set-attr, unset-attr, delete, update)
     Log {
-        /// entry ID or prefix (show changelog for this entry only)
+        /// entry ID or unambiguous prefix (show history for this entry only)
         id: Option<String>,
         /// include only changelog entries after this timestamp (ISO 8601)
         #[arg(long)]
@@ -1865,6 +1865,26 @@ fn push(
     }
 }
 
+/// A parsed import row: (data, entity_type, labels, attrs, created_at).
+type ImportRow = (
+    String,
+    Option<String>,
+    Vec<String>,
+    Vec<(String, String)>,
+    Option<String>,
+);
+
+/// A changelog row: (rowid, entry_id, timestamp, operation, key, old_value, new_value).
+type ChangelogRow = (
+    i64,
+    String,
+    String,
+    String,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+);
+
 #[derive(Serialize)]
 struct EntryJson {
     id: String,
@@ -2978,13 +2998,7 @@ fn import(dry_run: bool) {
     let stdin = io::stdin();
     let mut imported = 0u64;
     let mut errors = 0u64;
-    let mut parsed_entries: Vec<(
-        String,
-        Option<String>,
-        Vec<String>,
-        Vec<(String, String)>,
-        Option<String>,
-    )> = Vec::new();
+    let mut parsed_entries: Vec<ImportRow> = Vec::new();
 
     for (line_num, line_result) in io::BufRead::lines(stdin.lock()).enumerate() {
         let line_num = line_num + 1; // 1-based
@@ -4577,15 +4591,7 @@ fn log_cmd(
 
     let params_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
 
-    let rows: Vec<(
-        i64,
-        String,
-        String,
-        String,
-        Option<String>,
-        Option<String>,
-        Option<String>,
-    )> = match stmt.query_map(params_refs.as_slice(), |row| {
+    let rows: Vec<ChangelogRow> = match stmt.query_map(params_refs.as_slice(), |row| {
         Ok((
             row.get::<_, i64>(0)?,
             row.get::<_, String>(1)?,
