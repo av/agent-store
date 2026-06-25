@@ -662,6 +662,85 @@ from annotations added later (mutable via `set-attr` and `tag`). This
 gives you the benefits of append-only data (nothing lost) with the
 flexibility to track status changes and review outcomes after the fact.
 
+## Links — relationship modeling
+
+**When:** Entries have structural relationships — task dependencies,
+parent-child hierarchies, or associative references — and you need to
+traverse or query those relationships.
+
+### Task dependencies
+
+```bash
+# Create tasks
+DESIGN=$(echo "design auth flow" | agent-store push --type task --label backend --id-only)
+IMPL=$(echo "implement auth" | agent-store push --type task --label backend --id-only)
+TEST=$(echo "test auth" | agent-store push --type task --label backend --id-only)
+
+# Link: IMPL depends-on DESIGN, TEST depends-on IMPL
+agent-store link "$IMPL" "$DESIGN" depends-on
+agent-store link "$TEST" "$IMPL" depends-on
+
+# Find what a task depends on
+agent-store query --linked-from "$TEST" --link-rel depends-on
+
+# Find what depends on a task (reverse — who is blocked by this?)
+agent-store query --linked-to "$DESIGN" --link-rel depends-on
+```
+
+### Parent-child hierarchy
+
+```bash
+# Create an epic and its child tasks
+EPIC=$(echo "user authentication" | agent-store push --type epic --label auth --id-only)
+
+# Push children with links in one command
+echo "login page" | agent-store push --type task --link "child-of:$EPIC" --label auth
+echo "logout flow" | agent-store push --type task --link "child-of:$EPIC" --label auth
+echo "password reset" | agent-store push --type task --link "child-of:$EPIC" --label auth
+
+# List all children of the epic
+agent-store query --linked-to "$EPIC" --link-rel child-of
+
+# Count children
+agent-store query --linked-to "$EPIC" --link-rel child-of --count
+```
+
+### Associative references — linking findings to sources
+
+```bash
+# A finding references the file it was found in
+FILE_ID=$(echo "src/auth.rs" | agent-store push --type file-index --id-only)
+echo "SQL injection at line 42" | agent-store push --type finding \
+  --label security --link "found-in:$FILE_ID" --attr severity=critical
+
+# Later: find all findings for a file
+agent-store query --linked-to "$FILE_ID" --link-rel found-in
+
+# Find what a finding references
+agent-store query --linked-from "$FINDING_ID" --link-rel found-in
+```
+
+### Inspecting links
+
+```bash
+# See all links on an entry (both directions)
+agent-store pull "$ID" --json --with-links
+
+# The output includes:
+#   links_from: [{to, rel, created_at}]  — edges going out
+#   links_to:   [{from, rel, created_at}] — edges coming in
+```
+
+**Gotcha:** Links are directional. `link A B rel` means A->B. Use
+`--linked-from A` to find entries A points to, `--linked-to B` to find
+entries pointing at B. Deleting an entry removes its link rows in both
+directions but does not cascade-delete linked entries.
+
+**Tip:** For version chains, consider whether links or the `supersedes`
+attribute pattern (see Supersede / versioning above) fits better. Links
+are better when relationships are many-to-many or have named types;
+`supersedes` is simpler for linear version history.
+
 ## Putting it together
 
 A typical agent workflow combines several patterns:
