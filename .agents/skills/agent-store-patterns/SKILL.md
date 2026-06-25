@@ -376,13 +376,10 @@ filters over `purge` (which removes everything).
 
 ## Supersede / versioning
 
-**When:** You need to "update" an entry and want to preserve the original
-for version history. If you just need a simple in-place replacement without
-history, use `push --update <id>` instead (see `agent-store skills get
-agent-store` for details).
-
-For versioned updates, agent-store's convention is to push a new entry and
-link it to the one it replaces with `--attr supersedes=<old-id>`.
+**When:** You need to "update" an entry but want to preserve the original.
+agent-store is append-only — there is no update command. The convention
+is to push a new entry and link it to the one it replaces with
+`--attr supersedes=<old-id>`.
 
 ```bash
 # Push the original entry

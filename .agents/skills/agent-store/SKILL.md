@@ -132,7 +132,7 @@ agent-store delete 7bf8d3f
 | Command | What it does |
 |---------|-------------|
 | `init` | Create `.agent-store/store.db`, install skills to `.agents/skills/`, set up project docs |
-| `push` | Read stdin (or `--file`), store as entry. Flags: `--label`, `--type`, `--attr key=value`, `--timestamp`, `--ttl <duration>`, `-f`/`--file`, `-q`/`--quiet`, `--id-only`, `--strip`, `--json`, `--update <id>` |
+| `push` | Read stdin (or `--file`), store as entry. Flags: `--label`, `--type`, `--attr key=value`, `--timestamp`, `--ttl <duration>`, `-f`/`--file`, `-q`/`--quiet`, `--id-only`, `--strip` |
 | `pull <id>` | Retrieve entry by ID, print data to stdout. Flags: `--json` (full entry as JSON object), `--raw` (omit trailing newline for binary-safe piping) |
 | `query` | List entries. Filter: `--label` (repeat), `--not-label` (repeat, exclude), `--type`, `--not-type` (repeat, exclude, NULL-safe), `--attr key=value` (repeat), `--not-attr key=value` (repeat, exclude), `--data <substring>`, `--search <query>` (FTS5 full-text search), `--after <datetime>`, `--before <datetime>`, `--json`, `--count`, `--latest`, `--limit N`, `--offset N`, `-r`/`--reverse` |
 | `schema` | Show entity types and label counts |
@@ -260,15 +260,6 @@ echo "historical data" | agent-store push --type note --timestamp "2020-01-15 10
 # Strip trailing whitespace/newlines from data before storing
 echo "data" | agent-store push --label x --strip    # stores "data", not "data\n"
 agent-store push --file output.txt --strip           # strip works with --file too
-
-# JSON output — get structured JSON instead of human-readable message
-echo "data" | agent-store push --label tag --type note --json
-# {"attributes":null,"id":"<uuid>","labels":["tag"],"type":"note"}
-
-# Update an existing entry's data in-place (preserves created_at and existing labels)
-ID=$(echo "v1" | agent-store push --id-only --strip)
-echo "v2" | agent-store push --update $ID              # data is now "v2"
-echo "v3" | agent-store push --update $ID --label new  # adds label, data is now "v3"
 ```
 
 ## Querying data
@@ -516,25 +507,13 @@ accidental delete-all — use `purge` for that).
 
 Use `--json` for structured output: `{"deleted":1,"ids":["..."]}` (confirmed) or `{"dry_run":true,"count":1}` (preview).
 
-## Updating entries
+## Supersede convention
 
-For simple in-place replacement, use `push --update <id>`:
-
-```bash
-ID=$(echo "v1 config" | agent-store push --type config --label app --id-only)
-echo "v2 config" | agent-store push --update $ID
-```
-
-This replaces the entry's data, preserves `created_at` and existing labels,
-adds any new `--label` values, upserts `--attr` values, and updates `--type`
-if given. Supports prefix ID matching. Use this when you don't need version
-history.
-
-For versioned updates where you want to preserve the original, use the
-supersede convention: push a new entry with `--attr supersedes=<old-id>`.
-Queries return newest-first, so `--latest` always gives the current version.
-After confirming the replacement, clean up with `agent-store delete <old-id>`.
-See `agent-store skills get agent-store-patterns` for full examples including
+There is no "update" command — agent-store is append-only by design. To replace
+an entry, push a new one with `--attr supersedes=<old-id>`. Queries return
+newest-first, so `--latest` always gives the current version. After confirming
+the replacement, clean up with `agent-store delete <old-id>`. See
+`agent-store skills get agent-store-patterns` for full examples including
 version chain traversal and iterative draft workflows.
 
 ## Purge
