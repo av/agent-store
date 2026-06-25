@@ -32,3 +32,23 @@ Step 4 only works if step 2 happened. If you skipped step 2, go back now — you
 - `facts-discover` — scan the codebase and sync facts to reality (only when explicitly asked)
 - `facts-implement` — implement `@spec` facts in code, verify, tag `@implemented`
 <!-- facts:end -->
+
+<!-- agent-store:start -->
+## Agent data store
+
+This project uses [agent-store](https://github.com/av/agent-store) for persistent data storage. Agents can push, pull, and query arbitrary data with no schema.
+
+**Getting started:** Run `agent-store skills get agent-store --full` for the complete usage guide.
+
+```bash
+agent-store init                              # Initialize store + install skills
+echo "data" | agent-store push --label tag    # Store data
+agent-store query --label tag                 # Find it
+agent-store pull <id>                         # Retrieve by ID
+```
+
+**Skills** (invoke via `agent-store skills get <name>`):
+- `agent-store` — Core reference: data model, commands, configuration
+- `agent-store-patterns` — Workflow recipes: scratchpad, task tracking, caching, knowledge base
+- `agent-store-pipelines` — Shell composition: batch import/export, tool chaining, aggregation
+<!-- agent-store:end -->
