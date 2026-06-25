@@ -110,6 +110,8 @@ agent-store stats     # entry count and store size
 | `export` | Export entries as JSONL (one JSON object per line). Filter: `--id`, `--label` (repeat), `--not-label` (repeat), `--type`, `--attr key=value` (repeat), `--data`, `--after`, `--before` |
 | `import` | Import entries from JSONL on stdin (complement of export). Generates fresh IDs, preserves timestamps. Flags: `--dry-run` |
 | `purge` | Delete ALL entries (destructive). Requires `--confirm` flag. |
+| `labels` | List all unique labels in the store, sorted. Flags: `--json` (JSON array), `--count` (with counts) |
+| `types` | List all unique entity types in the store, sorted. Flags: `--json` (JSON array), `--count` (with counts) |
 | `info` | Show store configuration and environment. Flags: `--json` |
 | `completions <shell>` | Generate shell completions (bash, zsh, fish, elvish, powershell) |
 
@@ -337,6 +339,33 @@ agent-store info --json | jq .db_size_bytes
 
 Fields: `store_path`, `db_path`, `db_size_bytes`, `agent_store_path_env`,
 `project_root`, `version`.
+
+## Discovery
+
+List what labels and entity types exist in the store — useful for agents
+exploring a store without querying all entries:
+
+```bash
+# List all unique labels (sorted, one per line)
+agent-store labels
+
+# JSON array of labels
+agent-store labels --json
+
+# Labels with entry counts
+agent-store labels --count            # alpha (3)\n beta (1)
+agent-store labels --count --json     # {"alpha":3,"beta":1}
+
+# List all unique entity types (sorted, one per line)
+agent-store types
+
+# JSON array of types
+agent-store types --json
+
+# Types with entry counts
+agent-store types --count
+agent-store types --count --json
+```
 
 ## Shell completions
 

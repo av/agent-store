@@ -301,3 +301,25 @@
 - label: push --file reads data from a file instead of stdin; file not found prints clear error and exits 1
   command: echo "file-push-content" > /tmp/as-test-file-push.txt && agent-store push --label file-test --file /tmp/as-test-file-push.txt 2>&1 | grep -q "stored entry" && agent-store query --label file-test | grep -q "file-push-content" && agent-store push --file /tmp/nonexistent-file-xxx --label x 2>&1; test $? -ne 0 && echo "OK"
   tags: [spec, implemented]
+
+# cli > labels
+- label: agent-store labels lists all unique labels in the store, one per line, sorted alphabetically
+  command: export AGENT_STORE_PATH=$(mktemp -d) && agent-store init >/dev/null 2>&1 && echo "a" | agent-store push --label zebra -q && echo "b" | agent-store push --label alpha -q && echo "c" | agent-store push --label beta -q && RESULT=$(agent-store labels) && FIRST=$(echo "$RESULT" | head -1) && LAST=$(echo "$RESULT" | tail -1) && test "$FIRST" = "alpha" && test "$LAST" = "zebra"
+  tags: [spec, implemented]
+- label: agent-store labels --json outputs unique labels as a sorted JSON array
+  command: export AGENT_STORE_PATH=$(mktemp -d) && agent-store init >/dev/null 2>&1 && echo "a" | agent-store push --label zebra -q && echo "b" | agent-store push --label alpha -q && agent-store labels --json | python3 -c "import sys,json; d=json.load(sys.stdin); assert d==[\"alpha\",\"zebra\"]; print(\"OK\")"
+  tags: [spec, implemented]
+- label: agent-store labels --count shows count next to each label
+  command: export AGENT_STORE_PATH=$(mktemp -d) && agent-store init >/dev/null 2>&1 && echo "a" | agent-store push --label todo -q && echo "b" | agent-store push --label todo -q && echo "c" | agent-store push --label done -q && agent-store labels --count | grep -q "todo (2)" && agent-store labels --count | grep -q "done (1)"
+  tags: [spec, implemented]
+
+# cli > types
+- label: agent-store types lists all unique entity types in the store, one per line, sorted alphabetically
+  command: export AGENT_STORE_PATH=$(mktemp -d) && agent-store init >/dev/null 2>&1 && echo "a" | agent-store push --type note -q && echo "b" | agent-store push --type task -q && echo "c" | agent-store push --type config -q && RESULT=$(agent-store types) && FIRST=$(echo "$RESULT" | head -1) && LAST=$(echo "$RESULT" | tail -1) && test "$FIRST" = "config" && test "$LAST" = "task"
+  tags: [spec, implemented]
+- label: agent-store types --json outputs unique entity types as a sorted JSON array
+  command: export AGENT_STORE_PATH=$(mktemp -d) && agent-store init >/dev/null 2>&1 && echo "a" | agent-store push --type note -q && echo "b" | agent-store push --type task -q && agent-store types --json | python3 -c "import sys,json; d=json.load(sys.stdin); assert d==[\"note\",\"task\"]; print(\"OK\")"
+  tags: [spec, implemented]
+- label: agent-store types --count shows count next to each entity type
+  command: export AGENT_STORE_PATH=$(mktemp -d) && agent-store init >/dev/null 2>&1 && echo "a" | agent-store push --type note -q && echo "b" | agent-store push --type note -q && echo "c" | agent-store push --type task -q && agent-store types --count | grep -q "note (2)" && agent-store types --count | grep -q "task (1)"
+  tags: [spec, implemented]

@@ -184,6 +184,24 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// List all unique labels in the store
+    Labels {
+        /// Output as JSON array
+        #[arg(long)]
+        json: bool,
+        /// Show count next to each label
+        #[arg(long)]
+        count: bool,
+    },
+    /// List all unique entity types in the store
+    Types {
+        /// Output as JSON array
+        #[arg(long)]
+        json: bool,
+        /// Show count next to each type
+        #[arg(long)]
+        count: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1914,6 +1932,159 @@ fn info(json: bool) {
     }
 }
 
+fn labels_cmd(json: bool, count: bool) {
+    let conn = open_db();
+
+    if count {
+        // Labels with counts
+        let mut stmt = match conn
+            .prepare("SELECT label, COUNT(*) FROM labels GROUP BY label ORDER BY label")
+        {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("error: failed to query labels: {e}");
+                process::exit(1);
+            }
+        };
+
+        let rows: Vec<(String, i64)> =
+            match stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?))) {
+                Ok(r) => r.filter_map(|r| r.ok()).collect(),
+                Err(e) => {
+                    eprintln!("error: failed to query labels: {e}");
+                    process::exit(1);
+                }
+            };
+
+        if json {
+            // JSON object: {"label": count, ...}
+            let map: serde_json::Map<String, serde_json::Value> = rows
+                .into_iter()
+                .map(|(l, c)| (l, serde_json::Value::Number(c.into())))
+                .collect();
+            match serde_json::to_string(&map) {
+                Ok(s) => println!("{s}"),
+                Err(e) => {
+                    eprintln!("error: failed to serialize JSON: {e}");
+                    process::exit(1);
+                }
+            }
+        } else {
+            for (label, c) in &rows {
+                println!("{label} ({c})");
+            }
+        }
+    } else {
+        // Just unique labels, sorted
+        let mut stmt = match conn.prepare("SELECT DISTINCT label FROM labels ORDER BY label") {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("error: failed to query labels: {e}");
+                process::exit(1);
+            }
+        };
+
+        let rows: Vec<String> = match stmt.query_map([], |row| row.get::<_, String>(0)) {
+            Ok(r) => r.filter_map(|r| r.ok()).collect(),
+            Err(e) => {
+                eprintln!("error: failed to query labels: {e}");
+                process::exit(1);
+            }
+        };
+
+        if json {
+            match serde_json::to_string(&rows) {
+                Ok(s) => println!("{s}"),
+                Err(e) => {
+                    eprintln!("error: failed to serialize JSON: {e}");
+                    process::exit(1);
+                }
+            }
+        } else {
+            for label in &rows {
+                println!("{label}");
+            }
+        }
+    }
+}
+
+fn types_cmd(json: bool, count: bool) {
+    let conn = open_db();
+
+    if count {
+        // Types with counts
+        let mut stmt = match conn.prepare(
+            "SELECT entity_type, COUNT(*) FROM entries WHERE entity_type IS NOT NULL GROUP BY entity_type ORDER BY entity_type",
+        ) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("error: failed to query entity types: {e}");
+                process::exit(1);
+            }
+        };
+
+        let rows: Vec<(String, i64)> =
+            match stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?))) {
+                Ok(r) => r.filter_map(|r| r.ok()).collect(),
+                Err(e) => {
+                    eprintln!("error: failed to query entity types: {e}");
+                    process::exit(1);
+                }
+            };
+
+        if json {
+            let map: serde_json::Map<String, serde_json::Value> = rows
+                .into_iter()
+                .map(|(t, c)| (t, serde_json::Value::Number(c.into())))
+                .collect();
+            match serde_json::to_string(&map) {
+                Ok(s) => println!("{s}"),
+                Err(e) => {
+                    eprintln!("error: failed to serialize JSON: {e}");
+                    process::exit(1);
+                }
+            }
+        } else {
+            for (etype, c) in &rows {
+                println!("{etype} ({c})");
+            }
+        }
+    } else {
+        // Just unique types, sorted
+        let mut stmt = match conn.prepare(
+            "SELECT DISTINCT entity_type FROM entries WHERE entity_type IS NOT NULL ORDER BY entity_type",
+        ) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("error: failed to query entity types: {e}");
+                process::exit(1);
+            }
+        };
+
+        let rows: Vec<String> = match stmt.query_map([], |row| row.get::<_, String>(0)) {
+            Ok(r) => r.filter_map(|r| r.ok()).collect(),
+            Err(e) => {
+                eprintln!("error: failed to query entity types: {e}");
+                process::exit(1);
+            }
+        };
+
+        if json {
+            match serde_json::to_string(&rows) {
+                Ok(s) => println!("{s}"),
+                Err(e) => {
+                    eprintln!("error: failed to serialize JSON: {e}");
+                    process::exit(1);
+                }
+            }
+        } else {
+            for etype in &rows {
+                println!("{etype}");
+            }
+        }
+    }
+}
+
 fn main() {
     // Reset SIGPIPE to default so piping to head/tail/etc. exits cleanly
     // instead of panicking with "Broken pipe".
@@ -1973,6 +2144,8 @@ fn main() {
             SkillsAction::Path { name } => skills_path(&name),
         },
         Command::Info { json } => info(json),
+        Command::Labels { json, count } => labels_cmd(json, count),
+        Command::Types { json, count } => types_cmd(json, count),
         Command::Completions { shell } => {
             let mut cmd = Cli::command();
             clap_complete::generate(shell, &mut cmd, "agent-store", &mut std::io::stdout());

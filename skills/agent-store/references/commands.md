@@ -267,6 +267,57 @@ agent-store info
 agent-store info --json | jq .version
 ```
 
+## agent-store labels
+
+List all unique labels in the store, one per line, sorted alphabetically.
+Useful for discovery — agents can see what labels exist without querying
+all entries.
+
+```
+agent-store labels [--json] [--count]
+```
+
+Options:
+- `--json` — Output as a JSON array of label strings (or JSON object of label-to-count when combined with `--count`)
+- `--count` — Show entry count next to each label
+
+```bash
+# Plain list (one per line, sorted)
+agent-store labels
+
+# JSON array
+agent-store labels --json              # ["done","todo","urgent"]
+
+# With counts
+agent-store labels --count             # done (1)\n todo (5)\n urgent (2)
+agent-store labels --count --json      # {"done":1,"todo":5,"urgent":2}
+```
+
+## agent-store types
+
+List all unique entity types in the store, one per line, sorted alphabetically.
+Same pattern as `labels` but for entity types.
+
+```
+agent-store types [--json] [--count]
+```
+
+Options:
+- `--json` — Output as a JSON array of type strings (or JSON object of type-to-count when combined with `--count`)
+- `--count` — Show entry count next to each type
+
+```bash
+# Plain list (one per line, sorted)
+agent-store types
+
+# JSON array
+agent-store types --json               # ["config","note","task"]
+
+# With counts
+agent-store types --count              # config (1)\n note (3)\n task (2)
+agent-store types --count --json       # {"config":1,"note":3,"task":2}
+```
+
 ## agent-store completions
 
 Generate shell completion scripts.
