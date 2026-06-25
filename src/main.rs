@@ -240,6 +240,35 @@ enum Command {
         #[arg(long)]
         data: Option<String>,
     },
+    /// Save, run, list, and remove named query aliases
+    Alias {
+        #[command(subcommand)]
+        action: AliasCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum AliasCommand {
+    /// Save a query as a named alias (everything after -- is captured)
+    Set {
+        /// Alias name
+        name: String,
+        /// Query arguments (put after --)
+        #[arg(last = true)]
+        args: Vec<String>,
+    },
+    /// Execute a saved query alias
+    Run {
+        /// Alias name to execute
+        name: String,
+    },
+    /// List all saved aliases
+    List,
+    /// Remove a saved alias
+    Rm {
+        /// Alias name to remove
+        name: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -620,6 +649,16 @@ fn open_db() -> Connection {
         eprintln!("error: failed to set database pragmas: {e}");
         process::exit(1);
     }
+    // Migrate: ensure aliases table exists (for stores created before alias support)
+    if let Err(e) = conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS aliases (
+            name TEXT PRIMARY KEY,
+            args TEXT NOT NULL
+        );",
+    ) {
+        eprintln!("error: failed to ensure aliases table: {e}");
+        process::exit(1);
+    }
     conn
 }
 
@@ -718,6 +757,11 @@ fn init() {
             key TEXT NOT NULL,
             value TEXT NOT NULL,
             PRIMARY KEY (entry_id, key)
+        );
+
+        CREATE TABLE IF NOT EXISTS aliases (
+            name TEXT PRIMARY KEY,
+            args TEXT NOT NULL
         );
 
         CREATE INDEX IF NOT EXISTS idx_labels_label ON labels(label);
@@ -2421,6 +2465,147 @@ fn history(label: &str, json: bool, limit: Option<u64>, data_filter: Option<Stri
     }
 }
 
+fn alias_set(name: &str, args: Vec<String>) {
+    let conn = open_db();
+    let args_json = serde_json::to_string(&args).unwrap_or_else(|e| {
+        eprintln!("error: failed to serialize args: {e}");
+        process::exit(1);
+    });
+    if let Err(e) = conn.execute(
+        "INSERT OR REPLACE INTO aliases (name, args) VALUES (?1, ?2)",
+        rusqlite::params![name, args_json],
+    ) {
+        eprintln!("error: failed to save alias: {e}");
+        process::exit(1);
+    }
+    eprintln!("Alias '{}' saved", name);
+}
+
+fn alias_run(name: &str) {
+    let conn = open_db();
+    let args_json: String = match conn.query_row(
+        "SELECT args FROM aliases WHERE name = ?1",
+        rusqlite::params![name],
+        |row| row.get(0),
+    ) {
+        Ok(a) => a,
+        Err(rusqlite::Error::QueryReturnedNoRows) => {
+            eprintln!("error: alias '{}' not found", name);
+            process::exit(1);
+        }
+        Err(e) => {
+            eprintln!("error: failed to look up alias: {e}");
+            process::exit(1);
+        }
+    };
+    // We need to drop the connection before re-opening in the query path
+    drop(conn);
+
+    let stored_args: Vec<String> = match serde_json::from_str(&args_json) {
+        Ok(a) => a,
+        Err(e) => {
+            eprintln!("error: failed to parse stored alias args: {e}");
+            process::exit(1);
+        }
+    };
+
+    // Build a synthetic CLI invocation: "agent-store query <stored_args...>"
+    let full_args = std::iter::once("agent-store".to_string())
+        .chain(std::iter::once("query".to_string()))
+        .chain(stored_args.into_iter());
+
+    let cli = match Cli::try_parse_from(full_args) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("error: invalid stored query args: {e}");
+            process::exit(1);
+        }
+    };
+
+    // Extract the Query command and execute it
+    match cli.command {
+        Command::Query {
+            id,
+            label,
+            not_label,
+            entity_type,
+            not_type,
+            attr,
+            not_attr,
+            json,
+            count,
+            latest,
+            limit,
+            offset,
+            reverse,
+            data,
+            after,
+            before,
+        } => query(
+            label, not_label, entity_type, not_type, attr, not_attr, json, count, latest, limit,
+            offset, reverse, data, after, before, id,
+        ),
+        _ => {
+            eprintln!("error: stored alias did not parse as a query command");
+            process::exit(1);
+        }
+    }
+}
+
+fn alias_list() {
+    let conn = open_db();
+    let mut stmt = match conn.prepare("SELECT name, args FROM aliases ORDER BY name") {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("error: failed to list aliases: {e}");
+            process::exit(1);
+        }
+    };
+    let rows = match stmt.query_map([], |row| {
+        let name: String = row.get(0)?;
+        let args_json: String = row.get(1)?;
+        Ok((name, args_json))
+    }) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("error: failed to query aliases: {e}");
+            process::exit(1);
+        }
+    };
+    for row in rows {
+        match row {
+            Ok((name, args_json)) => {
+                let args: Vec<String> =
+                    serde_json::from_str(&args_json).unwrap_or_else(|_| vec![args_json.clone()]);
+                println!("{}\t{}", name, args.join(" "));
+            }
+            Err(e) => {
+                eprintln!("error: failed to read alias row: {e}");
+                process::exit(1);
+            }
+        }
+    }
+}
+
+fn alias_rm(name: &str) {
+    let conn = open_db();
+    let rows_affected = match conn.execute(
+        "DELETE FROM aliases WHERE name = ?1",
+        rusqlite::params![name],
+    ) {
+        Ok(n) => n,
+        Err(e) => {
+            eprintln!("error: failed to remove alias: {e}");
+            process::exit(1);
+        }
+    };
+    if rows_affected == 0 {
+        eprintln!("error: alias '{}' not found", name);
+        process::exit(1);
+    }
+    eprintln!("Alias '{}' removed", name);
+}
+
 fn main() {
     // Reset SIGPIPE to default so piping to head/tail/etc. exits cleanly
     // instead of panicking with "Broken pipe".
@@ -2526,5 +2711,11 @@ fn main() {
             let mut cmd = Cli::command();
             clap_complete::generate(shell, &mut cmd, "agent-store", &mut std::io::stdout());
         }
+        Command::Alias { action } => match action {
+            AliasCommand::Set { name, args } => alias_set(&name, args),
+            AliasCommand::Run { name } => alias_run(&name),
+            AliasCommand::List => alias_list(),
+            AliasCommand::Rm { name } => alias_rm(&name),
+        },
     }
 }
