@@ -552,6 +552,23 @@ enum Command {
         #[arg(long)]
         since: Option<String>,
     },
+    /// Show audit trail of mutations (tag, untag, set-attr, unset-attr, delete, update)
+    Log {
+        /// entry ID or prefix (show changelog for this entry only)
+        id: Option<String>,
+        /// include only changelog entries after this timestamp (ISO 8601)
+        #[arg(long)]
+        since: Option<String>,
+        /// maximum number of changelog entries to show
+        #[arg(long, default_value = "50")]
+        limit: u64,
+        /// output as JSON array
+        #[arg(long)]
+        json: bool,
+        /// filter to entries that have this label (repeatable, AND logic)
+        #[arg(long)]
+        label: Vec<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -986,6 +1003,22 @@ fn open_db() -> Connection {
         eprintln!("error: failed to ensure links table: {e}");
         process::exit(1);
     }
+    if let Err(e) = conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS changelog (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            entry_id TEXT NOT NULL,
+            timestamp TEXT NOT NULL,
+            operation TEXT NOT NULL,
+            key TEXT,
+            old_value TEXT,
+            new_value TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_changelog_entry ON changelog(entry_id);
+        CREATE INDEX IF NOT EXISTS idx_changelog_timestamp ON changelog(timestamp);",
+    ) {
+        eprintln!("error: failed to ensure changelog table: {e}");
+        process::exit(1);
+    }
     conn
 }
 
@@ -1022,6 +1055,7 @@ fn ensure_fts_table(conn: &Connection) {
 
 /// Delete a single entry and its associated FTS, attributes, labels, and links in FK-safe order.
 fn delete_entry(conn: &Connection, entry_id: &str) {
+    log_change(conn, entry_id, "delete", None, None, None);
     if let Err(e) = conn.execute(
         "DELETE FROM entries_fts WHERE id = ?1",
         rusqlite::params![entry_id],
@@ -1149,6 +1183,24 @@ fn delete_entries(conn: &Connection, ids: &[String]) {
         eprintln!("error: failed to commit transaction: {e}");
         process::exit(1);
     });
+}
+
+/// Record a changelog entry for a mutation operation.
+fn log_change(
+    conn: &Connection,
+    entry_id: &str,
+    operation: &str,
+    key: Option<&str>,
+    old_value: Option<&str>,
+    new_value: Option<&str>,
+) {
+    let ts = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();
+    if let Err(e) = conn.execute(
+        "INSERT INTO changelog (entry_id, timestamp, operation, key, old_value, new_value) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        rusqlite::params![entry_id, ts, operation, key, old_value, new_value],
+    ) {
+        eprintln!("warning: failed to log changelog entry: {e}");
+    }
 }
 
 /// Resolve an entry ID that may be a prefix.
@@ -1306,6 +1358,18 @@ fn init() {
         CREATE INDEX IF NOT EXISTS idx_attributes_key_value ON attributes(key, value);
         CREATE INDEX IF NOT EXISTS idx_links_from ON links(from_id);
         CREATE INDEX IF NOT EXISTS idx_links_to ON links(to_id);
+
+        CREATE TABLE IF NOT EXISTS changelog (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            entry_id TEXT NOT NULL,
+            timestamp TEXT NOT NULL,
+            operation TEXT NOT NULL,
+            key TEXT,
+            old_value TEXT,
+            new_value TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_changelog_entry ON changelog(entry_id);
+        CREATE INDEX IF NOT EXISTS idx_changelog_timestamp ON changelog(timestamp);
 
         CREATE VIRTUAL TABLE IF NOT EXISTS entries_fts USING fts5(id UNINDEXED, data);
     ";
@@ -1617,6 +1681,8 @@ fn push(
             eprintln!("error: failed to update FTS entry: {e}");
             process::exit(1);
         }
+
+        log_change(&conn, resolved_id, "update", Some("data"), None, None);
 
         if let Some(ref t) = entity_type
             && let Err(e) = conn.execute(
@@ -3726,7 +3792,10 @@ fn tag(id: &str, labels: Vec<String>, json: bool) {
             "INSERT OR IGNORE INTO labels (entry_id, label) VALUES (?1, ?2)",
             rusqlite::params![id, label],
         ) {
-            Ok(n) if n > 0 => added.push(label.clone()),
+            Ok(n) if n > 0 => {
+                log_change(&conn, &id, "tag", Some(label), None, Some(label));
+                added.push(label.clone());
+            }
             Ok(_) => {}
             Err(e) => {
                 eprintln!("error: failed to add label: {e}");
@@ -3761,7 +3830,10 @@ fn untag(id: &str, labels: Vec<String>, json: bool) {
             "DELETE FROM labels WHERE entry_id = ?1 AND label = ?2",
             rusqlite::params![id, label],
         ) {
-            Ok(n) if n > 0 => removed.push(label.clone()),
+            Ok(n) if n > 0 => {
+                log_change(&conn, &id, "untag", Some(label), Some(label), None);
+                removed.push(label.clone());
+            }
             Ok(_) => {}
             Err(e) => {
                 eprintln!("error: failed to remove label: {e}");
@@ -3791,11 +3863,28 @@ fn set_attr(id: &str, key: &str, value: &str, json: bool) {
     let conn = open_db();
     let id = resolve_entry_id(&conn, id);
 
+    let old_val: Option<String> = conn
+        .query_row(
+            "SELECT value FROM attributes WHERE entry_id = ?1 AND key = ?2",
+            rusqlite::params![id, key],
+            |row| row.get(0),
+        )
+        .ok();
+
     match conn.execute(
         "INSERT OR REPLACE INTO attributes (entry_id, key, value) VALUES (?1, ?2, ?3)",
         rusqlite::params![id, key, value],
     ) {
-        Ok(_) => {}
+        Ok(_) => {
+            log_change(
+                &conn,
+                &id,
+                "set-attr",
+                Some(key),
+                old_val.as_deref(),
+                Some(value),
+            );
+        }
         Err(e) => {
             eprintln!("error: failed to set attribute: {e}");
             process::exit(1);
@@ -3822,6 +3911,14 @@ fn unset_attr(id: &str, key: &str, json: bool) {
     let conn = open_db();
     let id = resolve_entry_id(&conn, id);
 
+    let old_val: Option<String> = conn
+        .query_row(
+            "SELECT value FROM attributes WHERE entry_id = ?1 AND key = ?2",
+            rusqlite::params![id, key],
+            |row| row.get(0),
+        )
+        .ok();
+
     let removed = match conn.execute(
         "DELETE FROM attributes WHERE entry_id = ?1 AND key = ?2",
         rusqlite::params![id, key],
@@ -3832,6 +3929,17 @@ fn unset_attr(id: &str, key: &str, json: bool) {
             process::exit(1);
         }
     };
+
+    if removed {
+        log_change(
+            &conn,
+            &id,
+            "unset-attr",
+            Some(key),
+            old_val.as_deref(),
+            None,
+        );
+    }
 
     if json {
         println!(
@@ -3868,7 +3976,10 @@ fn apply_mutations(
             "INSERT OR IGNORE INTO labels (entry_id, label) VALUES (?1, ?2)",
             rusqlite::params![entry_id, label],
         ) {
-            Ok(n) if n > 0 => tags_added += 1,
+            Ok(n) if n > 0 => {
+                log_change(conn, entry_id, "tag", Some(label), None, Some(label));
+                tags_added += 1;
+            }
             Ok(_) => {}
             Err(e) => {
                 eprintln!("error: failed to add label: {e}");
@@ -3882,7 +3993,10 @@ fn apply_mutations(
             "DELETE FROM labels WHERE entry_id = ?1 AND label = ?2",
             rusqlite::params![entry_id, label],
         ) {
-            Ok(n) if n > 0 => tags_removed += 1,
+            Ok(n) if n > 0 => {
+                log_change(conn, entry_id, "untag", Some(label), Some(label), None);
+                tags_removed += 1;
+            }
             Ok(_) => {}
             Err(e) => {
                 eprintln!("error: failed to remove label: {e}");
@@ -3892,11 +4006,28 @@ fn apply_mutations(
     }
 
     for (key, value) in sets {
+        let old_val: Option<String> = conn
+            .query_row(
+                "SELECT value FROM attributes WHERE entry_id = ?1 AND key = ?2",
+                rusqlite::params![entry_id, key],
+                |row| row.get(0),
+            )
+            .ok();
         match conn.execute(
             "INSERT OR REPLACE INTO attributes (entry_id, key, value) VALUES (?1, ?2, ?3)",
             rusqlite::params![entry_id, key, value],
         ) {
-            Ok(_) => attrs_set += 1,
+            Ok(_) => {
+                log_change(
+                    conn,
+                    entry_id,
+                    "set-attr",
+                    Some(key),
+                    old_val.as_deref(),
+                    Some(value),
+                );
+                attrs_set += 1;
+            }
             Err(e) => {
                 eprintln!("error: failed to set attribute: {e}");
                 process::exit(1);
@@ -3905,11 +4036,28 @@ fn apply_mutations(
     }
 
     for key in unsets {
+        let old_val: Option<String> = conn
+            .query_row(
+                "SELECT value FROM attributes WHERE entry_id = ?1 AND key = ?2",
+                rusqlite::params![entry_id, key],
+                |row| row.get(0),
+            )
+            .ok();
         match conn.execute(
             "DELETE FROM attributes WHERE entry_id = ?1 AND key = ?2",
             rusqlite::params![entry_id, key],
         ) {
-            Ok(n) if n > 0 => attrs_unset += 1,
+            Ok(n) if n > 0 => {
+                log_change(
+                    conn,
+                    entry_id,
+                    "unset-attr",
+                    Some(key),
+                    old_val.as_deref(),
+                    None,
+                );
+                attrs_unset += 1;
+            }
             Ok(_) => {}
             Err(e) => {
                 eprintln!("error: failed to remove attribute: {e}");
@@ -4329,6 +4477,161 @@ fn history(label: &str, json: bool, limit: Option<u64>, data_filter: Option<Stri
     }
 }
 
+fn log_cmd(
+    id: Option<String>,
+    since: Option<String>,
+    limit: u64,
+    json_output: bool,
+    labels: Vec<String>,
+) {
+    let conn = open_db();
+
+    let mut conditions: Vec<String> = Vec::new();
+    let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+    let mut joins = String::new();
+
+    if let Some(ref entry_id) = id {
+        // Try to resolve from entries table first; if the entry was deleted,
+        // fall back to prefix matching against the changelog table itself.
+        let resolved: String = conn
+            .query_row(
+                "SELECT id FROM entries WHERE id = ?1",
+                rusqlite::params![entry_id],
+                |row| row.get(0),
+            )
+            .or_else(|_| {
+                conn.query_row(
+                    "SELECT id FROM entries WHERE id LIKE ?1",
+                    rusqlite::params![format!("{entry_id}%")],
+                    |row| row.get(0),
+                )
+            })
+            .or_else(|_| {
+                // Entry may have been deleted — look in changelog
+                conn.query_row(
+                    "SELECT DISTINCT entry_id FROM changelog WHERE entry_id = ?1",
+                    rusqlite::params![entry_id],
+                    |row| row.get(0),
+                )
+            })
+            .or_else(|_| {
+                conn.query_row(
+                    "SELECT DISTINCT entry_id FROM changelog WHERE entry_id LIKE ?1",
+                    rusqlite::params![format!("{entry_id}%")],
+                    |row| row.get(0),
+                )
+            })
+            .unwrap_or_else(|_| {
+                eprintln!("error: no changelog entries found for: {entry_id}");
+                process::exit(1);
+            });
+        params.push(Box::new(resolved));
+        conditions.push(format!("c.entry_id = ?{}", params.len()));
+    }
+
+    if let Some(ref since_ts) = since {
+        params.push(Box::new(since_ts.clone()));
+        conditions.push(format!("c.timestamp > ?{}", params.len()));
+    }
+
+    if !labels.is_empty() {
+        joins.push_str(" JOIN labels l ON c.entry_id = l.entry_id");
+        for label in &labels {
+            params.push(Box::new(label.clone()));
+            conditions.push(format!("l.label = ?{}", params.len()));
+        }
+    }
+
+    let where_clause = if conditions.is_empty() {
+        String::new()
+    } else {
+        format!(" WHERE {}", conditions.join(" AND "))
+    };
+
+    let sql = format!(
+        "SELECT DISTINCT c.id, c.entry_id, c.timestamp, c.operation, c.key, c.old_value, c.new_value \
+         FROM changelog c{joins}{where_clause} ORDER BY c.timestamp DESC, c.id DESC LIMIT ?{}",
+        params.len() + 1
+    );
+    params.push(Box::new(limit as i64));
+
+    let mut stmt = match conn.prepare(&sql) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("error: failed to prepare log query: {e}");
+            process::exit(1);
+        }
+    };
+
+    let params_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+
+    let rows: Vec<(
+        i64,
+        String,
+        String,
+        String,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    )> = match stmt.query_map(params_refs.as_slice(), |row| {
+        Ok((
+            row.get::<_, i64>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, String>(3)?,
+            row.get::<_, Option<String>>(4)?,
+            row.get::<_, Option<String>>(5)?,
+            row.get::<_, Option<String>>(6)?,
+        ))
+    }) {
+        Ok(rs) => rs.filter_map(|r| r.ok()).collect(),
+        Err(e) => {
+            eprintln!("error: failed to query changelog: {e}");
+            process::exit(1);
+        }
+    };
+
+    if json_output {
+        let entries: Vec<serde_json::Value> = rows
+            .iter()
+            .map(|(_rowid, entry_id, ts, op, key, old, new)| {
+                let mut obj = serde_json::json!({
+                    "entry_id": entry_id,
+                    "timestamp": ts,
+                    "operation": op,
+                });
+                if let Some(k) = key {
+                    obj["key"] = serde_json::json!(k);
+                }
+                if let Some(o) = old {
+                    obj["old_value"] = serde_json::json!(o);
+                }
+                if let Some(n) = new {
+                    obj["new_value"] = serde_json::json!(n);
+                }
+                obj
+            })
+            .collect();
+        println!("{}", serde_json::json!(entries));
+    } else {
+        for (_rowid, entry_id, ts, op, key, old, new) in &rows {
+            let short_id = &entry_id[..7.min(entry_id.len())];
+            let key_str = key.as_deref().unwrap_or("");
+            let change = match (old.as_deref(), new.as_deref()) {
+                (Some(o), Some(n)) => format!("{o} -> {n}"),
+                (Some(o), None) => format!("{o} -> (none)"),
+                (None, Some(n)) => format!("(none) -> {n}"),
+                (None, None) => String::new(),
+            };
+            if change.is_empty() {
+                println!("[{ts}] {op} {short_id} {key_str}");
+            } else {
+                println!("[{ts}] {op} {short_id} {key_str} {change}");
+            }
+        }
+    }
+}
+
 fn gc(dry_run: bool, json: bool, ttl: Option<String>) {
     let conn = open_db();
 
@@ -4394,11 +4697,41 @@ fn gc(dry_run: bool, json: bool, ttl: Option<String>) {
 
     delete_entries(&conn, &ids);
 
+    // Clean up old changelog entries (default: 30 days, or use --ttl if provided)
+    let changelog_cutoff_secs: u64 = if let Some(ref ttl_str) = ttl {
+        parse_ttl(ttl_str).unwrap_or(30 * 24 * 3600)
+    } else {
+        30 * 24 * 3600 // 30 days default
+    };
+    let cl_cutoff = chrono::Utc::now() - chrono::Duration::seconds(changelog_cutoff_secs as i64);
+    let cl_cutoff_str = cl_cutoff.format("%Y-%m-%d %H:%M:%S").to_string();
+    let changelog_cleaned: usize = match conn.execute(
+        "DELETE FROM changelog WHERE timestamp < ?1",
+        rusqlite::params![cl_cutoff_str],
+    ) {
+        Ok(n) => n,
+        Err(e) => {
+            eprintln!("warning: failed to clean changelog: {e}");
+            0
+        }
+    };
+
     if json {
-        println!("{}", serde_json::json!({"collected": count, "ids": ids}));
+        println!(
+            "{}",
+            serde_json::json!({"collected": count, "ids": ids, "changelog_cleaned": changelog_cleaned})
+        );
     } else {
         let word = if count == 1 { "entry" } else { "entries" };
         println!("Collected {count} expired {word}");
+        if changelog_cleaned > 0 {
+            let cl_word = if changelog_cleaned == 1 {
+                "entry"
+            } else {
+                "entries"
+            };
+            println!("Cleaned {changelog_cleaned} old changelog {cl_word}");
+        }
     }
 }
 
@@ -5109,6 +5442,13 @@ fn main() {
             data,
         } => history(&label, json, limit, data),
         Command::Gc { dry_run, json, ttl } => gc(dry_run, json, ttl),
+        Command::Log {
+            id,
+            since,
+            limit,
+            json,
+            label,
+        } => log_cmd(id, since, limit, json, label),
         Command::Compact { json } => compact(json),
         Command::Completions { shell } => {
             let mut cmd = Cli::command();

@@ -814,6 +814,43 @@ agent-store gc --ttl 24h --dry-run
 agent-store gc --ttl 30m --json
 ```
 
+## agent-store log
+
+Show audit trail of mutations (tag, untag, set-attr, unset-attr, delete, update).
+All mutation commands automatically record changelog entries.
+
+```
+agent-store log [ID] [--since <ISO_TIMESTAMP>] [--limit N] [--label <LABEL>] [--json]
+```
+
+Options:
+- `ID` — Optional. Show changelog for this specific entry only (supports prefix matching). If omitted, shows recent changes across all entries
+- `--since <ISO_TIMESTAMP>` — Show only changelog entries after this timestamp (ISO 8601 format)
+- `--limit N` — Maximum number of changelog entries to show (default: 50)
+- `--label <LABEL>` — Filter to entries that have this label (repeatable, AND logic)
+- `--json` — Output as JSON array of objects with fields: `entry_id`, `timestamp`, `operation`, `key`, `old_value`, `new_value`
+
+Plain text output format: `[timestamp] operation entry_id_prefix key old -> new`
+
+The `gc` command automatically cleans changelog entries older than 30 days (or uses `--ttl` if provided).
+
+```bash
+# Show all recent changes
+agent-store log
+
+# Show changelog for a specific entry
+agent-store log abc1234
+
+# Show changes since a timestamp
+agent-store log --since "2026-06-25 00:00:00"
+
+# JSON output, limited to 10 entries
+agent-store log --limit 10 --json
+
+# Filter to entries with a specific label
+agent-store log --label task
+```
+
 ## agent-store compact
 
 Optimize the store by running SQLite VACUUM and PRAGMA optimize.
