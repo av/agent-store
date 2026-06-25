@@ -148,6 +148,10 @@ agent-store query --type decision --label constraint
 and *alternatives considered*, not just the choice. "Chose X" is less
 useful than "Chose X over Y because Z."
 
+**Tip:** For automatic tracking of metadata changes (tag/untag/set-attr/etc),
+use the built-in changelog — `agent-store log` shows all mutations without
+manual logging. The decision log pattern is for higher-level *why* records.
+
 ## Session state
 
 **When:** You need to persist what was done and where you left off so a

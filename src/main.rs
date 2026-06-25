@@ -3871,34 +3871,42 @@ fn set_attr(id: &str, key: &str, value: &str, json: bool) {
         )
         .ok();
 
-    match conn.execute(
-        "INSERT OR REPLACE INTO attributes (entry_id, key, value) VALUES (?1, ?2, ?3)",
-        rusqlite::params![id, key, value],
-    ) {
-        Ok(_) => {
-            log_change(
-                &conn,
-                &id,
-                "set-attr",
-                Some(key),
-                old_val.as_deref(),
-                Some(value),
-            );
-        }
-        Err(e) => {
-            eprintln!("error: failed to set attribute: {e}");
-            process::exit(1);
+    // Skip if the value is already set to the same thing (idempotent)
+    let changed = old_val.as_deref() != Some(value);
+    if changed {
+        match conn.execute(
+            "INSERT OR REPLACE INTO attributes (entry_id, key, value) VALUES (?1, ?2, ?3)",
+            rusqlite::params![id, key, value],
+        ) {
+            Ok(_) => {
+                log_change(
+                    &conn,
+                    &id,
+                    "set-attr",
+                    Some(key),
+                    old_val.as_deref(),
+                    Some(value),
+                );
+            }
+            Err(e) => {
+                eprintln!("error: failed to set attribute: {e}");
+                process::exit(1);
+            }
         }
     }
 
     if json {
         println!(
             "{}",
-            serde_json::json!({"id": id, "key": key, "value": value})
+            serde_json::json!({"id": id, "key": key, "value": value, "changed": changed})
         );
     } else {
         let short_id = &id[..7.min(id.len())];
-        eprintln!("Set {key}={value} on {short_id}");
+        if changed {
+            eprintln!("Set {key}={value} on {short_id}");
+        } else {
+            eprintln!("{key}={value} already set on {short_id} (no-op)");
+        }
     }
 }
 
@@ -4013,6 +4021,10 @@ fn apply_mutations(
                 |row| row.get(0),
             )
             .ok();
+        // Skip if the value is already set to the same thing (idempotent)
+        if old_val.as_deref() == Some(value) {
+            continue;
+        }
         match conn.execute(
             "INSERT OR REPLACE INTO attributes (entry_id, key, value) VALUES (?1, ?2, ?3)",
             rusqlite::params![entry_id, key, value],
