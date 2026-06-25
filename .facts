@@ -359,6 +359,17 @@
 - label: agent-store push --ttl rejects invalid duration format
   command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && echo data | \$AS push --ttl invalid 2>&1 | grep -qi 'invalid\\|error' && rm -rf \"\$TESTDIR\""
 
+## cli/alias @spec
+
+- label: alias set saves a named query and alias run executes it
+  command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=/home/everlier/code/agent-store/target/debug/agent-store && \$AS init >/dev/null 2>&1 && echo urgent-data | \$AS push --label urgent --type task -q && \$AS alias set myq -- --label urgent --type task && RESULT=\$(\$AS alias run myq) && rm -rf \"\$TESTDIR\" && test \"\$RESULT\" = 'urgent-data'"
+- label: alias list shows saved aliases with name and args
+  command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=/home/everlier/code/agent-store/target/debug/agent-store && \$AS init >/dev/null 2>&1 && \$AS alias set myq -- --label urgent && \$AS alias list | grep -q 'myq' && rm -rf \"\$TESTDIR\""
+- label: alias rm removes an alias and exits 1 if alias not found
+  command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=/home/everlier/code/agent-store/target/debug/agent-store && \$AS init >/dev/null 2>&1 && \$AS alias set myq -- --label urgent && \$AS alias rm myq 2>&1 | grep -q 'removed' && ! \$AS alias rm nonexistent 2>/dev/null && rm -rf \"\$TESTDIR\""
+- label: alias set overwrites an existing alias with the same name (upsert)
+  command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=/home/everlier/code/agent-store/target/debug/agent-store && \$AS init >/dev/null 2>&1 && \$AS alias set myq -- --label old && \$AS alias set myq -- --label new && \$AS alias list | grep -q 'new' && rm -rf \"\$TESTDIR\""
+
 ## conventions/supersede @spec
 
 - label: supersede convention is documented in the agent-store-patterns skill with examples for versioned config, chain traversal, cleanup, and iterative draft

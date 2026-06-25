@@ -180,9 +180,11 @@ echo "$RESPONSE" | agent-store push --type cache \
   --label api-response --attr endpoint="$ENDPOINT"
 ```
 
-**Gotcha:** There's no TTL or automatic eviction. Cache entries live
-forever. If your input changes frequently, query for stale entries
-periodically and note them for cleanup (see Data lifecycle).
+**Tip:** Use `--ttl` to set automatic expiry on cache entries so they
+don't accumulate indefinitely. Run `agent-store gc` to collect expired
+entries. For example: `echo "$RESULT" | agent-store push --type cache
+--label file-analysis --attr hash="$HASH" --ttl 24h`. See the TTL
+section in `agent-store skills get agent-store` for details.
 
 ## Knowledge base
 

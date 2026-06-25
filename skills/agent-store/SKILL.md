@@ -127,6 +127,7 @@ agent-store stats     # entry count and store size
 | `untag <id> <label>...` | Remove labels from an existing entry. Idempotent (missing labels are ignored). |
 | `gc` | Collect expired entries (those past their TTL). Flags: `--dry-run` |
 | `history <label>` | Show chronological history of entries with a given label (oldest first). Flags: `--json`, `--limit N`, `--data <substring>` |
+| `alias` | Named queries. Subcommands: `set <name> -- [query flags]` (save), `run <name>` (execute), `list` (show all), `rm <name>` (delete) |
 | `completions <shell>` | Generate shell completions (bash, zsh, fish, elvish, powershell) |
 
 ## Tagging
@@ -555,6 +556,32 @@ agent-store attrs --json
 agent-store attrs --count
 agent-store attrs --count --json
 ```
+
+## Named queries (aliases)
+
+Save frequently used query flag combinations as named aliases and replay
+them without remembering the full flag set. Aliases are stored in the
+SQLite database alongside entries.
+
+```bash
+# Save a query as an alias
+agent-store alias set urgent-tasks -- --label urgent --type task --attr status=pending
+
+# Run the saved query (equivalent to: agent-store query --label urgent --type task --attr status=pending)
+agent-store alias run urgent-tasks
+
+# List all saved aliases (name\targs per line)
+agent-store alias list
+
+# Overwrite an existing alias (upsert — INSERT OR REPLACE)
+agent-store alias set urgent-tasks -- --label urgent --type task
+
+# Remove an alias (exits 1 if not found)
+agent-store alias rm urgent-tasks
+```
+
+Aliases store the raw query flags as a JSON array. The `--` separator
+before the flags is required by the CLI parser.
 
 ## Shell completions
 

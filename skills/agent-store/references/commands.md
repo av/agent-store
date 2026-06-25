@@ -534,6 +534,78 @@ agent-store gc --dry-run
 # 3 expired entries would be collected
 ```
 
+## agent-store alias set
+
+Save a query as a named alias.
+
+```
+agent-store alias set <NAME> -- [QUERY FLAGS...]
+```
+
+Arguments:
+- `<NAME>` — Alias name. Must be unique; if an alias with this name exists, it is overwritten (INSERT OR REPLACE).
+- `[QUERY FLAGS...]` — The query flags to save. These are the same flags accepted by `query` (e.g., `--label`, `--type`, `--attr`, `--data`, `--search`, etc.). The `--` separator before the flags is required.
+
+Output: `Alias '<name>' saved` on stderr.
+
+```bash
+agent-store alias set urgent-tasks -- --label urgent --type task
+agent-store alias set recent-errors -- --label logs --data error --after "2024-01-01"
+```
+
+## agent-store alias run
+
+Execute a saved alias (runs the stored query flags).
+
+```
+agent-store alias run <NAME>
+```
+
+Arguments:
+- `<NAME>` — Name of an existing alias. Exits 1 if not found.
+
+Runs `query` with the stored flags. Output matches whatever the stored
+flags produce (raw data, JSON, count, etc.).
+
+```bash
+agent-store alias run urgent-tasks
+agent-store alias run recent-errors
+```
+
+## agent-store alias list
+
+List all saved aliases.
+
+```
+agent-store alias list
+```
+
+Output: one alias per line, tab-separated: `<name>\t<args>`.
+If no aliases exist, output is empty.
+
+```bash
+agent-store alias list
+# urgent-tasks	--label urgent --type task
+# recent-errors	--label logs --data error --after 2024-01-01
+```
+
+## agent-store alias rm
+
+Remove a saved alias.
+
+```
+agent-store alias rm <NAME>
+```
+
+Arguments:
+- `<NAME>` — Name of the alias to remove. Exits 1 with an error if the alias does not exist.
+
+Output: `Alias '<name>' removed` on stderr.
+
+```bash
+agent-store alias rm urgent-tasks
+```
+
 ## agent-store completions
 
 Generate shell completion scripts.
