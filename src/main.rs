@@ -70,6 +70,12 @@ enum Command {
         /// Set time-to-live for the entry (e.g. 30m, 24h, 7d, 3600s)
         #[arg(long)]
         ttl: Option<String>,
+        /// Output the stored/updated entry as JSON to stdout
+        #[arg(long)]
+        json: bool,
+        /// Update an existing entry's data in-place (by ID or prefix)
+        #[arg(long)]
+        update: Option<String>,
     },
     /// Pull an entry by ID and print to stdout
     Pull {
@@ -1063,6 +1069,8 @@ fn push(
     file: Option<String>,
     strip: bool,
     ttl: Option<String>,
+    json: bool,
+    update: Option<String>,
 ) {
     // Validate empty strings before any DB work
     for label in &labels {
@@ -1157,74 +1165,177 @@ fn push(
         process::exit(1);
     }
 
-    let id = Uuid::new_v4().to_string();
     let conn = open_db();
 
-    // Wrap entire push in a transaction for atomicity
-    if let Err(e) = conn.execute("BEGIN", []) {
-        eprintln!("error: failed to begin transaction: {e}");
-        process::exit(1);
-    }
+    let id = if let Some(ref update_id) = update {
+        let resolved_id = resolve_entry_id(&conn, update_id);
 
-    let insert_result = if let Some(ref ts) = timestamp {
-        conn.execute(
-            "INSERT INTO entries (id, data, entity_type, created_at) VALUES (?1, ?2, ?3, ?4)",
-            rusqlite::params![id, data, entity_type, ts],
-        )
+        if let Err(e) = conn.execute("BEGIN", []) {
+            eprintln!("error: failed to begin transaction: {e}");
+            process::exit(1);
+        }
+
+        if let Err(e) = conn.execute(
+            "UPDATE entries SET data = ?2 WHERE id = ?1",
+            rusqlite::params![resolved_id, data],
+        ) {
+            let _ = conn.execute("ROLLBACK", []);
+            eprintln!("error: failed to update entry: {e}");
+            process::exit(1);
+        }
+
+        // Update FTS index
+        let _ = conn.execute(
+            "DELETE FROM entries_fts WHERE id = ?1",
+            rusqlite::params![resolved_id],
+        );
+        if let Err(e) = conn.execute(
+            "INSERT INTO entries_fts(id, data) VALUES (?1, ?2)",
+            rusqlite::params![resolved_id, data],
+        ) {
+            let _ = conn.execute("ROLLBACK", []);
+            eprintln!("error: failed to update FTS entry: {e}");
+            process::exit(1);
+        }
+
+        if let Some(ref t) = entity_type {
+            if let Err(e) = conn.execute(
+                "UPDATE entries SET entity_type = ?2 WHERE id = ?1",
+                rusqlite::params![resolved_id, t],
+            ) {
+                let _ = conn.execute("ROLLBACK", []);
+                eprintln!("error: failed to update entity type: {e}");
+                process::exit(1);
+            }
+        }
+
+        for label in &labels {
+            if let Err(e) = conn.execute(
+                "INSERT OR IGNORE INTO labels (entry_id, label) VALUES (?1, ?2)",
+                rusqlite::params![resolved_id, label],
+            ) {
+                let _ = conn.execute("ROLLBACK", []);
+                eprintln!("error: failed to insert label: {e}");
+                process::exit(1);
+            }
+        }
+
+        for (key, value) in &parsed_attrs {
+            if let Err(e) = conn.execute(
+                "INSERT OR REPLACE INTO attributes (entry_id, key, value) VALUES (?1, ?2, ?3)",
+                rusqlite::params![resolved_id, key, value],
+            ) {
+                let _ = conn.execute("ROLLBACK", []);
+                eprintln!("error: failed to update attribute: {e}");
+                process::exit(1);
+            }
+        }
+
+        if let Err(e) = conn.execute("COMMIT", []) {
+            let _ = conn.execute("ROLLBACK", []);
+            eprintln!("error: failed to commit transaction: {e}");
+            process::exit(1);
+        }
+
+        resolved_id
     } else {
-        conn.execute(
-            "INSERT INTO entries (id, data, entity_type) VALUES (?1, ?2, ?3)",
-            rusqlite::params![id, data, entity_type],
-        )
+        let new_id = Uuid::new_v4().to_string();
+
+        if let Err(e) = conn.execute("BEGIN", []) {
+            eprintln!("error: failed to begin transaction: {e}");
+            process::exit(1);
+        }
+
+        let insert_result = if let Some(ref ts) = timestamp {
+            conn.execute(
+                "INSERT INTO entries (id, data, entity_type, created_at) VALUES (?1, ?2, ?3, ?4)",
+                rusqlite::params![new_id, data, entity_type, ts],
+            )
+        } else {
+            conn.execute(
+                "INSERT INTO entries (id, data, entity_type) VALUES (?1, ?2, ?3)",
+                rusqlite::params![new_id, data, entity_type],
+            )
+        };
+        if let Err(e) = insert_result {
+            let _ = conn.execute("ROLLBACK", []);
+            eprintln!("error: failed to insert entry: {e}");
+            process::exit(1);
+        }
+
+        if let Err(e) = conn.execute(
+            "INSERT INTO entries_fts(id, data) VALUES (?1, ?2)",
+            rusqlite::params![new_id, data],
+        ) {
+            let _ = conn.execute("ROLLBACK", []);
+            eprintln!("error: failed to insert FTS entry: {e}");
+            process::exit(1);
+        }
+
+        for label in &labels {
+            if let Err(e) = conn.execute(
+                "INSERT INTO labels (entry_id, label) VALUES (?1, ?2)",
+                rusqlite::params![new_id, label],
+            ) {
+                let _ = conn.execute("ROLLBACK", []);
+                eprintln!("error: failed to insert label: {e}");
+                process::exit(1);
+            }
+        }
+
+        for (key, value) in &parsed_attrs {
+            if let Err(e) = conn.execute(
+                "INSERT INTO attributes (entry_id, key, value) VALUES (?1, ?2, ?3)",
+                rusqlite::params![new_id, key, value],
+            ) {
+                let _ = conn.execute("ROLLBACK", []);
+                eprintln!("error: failed to insert attribute: {e}");
+                process::exit(1);
+            }
+        }
+
+        if let Err(e) = conn.execute("COMMIT", []) {
+            let _ = conn.execute("ROLLBACK", []);
+            eprintln!("error: failed to commit transaction: {e}");
+            process::exit(1);
+        }
+
+        new_id
     };
-    if let Err(e) = insert_result {
-        let _ = conn.execute("ROLLBACK", []);
-        eprintln!("error: failed to insert entry: {e}");
-        process::exit(1);
-    }
 
-    // Insert into FTS index
-    if let Err(e) = conn.execute(
-        "INSERT INTO entries_fts(id, data) VALUES (?1, ?2)",
-        rusqlite::params![id, data],
-    ) {
-        let _ = conn.execute("ROLLBACK", []);
-        eprintln!("error: failed to insert FTS entry: {e}");
-        process::exit(1);
-    }
-
-    for label in &labels {
-        if let Err(e) = conn.execute(
-            "INSERT INTO labels (entry_id, label) VALUES (?1, ?2)",
-            rusqlite::params![id, label],
-        ) {
-            let _ = conn.execute("ROLLBACK", []);
-            eprintln!("error: failed to insert label: {e}");
-            process::exit(1);
+    if json {
+        let mut obj = serde_json::Map::new();
+        obj.insert("id".to_string(), serde_json::Value::String(id));
+        if !labels.is_empty() {
+            obj.insert(
+                "labels".to_string(),
+                serde_json::Value::Array(
+                    labels
+                        .iter()
+                        .map(|l| serde_json::Value::String(l.clone()))
+                        .collect(),
+                ),
+            );
         }
-    }
-
-    for (key, value) in &parsed_attrs {
-        if let Err(e) = conn.execute(
-            "INSERT INTO attributes (entry_id, key, value) VALUES (?1, ?2, ?3)",
-            rusqlite::params![id, key, value],
-        ) {
-            let _ = conn.execute("ROLLBACK", []);
-            eprintln!("error: failed to insert attribute: {e}");
-            process::exit(1);
+        if let Some(ref t) = entity_type {
+            obj.insert("type".to_string(), serde_json::Value::String(t.clone()));
         }
-    }
-
-    if let Err(e) = conn.execute("COMMIT", []) {
-        let _ = conn.execute("ROLLBACK", []);
-        eprintln!("error: failed to commit transaction: {e}");
-        process::exit(1);
-    }
-
-    if id_only {
+        if !parsed_attrs.is_empty() {
+            let attrs_obj: serde_json::Map<String, serde_json::Value> = parsed_attrs
+                .iter()
+                .map(|(k, v)| (k.to_string(), serde_json::Value::String(v.to_string())))
+                .collect();
+            obj.insert(
+                "attributes".to_string(),
+                serde_json::Value::Object(attrs_obj),
+            );
+        }
+        println!("{}", serde_json::Value::Object(obj));
+    } else if id_only {
         print!("{id}");
     } else if !quiet {
-        println!("stored entry {id}");
+        let verb = if update.is_some() { "updated" } else { "stored" };
+        println!("{verb} entry {id}");
     }
 }
 
@@ -3298,6 +3409,8 @@ fn main() {
             file,
             strip,
             ttl,
+            json,
+            update,
         } => push(
             label,
             entity_type,
@@ -3308,6 +3421,8 @@ fn main() {
             file,
             strip,
             ttl,
+            json,
+            update,
         ),
         Command::Pull { id, json, raw } => pull(&id, json, raw),
         Command::Query {
