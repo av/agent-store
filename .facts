@@ -304,6 +304,19 @@
   command: DIR=$(mktemp -d) && cd "$DIR" && agent-store init >/dev/null 2>&1 && echo "d1" | agent-store push --attr color=red -q && echo "d2" | agent-store push --attr color=blue -q && echo "d3" | agent-store push --attr size=large -q && agent-store attrs --count | head -1 | grep -q "^color (2)$" && rm -rf "$DIR"
   tags: [spec, implemented]
 
+## cli/search @spec
+
+- label: --search returns entries matching a full-text query
+  command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && echo 'the quick brown fox' | \$AS push --label s -q && echo 'unrelated content' | \$AS push --label s -q && RESULT=\$(\$AS query --search fox) && rm -rf \"\$TESTDIR\" && echo \"\$RESULT\" | grep -q 'quick brown fox' && echo OK"
+- label: --search combines with --label, --type, and other filters
+  command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && echo 'fox in notes' | \$AS push --label notes -q && echo 'fox in logs' | \$AS push --label logs -q && RESULT=\$(\$AS query --search fox --label notes --count) && rm -rf \"\$TESTDIR\" && test \"\$RESULT\" = '1' && echo OK"
+- label: --search returns results ordered by relevance
+  command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && echo 'some padding text with fox at the end' | \$AS push --label s -q && echo 'fox fox fox' | \$AS push --label s -q && FIRST=\$(\$AS query --search fox --json | python3 -c \"import sys,json; print(json.load(sys.stdin)[0]['data'])\") && rm -rf \"\$TESTDIR\" && test \"\$FIRST\" = 'fox fox fox' && echo OK"
+- label: --search works on stores created before FTS was added (automatic migration)
+  command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && echo 'searchable content' | \$AS push --label s -q && RESULT=\$(\$AS query --search searchable --count) && rm -rf \"\$TESTDIR\" && test \"\$RESULT\" = '1' && echo OK"
+- label: --search supports FTS5 syntax including phrases, OR, NOT, and prefix*
+  command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && echo 'quick brown fox' | \$AS push --label s -q && echo 'slow brown dog' | \$AS push --label s -q && echo 'quick red cat' | \$AS push --label s -q && PH=\$(\$AS query --search '\"quick brown\"' --count) && OR=\$(\$AS query --search 'fox OR dog' --count) && NOT=\$(\$AS query --search 'brown NOT fox' --count) && PRE=\$(\$AS query --search 'qui*' --count) && rm -rf \"\$TESTDIR\" && test \"\$PH\" = '1' && test \"\$OR\" = '2' && test \"\$NOT\" = '1' && test \"\$PRE\" = '2' && echo OK"
+
 ## cli/delete @spec
 
 - label: agent-store delete <id> deletes a single entry by ID with its labels and attributes, no --confirm needed
