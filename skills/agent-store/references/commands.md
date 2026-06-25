@@ -228,6 +228,63 @@ cat data.jsonl | agent-store import --dry-run
 AGENT_STORE_PATH=./other agent-store export --label shared | agent-store import
 ```
 
+## agent-store delete
+
+Delete entries by ID or by filters.
+
+```
+agent-store delete [ID] [OPTIONS]
+```
+
+Arguments:
+- `[ID]` — Entry ID to delete. When provided, deletes a single entry without
+  requiring `--confirm`.
+
+Options:
+- `--confirm` — Required for filter-based deletes. Without it, prints how many
+  entries would be deleted and exits 1.
+- `--label <LABEL>` — Filter by label (can be repeated, AND logic)
+- `--not-label <LABEL>` — Exclude entries with this label (can be repeated)
+- `--type <TYPE>` — Filter by entity type
+- `--not-type <TYPE>` — Exclude entries with this entity type (can be repeated, NULL-safe)
+- `--attr <KEY=VALUE>` — Filter by attribute (can be repeated, AND logic)
+- `--not-attr <KEY=VALUE>` — Exclude entries with this attribute (can be repeated)
+- `--data <SUBSTRING>` — Filter by substring match in entry data
+- `--after <DATETIME>` — Only entries created after this timestamp (ISO 8601)
+- `--before <DATETIME>` — Only entries created before this timestamp (ISO 8601)
+
+All filter options match `query`/`export` — see those docs for semantics.
+
+**Delete by ID:**
+- Validates entry existence (exits 1 if not found)
+- Removes the entry plus its labels and attributes
+- No `--confirm` required
+- Output: `Deleted <short-id>` on stderr
+
+**Delete by filters:**
+- Without `--confirm`: prints `Would delete N entries. Run with --confirm to proceed.` on stderr, exits 1
+- With `--confirm`: deletes matching entries, prints `Deleted N entries` on stderr
+- No ID and no filters: prints `error: specify an ID or at least one filter`, exits 1
+
+Deletes in FK-safe order: attributes, labels, entries.
+
+```bash
+# Delete one entry by ID
+agent-store delete $ID
+
+# Preview filter-based delete
+agent-store delete --label stale
+# Would delete 5 entries. Run with --confirm to proceed.
+
+# Execute filter-based delete
+agent-store delete --label stale --confirm
+# Deleted 5 entries
+
+# Combined filters
+agent-store delete --type log --before "2024-01-01" --confirm
+agent-store delete --label todo --attr status=done --confirm
+```
+
 ## agent-store purge
 
 Delete ALL entries from the store. Destructive — requires explicit confirmation.

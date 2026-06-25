@@ -117,6 +117,7 @@ agent-store stats     # entry count and store size
 | `skills` | List and read built-in usage guides |
 | `export` | Export entries as JSONL (one JSON object per line). Filter: `--id`, `--label` (repeat), `--not-label` (repeat), `--type`, `--not-type` (repeat, exclude), `--attr key=value` (repeat), `--not-attr key=value` (repeat, exclude), `--data`, `--after`, `--before` |
 | `import` | Import entries from JSONL on stdin (complement of export). Generates fresh IDs, preserves timestamps. Flags: `--dry-run` |
+| `delete [id]` | Delete entries by ID or by filters. Filters: `--label`, `--not-label`, `--type`, `--not-type`, `--attr`, `--not-attr`, `--data`, `--after`, `--before`. Single-ID delete needs no confirmation; filter-based delete requires `--confirm` |
 | `purge` | Delete ALL entries (destructive). Requires `--confirm` flag. |
 | `labels` | List all unique labels in the store, sorted. Flags: `--json` (JSON array), `--count` (with counts) |
 | `types` | List all unique entity types in the store, sorted. Flags: `--json` (JSON array), `--count` (with counts) |
@@ -382,6 +383,38 @@ the current time is used.
 
 Output: `Imported N entries (M errors)` on stderr.
 With `--dry-run`: `Dry run: N entries would be imported (M errors)` on stderr. Nothing is inserted.
+
+## Delete
+
+Delete entries selectively — by ID or by filter. For bulk deletion of all
+entries, see `purge`.
+
+```bash
+# Delete a single entry by ID (no --confirm needed)
+agent-store delete $ID
+
+# Preview what a filter-based delete would do (prints count, exits 1)
+agent-store delete --label old-tag
+
+# Delete matching entries (requires --confirm)
+agent-store delete --label old-tag --confirm
+
+# Delete with combined filters
+agent-store delete --type log --before "2024-01-01" --confirm
+
+# All query filters are supported
+agent-store delete --label todo --not-label important --attr status=done --confirm
+```
+
+Single-ID delete validates that the entry exists (exits 1 if not found) and
+removes the entry plus its labels and attributes. No `--confirm` needed.
+
+Filter-based delete uses the same filter arguments as `query` and `export`.
+Without `--confirm`, it prints how many entries would be deleted and exits 1.
+With `--confirm`, it deletes and prints `Deleted N entries` on stderr.
+
+Calling `delete` with no ID and no filters prints an error (prevents
+accidental delete-all — use `purge` for that).
 
 ## Purge
 
