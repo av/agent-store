@@ -96,7 +96,9 @@ Options:
 - `--before <DATETIME>` — Only entries created before this timestamp (ISO 8601: `"2024-01-15"` or `"2024-01-15 10:30:00"`)
 - `--json` — Output as JSON array of full entry objects
 - `--count` — Output only the number of matching entries (just a number, for scripting)
-- `--latest` — Return only the single most recent matching entry (conflicts with `--limit`)
+- `--latest` — Return only the single most recent matching entry (conflicts with `--limit`, `--first`, `--last`)
+- `--first` — Return only the single oldest matching entry (sorts ASC, LIMIT 1). Conflicts with `--limit`, `--latest`, `--last`
+- `--last` — Return only the single newest matching entry (sorts DESC, LIMIT 1). Conflicts with `--limit`, `--latest`, `--first`
 - `--limit <N>` — Return at most N entries
 - `--offset <N>` — Skip first N entries (requires `--limit`)
 - `-r`, `--reverse` — Reverse sort order to oldest-first (default is newest-first)
@@ -106,6 +108,10 @@ Without any filter flags, returns all entries.
 `--latest` is the most common agent pattern: "give me the latest entry with this label."
 It conflicts with `--limit` (use one or the other). Combine with `--reverse` to get the
 oldest single entry instead.
+
+`--first` and `--last` are shorthand alternatives: `--first` returns the single oldest
+matching entry and `--last` returns the single newest. They conflict with `--limit`,
+`--latest`, and each other.
 
 `--count` respects `--limit`/`--offset` — it counts entries within the paginated window.
 When combined with `--latest`, `--count` returns 0 or 1.

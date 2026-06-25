@@ -316,6 +316,9 @@
   command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && \$AS delete 2>&1 | grep -q 'specify an ID or at least one filter' && rm -rf \"\$TESTDIR\""
 - label: agent-store delete exits 1 with error for nonexistent entry ID
   command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && \$AS delete fake-id 2>&1 | grep -q 'entry not found' && rm -rf \"\$TESTDIR\""
+- label: delete --dry-run lists matching entries with details without deleting, conflicts with --confirm, outputs JSON array with --json
+  command: bash -c "TESTDIR=$(mktemp -d) && export AGENT_STORE_PATH=\"$TESTDIR/.agent-store\" && AS=target/release/agent-store && $AS init >/dev/null 2>&1 && echo a | $AS push --label todo --type task -q && echo b | $AS push --label todo --type note -q && echo c | $AS push --label done -q && $AS delete --label todo --dry-run 2>&1 | grep -q todo && JSON=$($AS delete --label todo --dry-run --json) && python3 -c 'import sys,json; d=json.loads(sys.argv[1]); assert len(d)==2; assert all(\"id\" in e for e in d); print(\"OK\")' \"$JSON\" && test \"$($AS query --count)\" = '3' && rm -rf \"$TESTDIR\""
+  tags: [spec]
 
 ## cli/json-output @implemented
 
@@ -394,7 +397,7 @@
   command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && echo d | \$AS push -q && \$AS pull zzzzzzz 2>&1 | grep -q 'entry not found' && rm -rf \"\$TESTDIR\""
   tags: [implemented]
 
-## cli/query-shortcuts @spec
+## cli/query-shortcuts @implemented
 
 - label: query --first returns the single oldest matching entry
   command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && echo oldest | \$AS push --label qs-test --strip --timestamp '2024-01-01 10:00:00' -q && echo newest | \$AS push --label qs-test --strip --timestamp '2024-01-02 10:00:00' -q && RESULT=\$(\$AS query --label qs-test --first) && rm -rf \"\$TESTDIR\" && test \"\$RESULT\" = 'oldest'"
@@ -423,6 +426,7 @@
 - label: agent-store history --data <substring> filters history entries by substring match in data
   command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && echo apple | \$AS push --label hist-data --strip --timestamp \"2024-01-01 10:00:00\" -q && echo banana | \$AS push --label hist-data --strip --timestamp \"2024-01-01 11:00:00\" -q && OUT=\$(\$AS history hist-data --data banana) && rm -rf \"\$TESTDIR\" && echo \"\$OUT\" | grep -q banana && ! echo \"\$OUT\" | grep -q apple"
   tags: [spec, implemented]
+
 
 # resilience
 - PRAGMA foreign_keys = ON is set on every database connection so ON DELETE CASCADE is enforced @spec @implemented
