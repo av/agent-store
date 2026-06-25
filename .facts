@@ -304,6 +304,28 @@
   command: DIR=$(mktemp -d) && cd "$DIR" && agent-store init >/dev/null 2>&1 && echo "d1" | agent-store push --attr color=red -q && echo "d2" | agent-store push --attr color=blue -q && echo "d3" | agent-store push --attr size=large -q && agent-store attrs --count | head -1 | grep -q "^color (2)$" && rm -rf "$DIR"
   tags: [spec, implemented]
 
+## tag @spec
+
+- label: agent-store tag adds a label to an existing entry
+  command: cd /tmp/as-test-tag && rm -rf .agent-store && agent-store init && ID=$(echo "data" | agent-store push --id-only) && agent-store tag "$ID" urgent && agent-store query --label urgent --json | jq -r '.[0].data' | grep -q "data" && echo "OK"
+- label: agent-store tag is idempotent for duplicate labels
+  command: cd /tmp/as-test-tag && agent-store tag "$(agent-store query --latest --json | jq -r '.[0].id')" urgent urgent && echo "OK"
+- label: agent-store tag errors on unknown entry ID
+  command: cd /tmp/as-test-tag && agent-store tag nonexistent-id urgent 2>&1 | grep -q "not found" && echo "OK"
+- label: agent-store tag rejects empty labels
+  command: cd /tmp/as-test-tag && agent-store tag "$(agent-store query --latest --json | jq -r '.[0].id')" "" 2>&1 | grep -qi "empty" && echo "OK"
+- label: agent-store tag supports multiple labels in one call
+  command: cd /tmp/as-test-tag && ID=$(echo "multi" | agent-store push --id-only) && agent-store tag "$ID" alpha beta && agent-store pull "$ID" --json | jq -e '.labels | sort == ["alpha","beta"]' > /dev/null && echo "OK"
+
+## untag @spec
+
+- label: agent-store untag removes a label from an existing entry
+  command: cd /tmp/as-test-tag && ID=$(agent-store query --latest --json | jq -r '.[0].id') && agent-store untag "$ID" urgent && agent-store query --label urgent --count | grep -q "0" && echo "OK"
+- label: agent-store untag is idempotent for missing labels
+  command: cd /tmp/as-test-tag && agent-store untag "$(agent-store query --latest --json | jq -r '.[0].id')" nonexistent && echo "OK"
+- label: agent-store untag errors on unknown entry ID
+  command: cd /tmp/as-test-tag && agent-store untag nonexistent-id urgent 2>&1 | grep -q "not found" && echo "OK"
+
 ## history
 - label: agent-store history <LABEL> shows all entries with the given label in chronological order (oldest first) with timestamp and ID headers
   command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && echo v1 | \$AS push --label hist-test --strip --timestamp \"2024-01-01 10:00:00\" -q && echo v2 | \$AS push --label hist-test --strip --timestamp \"2024-01-01 11:00:00\" -q && OUT=\$(\$AS history hist-test) && rm -rf \"\$TESTDIR\" && echo \"\$OUT\" | head -1 | grep -q \"\\[2024-01-01 10:00:00\\]\" && echo \"\$OUT\" | grep -q v1 && echo \"\$OUT\" | grep -q v2"

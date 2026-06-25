@@ -349,6 +349,64 @@ agent-store attrs --count              # color (3)\n size (1)\n weight (2)
 agent-store attrs --count --json       # {"color":3,"size":1,"weight":2}
 ```
 
+## agent-store tag
+
+Add labels to an existing entry.
+
+```
+agent-store tag <ID> <LABEL>...
+```
+
+Arguments:
+- `<ID>` — Entry ID (or unambiguous prefix) to tag.
+- `<LABEL>...` — One or more labels to add. At least one required.
+
+Idempotent: adding a label that already exists on the entry is a no-op (uses
+`INSERT OR IGNORE` on the `(entry_id, label)` primary key). Empty labels are
+rejected with an error. Unknown entry IDs print "not found" and exit 1.
+
+Output: `Tagged <short-id> with: <labels>` on stderr.
+
+```bash
+# Tag a single label
+agent-store tag $ID urgent
+
+# Tag multiple labels at once
+agent-store tag $ID urgent review backend
+
+# Safe to repeat (idempotent)
+agent-store tag $ID urgent urgent    # no error, no duplicate
+```
+
+## agent-store untag
+
+Remove labels from an existing entry.
+
+```
+agent-store untag <ID> <LABEL>...
+```
+
+Arguments:
+- `<ID>` — Entry ID (or unambiguous prefix) to untag.
+- `<LABEL>...` — One or more labels to remove. At least one required.
+
+Idempotent: removing a label that doesn't exist on the entry is a no-op
+(the `DELETE` simply affects zero rows). Unknown entry IDs print "not found"
+and exit 1.
+
+Output: `Untagged <short-id>: <labels>` on stderr.
+
+```bash
+# Remove a label
+agent-store untag $ID urgent
+
+# Remove multiple labels at once
+agent-store untag $ID urgent review
+
+# Safe to repeat (idempotent)
+agent-store untag $ID nonexistent    # no error
+```
+
 ## agent-store history
 
 Show chronological history of entries with a given label. Since agent-store is append-only, pushing multiple entries with the same label tracks changes over time. The `history` subcommand makes this explicit with human-readable output.
