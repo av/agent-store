@@ -380,16 +380,19 @@
   command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=/home/everlier/code/agent-store/target/debug/agent-store && \$AS init >/dev/null 2>&1 && \$AS alias set myq -- --label old && \$AS alias set myq -- --label new && \$AS alias list | grep -q 'new' && rm -rf \"\$TESTDIR\""
 - label: alias run supports --mode for export and delete
   command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=/home/everlier/code/agent-store/target/debug/agent-store && \$AS init >/dev/null 2>&1 && echo data | \$AS push --label x -q && \$AS alias set myq -- --label x && \$AS alias run myq --mode export | jq -e '.data' >/dev/null && rm -rf \"\$TESTDIR\""
-  tags: [spec]
+  tags: [spec, implemented]
 
 ## cli/prefix-id @spec
 
 - label: pull with an unambiguous ID prefix resolves to the full entry
   command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && ID=\$(echo test-prefix | \$AS push --id-only --strip) && PREFIX=\"\${ID:0:7}\" && RESULT=\$(\$AS pull \"\$PREFIX\") && rm -rf \"\$TESTDIR\" && test \"\$RESULT\" = 'test-prefix'"
+  tags: [implemented]
 - label: ambiguous ID prefix prints error with match count and exits 1
   command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && for i in \$(seq 1 30); do echo d\$i | \$AS push -q; done && CHAR=\$(\$AS query --json | python3 -c \"import sys,json,collections; ids=[e['id'] for e in json.load(sys.stdin)]; c=collections.Counter(i[0] for i in ids); print(c.most_common(1)[0][0])\") && \$AS pull \"\$CHAR\" 2>&1 | grep -q 'ambiguous ID prefix' && rm -rf \"\$TESTDIR\""
+  tags: [implemented]
 - label: non-existent ID prefix prints not-found error and exits 1
   command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && echo d | \$AS push -q && \$AS pull zzzzzzz 2>&1 | grep -q 'entry not found' && rm -rf \"\$TESTDIR\""
+  tags: [implemented]
 
 ## conventions/supersede @implemented
 
@@ -462,10 +465,13 @@
 
 - label: push --json outputs structured JSON with id, labels, type, and attributes (only non-null fields)
   command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && OUT=\$(echo test | \$AS push --label tag1 --type note --attr k=v --json --strip) && echo \"\$OUT\" | python3 -c \"import sys,json; d=json.load(sys.stdin); assert 'id' in d; assert d['labels']==['tag1']; assert d['type']=='note'; assert d['attributes']=={'k':'v'}; print('OK')\" && rm -rf \"\$TESTDIR\""
+  tags: [implemented]
 
 # cli > push-update @spec
 
 - label: push --update replaces data in-place while preserving created_at
   command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && ID=\$(echo v1 | \$AS push --id-only --strip) && echo v2 | \$AS push --update \"\$ID\" -q && RESULT=\$(\$AS pull \"\$ID\" --raw) && rm -rf \"\$TESTDIR\" && test \"\$RESULT\" = 'v2'"
+  tags: [implemented]
 - label: push --update preserves existing labels and adds new ones
   command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && ID=\$(echo v1 | \$AS push --label old --id-only --strip) && echo v2 | \$AS push --update \"\$ID\" --label new -q && LABELS=\$(\$AS pull \"\$ID\" --json | python3 -c \"import sys,json; print(','.join(sorted(json.load(sys.stdin)['labels'])))\") && rm -rf \"\$TESTDIR\" && test \"\$LABELS\" = 'new,old'"
+  tags: [implemented]
