@@ -568,18 +568,27 @@ agent-store alias set recent-errors -- --label logs --data error --after "2024-0
 Execute a saved alias (runs the stored query flags).
 
 ```
-agent-store alias run <NAME>
+agent-store alias run <NAME> [--mode query|export|delete] [--confirm]
 ```
 
 Arguments:
 - `<NAME>` — Name of an existing alias. Exits 1 if not found.
 
-Runs `query` with the stored flags. Output matches whatever the stored
-flags produce (raw data, JSON, count, etc.).
+Options:
+- `--mode <MODE>` — Execution mode. Default: `query`.
+  - `query` — Run the stored flags as a `query` command (default behavior)
+  - `export` — Run the stored flags as an `export` command (JSONL output)
+  - `delete` — Run the stored flags as a `delete` command
+- `--confirm` — Required when using `--mode delete` to actually execute the deletion. Without it, prints how many entries would be deleted and exits 1.
+
+Runs the specified command with the stored flags. Output matches whatever
+the stored flags and mode produce.
 
 ```bash
 agent-store alias run urgent-tasks
-agent-store alias run recent-errors
+agent-store alias run urgent-tasks --mode export
+agent-store alias run urgent-tasks --mode delete
+agent-store alias run urgent-tasks --mode delete --confirm
 ```
 
 ## agent-store alias list

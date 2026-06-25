@@ -140,15 +140,15 @@ agent-store delete 7bf8d3f
 | `skills` | List and read built-in usage guides |
 | `export` | Export entries as JSONL (one JSON object per line). Filter: `--id`, `--label` (repeat), `--not-label` (repeat), `--type`, `--not-type` (repeat, exclude), `--attr key=value` (repeat), `--not-attr key=value` (repeat, exclude), `--data`, `--search <query>` (FTS5), `--after`, `--before` |
 | `import` | Import entries from JSONL on stdin (complement of export). Generates fresh IDs, preserves timestamps. Flags: `--dry-run` |
-| `delete [id]` | Delete entries by ID or by filters. Filters: `--label`, `--not-label`, `--type`, `--not-type`, `--attr`, `--not-attr`, `--data`, `--search` (FTS5), `--after`, `--before`. Single-ID delete needs no confirmation; filter-based delete requires `--confirm` |
+| `delete [id]` | Delete entries by ID or by filters. Filters: `--label`, `--not-label`, `--type`, `--not-type`, `--attr`, `--not-attr`, `--data`, `--search` (FTS5), `--after`, `--before`. Single-ID delete needs no confirmation; filter-based delete requires `--confirm`. Flags: `--json` |
 | `purge` | Delete ALL entries (destructive). Requires `--confirm` flag. |
 | `labels` | List all unique labels in the store, sorted. Flags: `--json` (JSON array), `--count` (with counts) |
 | `types` | List all unique entity types in the store, sorted. Flags: `--json` (JSON array), `--count` (with counts) |
 | `attrs` | List all unique attribute keys in the store, sorted. Flags: `--json` (JSON array), `--count` (with counts) |
 | `info` | Show store configuration and environment. Flags: `--json` |
-| `tag <id> <label>...` | Add labels to an existing entry. Idempotent (duplicate labels are ignored). |
-| `untag <id> <label>...` | Remove labels from an existing entry. Idempotent (missing labels are ignored). |
-| `gc` | Collect expired entries (those past their TTL). Flags: `--dry-run` |
+| `tag <id> <label>...` | Add labels to an existing entry. Idempotent (duplicate labels are ignored). Flags: `--json` |
+| `untag <id> <label>...` | Remove labels from an existing entry. Idempotent (missing labels are ignored). Flags: `--json` |
+| `gc` | Collect expired entries (those past their TTL). Flags: `--dry-run`, `--json` |
 | `history <label>` | Show chronological history of entries with a given label (oldest first). Flags: `--json`, `--limit N`, `--data <substring>` |
 | `alias` | Named queries. Subcommands: `set <name> -- [query flags]` (save), `run <name>` (execute), `list` (show all), `rm <name>` (delete) |
 | `completions <shell>` | Generate shell completions (bash, zsh, fish, elvish, powershell) |
@@ -172,6 +172,8 @@ agent-store untag $ID review backend  # multiple labels at once
 # Verify
 agent-store query --label backend --json | jq '.[].data'
 ```
+
+Both `tag` and `untag` accept `--json` for structured output (e.g., `{"id":"...","labels_added":["urgent"]}`).
 
 ## History
 
@@ -217,6 +219,7 @@ agent-store gc
 
 Supported duration units: `s` (seconds), `m` (minutes), `h` (hours), `d` (days).
 TTL is stored as a `_expires_at` attribute — entries without TTL never expire.
+Use `gc --json` for structured output: `{"collected":1,"ids":["..."]}` or `{"dry_run":true,"count":0}`.
 
 ## Pushing data
 
@@ -501,6 +504,8 @@ With `--confirm`, it deletes and prints `Deleted N entries` on stderr.
 
 Calling `delete` with no ID and no filters prints an error (prevents
 accidental delete-all — use `purge` for that).
+
+Use `--json` for structured output: `{"deleted":1,"ids":["..."]}` (confirmed) or `{"dry_run":true,"count":1}` (preview).
 
 ## Supersede convention
 

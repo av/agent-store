@@ -849,15 +849,14 @@ fn resolve_entry_id(conn: &Connection, id_input: &str) -> String {
         }
     };
 
-    let matches: Vec<String> = match stmt.query_map(rusqlite::params![id_input], |row| {
-        row.get::<_, String>(0)
-    }) {
-        Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
-        Err(e) => {
-            eprintln!("error: failed to query entries: {e}");
-            process::exit(1);
-        }
-    };
+    let matches: Vec<String> =
+        match stmt.query_map(rusqlite::params![id_input], |row| row.get::<_, String>(0)) {
+            Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
+            Err(e) => {
+                eprintln!("error: failed to query entries: {e}");
+                process::exit(1);
+            }
+        };
 
     match matches.len() {
         0 => {
@@ -2116,7 +2115,13 @@ fn import(dry_run: bool) {
     let stdin = io::stdin();
     let mut imported = 0u64;
     let mut errors = 0u64;
-    let mut parsed_entries: Vec<(String, Option<String>, Vec<String>, Vec<(String, String)>, Option<String>)> = Vec::new();
+    let mut parsed_entries: Vec<(
+        String,
+        Option<String>,
+        Vec<String>,
+        Vec<(String, String)>,
+        Option<String>,
+    )> = Vec::new();
 
     for (line_num, line_result) in io::BufRead::lines(stdin.lock()).enumerate() {
         let line_num = line_num + 1; // 1-based
@@ -2372,10 +2377,7 @@ fn delete(
         delete_entry(&conn, &resolved);
 
         if json {
-            println!(
-                "{}",
-                serde_json::json!({"deleted": 1, "ids": [resolved]})
-            );
+            println!("{}", serde_json::json!({"deleted": 1, "ids": [resolved]}));
         } else {
             let short_id = &resolved[..7.min(resolved.len())];
             eprintln!("Deleted {short_id}");
@@ -2808,10 +2810,7 @@ fn tag(id: &str, labels: Vec<String>, json: bool) {
     }
 
     if json {
-        println!(
-            "{}",
-            serde_json::json!({"id": id, "labels_added": added})
-        );
+        println!("{}", serde_json::json!({"id": id, "labels_added": added}));
     } else {
         let short_id = &id[..7.min(id.len())];
         let label_list = labels.join(", ");
@@ -3052,10 +3051,7 @@ fn gc(dry_run: bool, json: bool) {
     delete_entries(&conn, &ids);
 
     if json {
-        println!(
-            "{}",
-            serde_json::json!({"collected": count, "ids": ids})
-        );
+        println!("{}", serde_json::json!({"collected": count, "ids": ids}));
     } else {
         let word = if count == 1 { "entry" } else { "entries" };
         println!("Collected {count} expired {word}");
@@ -3147,8 +3143,23 @@ fn alias_run(name: &str, mode: &str, confirm: bool) {
             after,
             before,
         } => query(
-            label, not_label, entity_type, not_type, attr, not_attr, json, count, latest, limit,
-            offset, reverse, data, search, after, before, id,
+            label,
+            not_label,
+            entity_type,
+            not_type,
+            attr,
+            not_attr,
+            json,
+            count,
+            latest,
+            limit,
+            offset,
+            reverse,
+            data,
+            search,
+            after,
+            before,
+            id,
         ),
         Command::Export {
             id,
@@ -3163,7 +3174,16 @@ fn alias_run(name: &str, mode: &str, confirm: bool) {
             after,
             before,
         } => export(
-            label, not_label, entity_type, not_type, attr, not_attr, data, search, after, before,
+            label,
+            not_label,
+            entity_type,
+            not_type,
+            attr,
+            not_attr,
+            data,
+            search,
+            after,
+            before,
             id,
         ),
         Command::Delete {
@@ -3181,8 +3201,19 @@ fn alias_run(name: &str, mode: &str, confirm: bool) {
             before,
             json,
         } => delete(
-            id, confirm, label, not_label, entity_type, not_type, attr, not_attr, data, search,
-            after, before, json,
+            id,
+            confirm,
+            label,
+            not_label,
+            entity_type,
+            not_type,
+            attr,
+            not_attr,
+            data,
+            search,
+            after,
+            before,
+            json,
         ),
         _ => {
             eprintln!("error: stored alias did not parse as a {cmd} command");
@@ -3358,8 +3389,19 @@ fn main() {
             before,
             json,
         } => delete(
-            id, confirm, label, not_label, entity_type, not_type, attr, not_attr, data, search,
-            after, before, json,
+            id,
+            confirm,
+            label,
+            not_label,
+            entity_type,
+            not_type,
+            attr,
+            not_attr,
+            data,
+            search,
+            after,
+            before,
+            json,
         ),
         Command::Purge { confirm } => purge(confirm),
         Command::Schema => schema(),

@@ -150,7 +150,7 @@ agent-store delete 7bf8d3f
 | `untag <id> <label>...` | Remove labels from an existing entry. Idempotent (missing labels are ignored). Flags: `--json` |
 | `gc` | Collect expired entries (those past their TTL). Flags: `--dry-run`, `--json` |
 | `history <label>` | Show chronological history of entries with a given label (oldest first). Flags: `--json`, `--limit N`, `--data <substring>` |
-| `alias` | Named queries. Subcommands: `set <name> -- [query flags]` (save), `run <name>` (execute), `list` (show all), `rm <name>` (delete) |
+| `alias` | Named queries. Subcommands: `set <name> -- [query flags]` (save), `run <name> [--mode query\|export\|delete] [--confirm]` (execute), `list` (show all), `rm <name>` (delete) |
 | `completions <shell>` | Generate shell completions (bash, zsh, fish, elvish, powershell) |
 
 ## Tagging
@@ -598,6 +598,15 @@ agent-store alias set urgent-tasks -- --label urgent --type task --attr status=p
 # Run the saved query (equivalent to: agent-store query --label urgent --type task --attr status=pending)
 agent-store alias run urgent-tasks
 
+# Run as export (JSONL output instead of query format)
+agent-store alias run urgent-tasks --mode export
+
+# Run as delete (preview — prints count, exits 1)
+agent-store alias run urgent-tasks --mode delete
+
+# Run as delete (execute — requires --confirm)
+agent-store alias run urgent-tasks --mode delete --confirm
+
 # List all saved aliases (name\targs per line)
 agent-store alias list
 
@@ -610,6 +619,11 @@ agent-store alias rm urgent-tasks
 
 Aliases store the raw query flags as a JSON array. The `--` separator
 before the flags is required by the CLI parser.
+
+`alias run` supports `--mode` to change the execution mode:
+- `--mode query` (default) — run as a `query` command
+- `--mode export` — run as an `export` command (JSONL output)
+- `--mode delete` — run as a `delete` command (requires `--confirm` to execute)
 
 ## Shell completions
 
