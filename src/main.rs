@@ -764,6 +764,45 @@ fn ensure_fts_table(conn: &Connection) {
     }
 }
 
+/// Delete a single entry and its associated FTS, attributes, and labels in FK-safe order.
+fn delete_entry(conn: &Connection, entry_id: &str) {
+    if let Err(e) = conn.execute(
+        "DELETE FROM entries_fts WHERE id = ?1",
+        rusqlite::params![entry_id],
+    ) {
+        eprintln!("error: failed to delete FTS entry: {e}");
+        process::exit(1);
+    }
+    if let Err(e) = conn.execute(
+        "DELETE FROM attributes WHERE entry_id = ?1",
+        rusqlite::params![entry_id],
+    ) {
+        eprintln!("error: failed to delete attributes: {e}");
+        process::exit(1);
+    }
+    if let Err(e) = conn.execute(
+        "DELETE FROM labels WHERE entry_id = ?1",
+        rusqlite::params![entry_id],
+    ) {
+        eprintln!("error: failed to delete labels: {e}");
+        process::exit(1);
+    }
+    if let Err(e) = conn.execute(
+        "DELETE FROM entries WHERE id = ?1",
+        rusqlite::params![entry_id],
+    ) {
+        eprintln!("error: failed to delete entry: {e}");
+        process::exit(1);
+    }
+}
+
+/// Delete multiple entries by their IDs in FK-safe order.
+fn delete_entries(conn: &Connection, ids: &[String]) {
+    for entry_id in ids {
+        delete_entry(conn, entry_id);
+    }
+}
+
 /// Ensure .agent-store/ is in .gitignore. Returns true on success, false on error.
 fn ensure_gitignore(root: &Path) -> bool {
     // Only add .gitignore protection in git repos
@@ -2245,36 +2284,7 @@ fn delete(
     if let Some(ref entry_id) = id {
         // Single-entry delete by ID — no --confirm needed
         let resolved = resolve_entry_id(&conn, entry_id);
-
-        // Delete in FK-safe order: FTS, attributes, labels, entry
-        if let Err(e) = conn.execute(
-            "DELETE FROM entries_fts WHERE id = ?1",
-            rusqlite::params![resolved],
-        ) {
-            eprintln!("error: failed to delete FTS entry: {e}");
-            process::exit(1);
-        }
-        if let Err(e) = conn.execute(
-            "DELETE FROM attributes WHERE entry_id = ?1",
-            rusqlite::params![resolved],
-        ) {
-            eprintln!("error: failed to delete attributes: {e}");
-            process::exit(1);
-        }
-        if let Err(e) = conn.execute(
-            "DELETE FROM labels WHERE entry_id = ?1",
-            rusqlite::params![resolved],
-        ) {
-            eprintln!("error: failed to delete labels: {e}");
-            process::exit(1);
-        }
-        if let Err(e) = conn.execute(
-            "DELETE FROM entries WHERE id = ?1",
-            rusqlite::params![resolved],
-        ) {
-            eprintln!("error: failed to delete entry: {e}");
-            process::exit(1);
-        }
+        delete_entry(&conn, &resolved);
 
         let short_id = &resolved[..7.min(resolved.len())];
         eprintln!("Deleted {short_id}");
@@ -2369,37 +2379,7 @@ fn delete(
                 }
             };
 
-        // Delete in FK-safe order for each matched entry
-        for entry_id in &ids {
-            if let Err(e) = conn.execute(
-                "DELETE FROM entries_fts WHERE id = ?1",
-                rusqlite::params![entry_id],
-            ) {
-                eprintln!("error: failed to delete FTS entry: {e}");
-                process::exit(1);
-            }
-            if let Err(e) = conn.execute(
-                "DELETE FROM attributes WHERE entry_id = ?1",
-                rusqlite::params![entry_id],
-            ) {
-                eprintln!("error: failed to delete attributes: {e}");
-                process::exit(1);
-            }
-            if let Err(e) = conn.execute(
-                "DELETE FROM labels WHERE entry_id = ?1",
-                rusqlite::params![entry_id],
-            ) {
-                eprintln!("error: failed to delete labels: {e}");
-                process::exit(1);
-            }
-            if let Err(e) = conn.execute(
-                "DELETE FROM entries WHERE id = ?1",
-                rusqlite::params![entry_id],
-            ) {
-                eprintln!("error: failed to delete entry: {e}");
-                process::exit(1);
-            }
-        }
+        delete_entries(&conn, &ids);
 
         let deleted = ids.len() as i64;
         let word = if deleted == 1 { "entry" } else { "entries" };
@@ -2961,36 +2941,7 @@ fn gc(dry_run: bool) {
         return;
     }
 
-    for entry_id in &ids {
-        if let Err(e) = conn.execute(
-            "DELETE FROM entries_fts WHERE id = ?1",
-            rusqlite::params![entry_id],
-        ) {
-            eprintln!("error: failed to delete FTS entry: {e}");
-            process::exit(1);
-        }
-        if let Err(e) = conn.execute(
-            "DELETE FROM attributes WHERE entry_id = ?1",
-            rusqlite::params![entry_id],
-        ) {
-            eprintln!("error: failed to delete attributes: {e}");
-            process::exit(1);
-        }
-        if let Err(e) = conn.execute(
-            "DELETE FROM labels WHERE entry_id = ?1",
-            rusqlite::params![entry_id],
-        ) {
-            eprintln!("error: failed to delete labels: {e}");
-            process::exit(1);
-        }
-        if let Err(e) = conn.execute(
-            "DELETE FROM entries WHERE id = ?1",
-            rusqlite::params![entry_id],
-        ) {
-            eprintln!("error: failed to delete entry: {e}");
-            process::exit(1);
-        }
-    }
+    delete_entries(&conn, &ids);
 
     let word = if count == 1 { "entry" } else { "entries" };
     println!("Collected {count} expired {word}");
@@ -3071,8 +3022,23 @@ fn alias_run(name: &str) {
             after,
             before,
         } => query(
-            label, not_label, entity_type, not_type, attr, not_attr, json, count, latest, limit,
-            offset, reverse, data, search, after, before, id,
+            label,
+            not_label,
+            entity_type,
+            not_type,
+            attr,
+            not_attr,
+            json,
+            count,
+            latest,
+            limit,
+            offset,
+            reverse,
+            data,
+            search,
+            after,
+            before,
+            id,
         ),
         _ => {
             eprintln!("error: stored alias did not parse as a query command");
