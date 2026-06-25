@@ -148,7 +148,7 @@ agent-store delete 7bf8d3f
 | `info` | Show store configuration and environment. Flags: `--json` |
 | `tag <id> <label>...` | Add labels to an existing entry. Idempotent (duplicate labels are ignored). Flags: `--json` |
 | `untag <id> <label>...` | Remove labels from an existing entry. Idempotent (missing labels are ignored). Flags: `--json` |
-| `gc` | Collect expired entries (those past their TTL). Flags: `--dry-run`, `--json` |
+| `gc` | Collect expired entries (those past their TTL). Flags: `--ttl <duration>`, `--dry-run`, `--json` |
 | `history <label>` | Show chronological history of entries with a given label (oldest first). Flags: `--json`, `--limit N`, `--data <substring>` |
 | `alias` | Named queries. Subcommands: `set <name> -- [query flags]` (save), `run <name> [--mode query\|export\|delete] [--confirm]` (execute), `list` (show all), `rm <name>` (delete) |
 | `completions <shell>` | Generate shell completions (bash, zsh, fish, elvish, powershell) |
@@ -215,10 +215,20 @@ agent-store gc --dry-run
 
 # Collect expired entries
 agent-store gc
+
+# Override: collect ALL entries older than a duration, regardless of _expires_at
+agent-store gc --ttl 7d              # delete everything older than 7 days
+agent-store gc --ttl 24h --dry-run   # preview what would be collected
+agent-store gc --ttl 30m --json      # structured output
 ```
 
 Supported duration units: `s` (seconds), `m` (minutes), `h` (hours), `d` (days).
 TTL is stored as a `_expires_at` attribute — entries without TTL never expire.
+
+With `--ttl <duration>`, gc ignores `_expires_at` and instead collects all entries
+whose `created_at` is older than the given duration. This is useful for bulk cleanup
+of old entries regardless of whether they were pushed with a TTL.
+
 Use `gc --json` for structured output: `{"collected":1,"ids":["..."]}` or `{"dry_run":true,"count":0}`.
 
 ## Pushing data

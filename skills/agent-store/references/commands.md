@@ -547,29 +547,46 @@ agent-store history config --data "database"
 ## agent-store gc
 
 Collect expired entries — those whose `_expires_at` attribute is in the past.
+With `--ttl`, collect all entries older than a given duration instead.
 
 ```
-agent-store gc [--dry-run] [--json]
+agent-store gc [--ttl <DURATION>] [--dry-run] [--json]
 ```
 
 Options:
+- `--ttl <DURATION>` — Override: collect ALL entries whose `created_at` is older than the given duration, regardless of `_expires_at`. Duration format: `<number><unit>` where unit is `s` (seconds), `m` (minutes), `h` (hours), or `d` (days). Examples: `30m`, `24h`, `7d`
 - `--dry-run` — Show how many entries would be collected without deleting them
 - `--json` — Output as JSON object: `{"collected":1,"ids":["..."]}` or `{"dry_run":true,"count":0}` (with `--dry-run`)
 
+**Default mode (no `--ttl`):**
 Entries get an `_expires_at` attribute when pushed with `--ttl`. The `gc`
 command scans for entries where `_expires_at` is earlier than the current
 time and deletes them (along with their labels and attributes).
-
 Entries without `_expires_at` are never collected — they live forever.
 
+**Override mode (`--ttl <duration>`):**
+Ignores `_expires_at` entirely. Instead, collects all entries whose
+`created_at` timestamp is older than the specified duration from now.
+This is useful for bulk cleanup of old entries regardless of whether
+they were pushed with a TTL. Works with `--dry-run` and `--json`.
+
 ```bash
-# Collect all expired entries
+# Collect all expired entries (default mode)
 agent-store gc
 # Collected 3 entries
 
 # Preview without deleting
 agent-store gc --dry-run
 # 3 expired entries would be collected
+
+# Override: collect everything older than 7 days
+agent-store gc --ttl 7d
+
+# Preview age-based collection
+agent-store gc --ttl 24h --dry-run
+
+# JSON output with TTL override
+agent-store gc --ttl 30m --json
 ```
 
 ## agent-store alias set
