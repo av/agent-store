@@ -318,6 +318,47 @@ newlines. For structured or predictable output, use `--json`.
 **JSON output** (`--json`) returns the full entry objects including metadata,
 useful when you need IDs, timestamps, labels, or attributes.
 
+## Full-text search
+
+Use `--search` for relevance-ranked full-text search powered by SQLite FTS5.
+Unlike `--data` (substring match), `--search` tokenizes content and supports
+rich query syntax. Results are ordered by relevance when `--search` is active.
+
+```bash
+# Basic term search
+agent-store query --search "error"
+
+# Phrase search (exact sequence of words)
+agent-store query --search '"database connection"'
+
+# OR — match either term
+agent-store query --search "error OR warning"
+
+# NOT — exclude entries containing a term
+agent-store query --search "error NOT timeout"
+
+# Prefix — match words starting with a prefix
+agent-store query --search "config*"
+
+# Combine with filters (AND logic with all other flags)
+agent-store query --search "error" --label logs --type event
+agent-store query --search "migration" --after "2024-06-01" --json
+
+# Count search results
+agent-store query --search "error" --count
+
+# Export search results as JSONL
+agent-store export --search "database"
+
+# Delete matching entries
+agent-store delete --search "deprecated" --confirm
+```
+
+`--search` is available on `query`, `export`, and `delete`. It combines with
+all existing filters (`--label`, `--type`, `--attr`, `--data`, `--after`,
+`--before`, and their exclusion variants). Stores created before FTS was added
+are migrated automatically on first use.
+
 ## Configuration
 
 ```bash
