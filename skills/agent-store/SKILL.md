@@ -138,7 +138,7 @@ agent-store delete 7bf8d3f
 | `schema` | Show entity types and label counts |
 | `stats` | Show entry count and store size. Flags: `--json` |
 | `skills` | List and read built-in usage guides |
-| `export` | Export entries as JSONL (one JSON object per line). Filter: `--id`, `--label` (repeat), `--not-label` (repeat), `--type`, `--not-type` (repeat, exclude), `--attr key=value` (repeat), `--not-attr key=value` (repeat, exclude), `--data`, `--search <query>` (FTS5), `--after`, `--before` |
+| `export` | Export entries in multiple formats. Flags: `--format jsonl\|json\|csv` (default: jsonl). Filter: `--id`, `--label` (repeat), `--not-label` (repeat), `--type`, `--not-type` (repeat, exclude), `--attr key=value` (repeat), `--not-attr key=value` (repeat, exclude), `--data`, `--search <query>` (FTS5), `--after`, `--before` |
 | `import` | Import entries from JSONL on stdin (complement of export). Generates fresh IDs, preserves timestamps. Flags: `--dry-run` |
 | `delete [id]` | Delete entries by ID or by filters. Filters: `--label`, `--not-label`, `--type`, `--not-type`, `--attr`, `--not-attr`, `--data`, `--search` (FTS5), `--after`, `--before`. Single-ID delete needs no confirmation; filter-based delete requires `--confirm`. Flags: `--dry-run`, `--json` |
 | `purge` | Delete ALL entries (destructive). Requires `--confirm` flag. |
@@ -430,11 +430,18 @@ agent-store skills path agent-store            # Print skill data directory
 
 ## Export
 
-Dump entries as JSONL (one JSON object per line) for backup and migration:
+Export entries for backup, migration, and integration. The `--format` flag
+controls the output format (default: `jsonl`).
 
 ```bash
-# Export all entries
+# Export all entries as JSONL (default)
 agent-store export > backup.jsonl
+
+# Export as a proper JSON array (pretty-printed)
+agent-store export --format json > backup.json
+
+# Export as CSV (headers: id,created_at,entity_type,labels,data)
+agent-store export --format csv > backup.csv
 
 # Export a single entry by ID
 agent-store export --id <uuid>
@@ -465,8 +472,20 @@ agent-store export | wc -l
 agent-store export | jq -r '.id'
 ```
 
-Each line is a complete JSON object with the same fields as `query --json`:
-`id`, `data`, `entity_type`, `created_at`, `labels`, `attributes`.
+### Output formats
+
+| Format | Flag | Description |
+|--------|------|-------------|
+| JSONL | `--format jsonl` (default) | One JSON object per line. Streams well, works with `jq`, `wc -l`, and `import` |
+| JSON | `--format json` | Proper JSON array, pretty-printed. Good for APIs and tools that expect valid JSON |
+| CSV | `--format csv` | Headers: `id,created_at,entity_type,labels,data`. Labels are semicolon-separated. Data is truncated to 100 characters. Proper CSV escaping for fields containing commas or quotes |
+
+Unknown format values produce an error and exit 1.
+
+JSONL output: each line is a complete JSON object with the same fields as
+`query --json`: `id`, `data`, `entity_type`, `created_at`, `labels`, `attributes`.
+
+All formats work with all filter flags and through `alias run --mode export`.
 
 ## Import
 

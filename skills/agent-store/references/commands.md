@@ -176,7 +176,7 @@ Available skills:
 
 ## agent-store export
 
-Export entries as JSONL (one JSON object per line) for backup and migration.
+Export entries in multiple formats for backup, migration, and integration.
 
 ```
 agent-store export [OPTIONS]
@@ -186,6 +186,7 @@ agent-store export [OPTIONS]
 
 | Flag | Description |
 |------|-------------|
+| `--format <FORMAT>` | Output format: `jsonl` (default), `json`, or `csv`. See format details below. Unknown values produce an error and exit 1 |
 | `--id <ID>` | Filter by entry ID (export a single entry) |
 | `--label <LABEL>` | Filter by label (can be repeated, AND logic) |
 | `--not-label <LABEL>` | Exclude entries with this label (can be repeated) |
@@ -200,13 +201,37 @@ agent-store export [OPTIONS]
 
 All filters match `query` — see `query` docs for filter semantics.
 
-Output goes to stdout. Each line is a self-contained JSON object with
-fields: `id`, `data`, `entity_type`, `created_at`, `labels`, `attributes`.
+**Output formats:**
+
+- **`jsonl`** (default) — One JSON object per line. Each line is a self-contained
+  JSON object with fields: `id`, `data`, `entity_type`, `created_at`, `labels`,
+  `attributes`. Streams well, works with `jq` and `wc -l`, and is the input
+  format for `import`.
+
+- **`json`** — Proper JSON array, pretty-printed with indentation. Contains the
+  same entry objects as JSONL but wrapped in `[...]` with commas between entries.
+  Use when consumers expect valid JSON (APIs, config files, non-streaming tools).
+
+- **`csv`** — CSV with headers: `id,created_at,entity_type,labels,data`. Labels
+  are semicolon-separated (e.g., `urgent;review`). Data is truncated to 100
+  characters. Fields containing commas, quotes, or newlines are properly escaped.
+  Use for spreadsheets, quick inspection, or tools that don't handle JSON.
 
 ```bash
+# Default JSONL output
 agent-store export > backup.jsonl
 agent-store export --label important > important.jsonl
-agent-store export --not-label archived > active.jsonl
+
+# JSON array output
+agent-store export --format json > backup.json
+agent-store export --format json --label urgent > urgent.json
+
+# CSV output
+agent-store export --format csv > entries.csv
+agent-store export --format csv --type task > tasks.csv
+
+# All formats work with all filters
+agent-store export --format csv --not-label archived --after "2024-06-01" > recent.csv
 agent-store export --data "error" --after "2024-06-01" > recent-errors.jsonl
 agent-store export | jq -r '.id'
 ```
