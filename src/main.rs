@@ -43,108 +43,108 @@ enum Command {
     Init,
     /// Push data from stdin (or --file) into the store
     Push {
-        /// Tag entry with a label (can be repeated)
+        /// attach a label to the entry (repeatable)
         #[arg(long)]
         label: Vec<String>,
-        /// Set entity type
+        /// set the entity type
         #[arg(long = "type")]
         entity_type: Option<String>,
-        /// Only print the entry ID (for scripting/piping)
+        /// suppress output, print only the entry ID
         #[arg(long, short = 'q', conflicts_with = "id_only")]
         quiet: bool,
-        /// Output only the raw UUID (no prefix text), for scripting
+        /// print only the raw UUID with no prefix text
         #[arg(long, conflicts_with = "quiet")]
         id_only: bool,
-        /// Set attribute key=value pair (can be repeated)
+        /// set an attribute as key=value (repeatable)
         #[arg(long = "attr")]
         attr: Vec<String>,
-        /// Override created_at timestamp (ISO 8601: "2024-01-15 10:30:00" or "2024-01-15")
+        /// override created_at timestamp (ISO 8601)
         #[arg(long)]
         timestamp: Option<String>,
-        /// Read data from a file instead of stdin
+        /// read data from a file instead of stdin
         #[arg(long, short = 'f')]
         file: Option<String>,
-        /// Strip trailing whitespace (including newlines) from data before storing
+        /// strip trailing whitespace and newlines before storing
         #[arg(long)]
         strip: bool,
-        /// Set time-to-live for the entry (e.g. 30m, 24h, 7d, 3600s)
+        /// set time-to-live (e.g. 30m, 24h, 7d, 3600s)
         #[arg(long)]
         ttl: Option<String>,
-        /// Output the stored/updated entry as JSON to stdout
+        /// output the stored entry as JSON
         #[arg(long)]
         json: bool,
-        /// Update an existing entry's data in-place (by ID or prefix)
+        /// replace data of an existing entry in-place (ID or prefix)
         #[arg(long)]
         update: Option<String>,
     },
     /// Pull an entry by ID and print to stdout
     Pull {
-        /// Entry ID to retrieve
+        /// entry ID or unambiguous prefix
         id: String,
-        /// Output the full entry as a JSON object (same format as query --json)
+        /// output the full entry as JSON
         #[arg(long)]
         json: bool,
-        /// Omit trailing newline (binary-safe piping)
+        /// omit trailing newline for binary-safe piping
         #[arg(long)]
         raw: bool,
     },
     /// List and filter entries
     Query {
-        /// Filter by entry ID (returns entry in query format with JSON support)
+        /// filter by entry ID or prefix
         #[arg(long)]
         id: Option<String>,
-        /// Filter by label (can be repeated, AND logic)
+        /// require this label (repeatable, AND logic)
         #[arg(long)]
         label: Vec<String>,
-        /// Exclude entries with this label (can be repeated, excludes all specified)
+        /// exclude entries with this label (repeatable)
         #[arg(long = "not-label")]
         not_label: Vec<String>,
-        /// Filter by entity type
+        /// filter by entity type
         #[arg(long = "type")]
         entity_type: Option<String>,
-        /// Exclude entries with this entity type (can be repeated, NULL-safe)
+        /// exclude entries with this entity type (repeatable)
         #[arg(long = "not-type", action = clap::ArgAction::Append)]
         not_type: Vec<String>,
-        /// Filter by attribute key=value pair (can be repeated, AND logic)
+        /// require this attribute key=value (repeatable, AND logic)
         #[arg(long = "attr")]
         attr: Vec<String>,
-        /// Exclude entries with this attribute key=value pair (can be repeated)
+        /// exclude entries with this attribute key=value (repeatable)
         #[arg(long = "not-attr", action = clap::ArgAction::Append)]
         not_attr: Vec<String>,
-        /// Output as JSON array
+        /// output as JSON array
         #[arg(long)]
         json: bool,
-        /// Output only the count of matching entries
+        /// print only the count of matching entries
         #[arg(long)]
         count: bool,
-        /// Return only the single most recent matching entry
+        /// return only the most recent match
         #[arg(long, conflicts_with_all = ["limit", "first", "last"])]
         latest: bool,
-        /// Return only the single oldest matching entry
+        /// return only the oldest match
         #[arg(long, conflicts_with_all = ["limit", "latest", "last"])]
         first: bool,
-        /// Return only the single newest matching entry (alias for --latest)
+        /// return only the newest match (alias for --latest)
         #[arg(long, conflicts_with_all = ["limit", "latest", "first"])]
         last: bool,
-        /// Return at most N entries
+        /// return at most N entries
         #[arg(long)]
         limit: Option<u64>,
-        /// Skip first N entries (requires --limit)
+        /// skip the first N entries (requires --limit)
         #[arg(long, requires = "limit")]
         offset: Option<u64>,
-        /// Reverse sort order to oldest-first
+        /// reverse sort order to oldest-first
         #[arg(long, short = 'r')]
         reverse: bool,
-        /// Filter by substring match in entry data
+        /// filter by substring match in entry data
         #[arg(long)]
         data: Option<String>,
-        /// Full-text search query (FTS5 syntax: terms, "phrases", OR, NOT, prefix*)
+        /// full-text search (FTS5 syntax: terms, "phrases", OR, NOT, prefix*)
         #[arg(long)]
         search: Option<String>,
-        /// Only entries created after this timestamp (ISO 8601: "2024-01-15" or "2024-01-15 10:30:00")
+        /// include only entries created after this timestamp (ISO 8601)
         #[arg(long)]
         after: Option<String>,
-        /// Only entries created before this timestamp (ISO 8601: "2024-01-15" or "2024-01-15 10:30:00")
+        /// include only entries created before this timestamp (ISO 8601)
         #[arg(long)]
         before: Option<String>,
     },
@@ -152,7 +152,7 @@ enum Command {
     Schema,
     /// Show entry count and store size
     Stats {
-        /// Output stats as a JSON object
+        /// output as JSON
         #[arg(long)]
         json: bool,
     },
@@ -163,212 +163,212 @@ enum Command {
     },
     /// Export entries for backup, migration, or piping to other tools
     Export {
-        /// Filter by entry ID
+        /// filter by entry ID or prefix
         #[arg(long)]
         id: Option<String>,
-        /// Filter by label (can be repeated, AND logic)
+        /// require this label (repeatable, AND logic)
         #[arg(long)]
         label: Vec<String>,
-        /// Exclude entries with this label (can be repeated)
+        /// exclude entries with this label (repeatable)
         #[arg(long = "not-label")]
         not_label: Vec<String>,
-        /// Filter by entity type
+        /// filter by entity type
         #[arg(long = "type")]
         entity_type: Option<String>,
-        /// Exclude entries with this entity type (can be repeated, NULL-safe)
+        /// exclude entries with this entity type (repeatable)
         #[arg(long = "not-type", action = clap::ArgAction::Append)]
         not_type: Vec<String>,
-        /// Filter by attribute key=value pair (can be repeated, AND logic)
+        /// require this attribute key=value (repeatable, AND logic)
         #[arg(long = "attr")]
         attr: Vec<String>,
-        /// Exclude entries with this attribute key=value pair (can be repeated)
+        /// exclude entries with this attribute key=value (repeatable)
         #[arg(long = "not-attr", action = clap::ArgAction::Append)]
         not_attr: Vec<String>,
-        /// Filter by substring match in entry data
+        /// filter by substring match in entry data
         #[arg(long)]
         data: Option<String>,
-        /// Full-text search query (FTS5 syntax: terms, "phrases", OR, NOT, prefix*)
+        /// full-text search (FTS5 syntax: terms, "phrases", OR, NOT, prefix*)
         #[arg(long)]
         search: Option<String>,
-        /// Only entries created after this timestamp (ISO 8601)
+        /// include only entries created after this timestamp (ISO 8601)
         #[arg(long)]
         after: Option<String>,
-        /// Only entries created before this timestamp (ISO 8601)
+        /// include only entries created before this timestamp (ISO 8601)
         #[arg(long)]
         before: Option<String>,
-        /// Output format: jsonl (default, one JSON object per line), json (array), csv
+        /// output format: jsonl (one object per line), json (array), csv
         #[arg(long, default_value = "jsonl")]
         format: String,
     },
     /// Import entries from JSONL on stdin (complement of export)
     Import {
-        /// Parse and validate without inserting; print summary only
+        /// validate without inserting, print summary only
         #[arg(long)]
         dry_run: bool,
     },
     /// Delete entries by ID or by filters
     Delete {
-        /// Entry ID to delete (if provided, deletes a single entry without --confirm)
+        /// entry ID or prefix to delete (skips --confirm)
         id: Option<String>,
-        /// Require confirmation for filter-based deletes
+        /// confirm filter-based deletion
         #[arg(long, conflicts_with = "dry_run")]
         confirm: bool,
-        /// Preview matching entries without deleting (read-only)
+        /// preview matching entries without deleting
         #[arg(long, conflicts_with = "confirm")]
         dry_run: bool,
-        /// Filter by label (can be repeated, AND logic)
+        /// require this label (repeatable, AND logic)
         #[arg(long)]
         label: Vec<String>,
-        /// Exclude entries with this label (can be repeated)
+        /// exclude entries with this label (repeatable)
         #[arg(long = "not-label")]
         not_label: Vec<String>,
-        /// Filter by entity type
+        /// filter by entity type
         #[arg(long = "type")]
         entity_type: Option<String>,
-        /// Exclude entries with this entity type (can be repeated, NULL-safe)
+        /// exclude entries with this entity type (repeatable)
         #[arg(long = "not-type", action = clap::ArgAction::Append)]
         not_type: Vec<String>,
-        /// Filter by attribute key=value pair (can be repeated, AND logic)
+        /// require this attribute key=value (repeatable, AND logic)
         #[arg(long = "attr")]
         attr: Vec<String>,
-        /// Exclude entries with this attribute key=value pair (can be repeated)
+        /// exclude entries with this attribute key=value (repeatable)
         #[arg(long = "not-attr", action = clap::ArgAction::Append)]
         not_attr: Vec<String>,
-        /// Filter by substring match in entry data
+        /// filter by substring match in entry data
         #[arg(long)]
         data: Option<String>,
-        /// Full-text search query (FTS5 syntax: terms, "phrases", OR, NOT, prefix*)
+        /// full-text search (FTS5 syntax: terms, "phrases", OR, NOT, prefix*)
         #[arg(long)]
         search: Option<String>,
-        /// Only entries created after this timestamp (ISO 8601)
+        /// include only entries created after this timestamp (ISO 8601)
         #[arg(long)]
         after: Option<String>,
-        /// Only entries created before this timestamp (ISO 8601)
+        /// include only entries created before this timestamp (ISO 8601)
         #[arg(long)]
         before: Option<String>,
-        /// Output result as JSON
+        /// output as JSON
         #[arg(long)]
         json: bool,
     },
     /// Delete ALL entries from the store (destructive, requires --confirm)
     Purge {
-        /// Confirm you want to delete all data
+        /// confirm you want to delete all data
         #[arg(long)]
         confirm: bool,
     },
     /// Generate shell completions for bash, zsh, fish, elvish, or powershell
     Completions {
-        /// Shell to generate completions for
+        /// target shell
         shell: clap_complete::Shell,
     },
     /// Show store configuration and environment info
     Info {
-        /// Output as JSON object
+        /// output as JSON
         #[arg(long)]
         json: bool,
     },
     /// List all unique labels in the store
     Labels {
-        /// Output as JSON array
+        /// output as JSON array
         #[arg(long)]
         json: bool,
-        /// Show count next to each label
+        /// show entry count next to each label
         #[arg(long)]
         count: bool,
     },
     /// List all unique entity types in the store
     Types {
-        /// Output as JSON array
+        /// output as JSON array
         #[arg(long)]
         json: bool,
-        /// Show count next to each type
+        /// show entry count next to each type
         #[arg(long)]
         count: bool,
     },
     /// List all unique attribute keys in the store
     Attrs {
-        /// Output as JSON array
+        /// output as JSON array
         #[arg(long)]
         json: bool,
-        /// Show count next to each key
+        /// show entry count next to each key
         #[arg(long)]
         count: bool,
     },
     /// Add labels to an existing entry
     Tag {
-        /// Entry ID to tag
+        /// entry ID or unambiguous prefix
         id: String,
-        /// Labels to add (at least one required)
+        /// labels to add (at least one required)
         #[arg(required = true)]
         label: Vec<String>,
-        /// Output result as JSON
+        /// output as JSON
         #[arg(long)]
         json: bool,
     },
     /// Remove labels from an existing entry
     Untag {
-        /// Entry ID to untag
+        /// entry ID or unambiguous prefix
         id: String,
-        /// Labels to remove (at least one required)
+        /// labels to remove (at least one required)
         #[arg(required = true)]
         label: Vec<String>,
-        /// Output result as JSON
+        /// output as JSON
         #[arg(long)]
         json: bool,
     },
     /// Set an attribute on an existing entry
     #[command(name = "set-attr")]
     SetAttr {
-        /// Entry ID (or unambiguous prefix)
+        /// entry ID or unambiguous prefix
         id: String,
-        /// Attribute key
+        /// attribute key
         key: String,
-        /// Attribute value
+        /// attribute value
         value: String,
-        /// Output result as JSON
+        /// output as JSON
         #[arg(long)]
         json: bool,
     },
     /// Remove an attribute from an existing entry
     #[command(name = "unset-attr")]
     UnsetAttr {
-        /// Entry ID (or unambiguous prefix)
+        /// entry ID or unambiguous prefix
         id: String,
-        /// Attribute key to remove
+        /// attribute key to remove
         key: String,
-        /// Output result as JSON
+        /// output as JSON
         #[arg(long)]
         json: bool,
     },
     /// Show chronological history of entries with a given label
     History {
-        /// Label to show history for
+        /// label to show history for
         label: String,
-        /// Output as JSON array (same format as query --json)
+        /// output as JSON array
         #[arg(long)]
         json: bool,
-        /// Show only the last N entries
+        /// return at most N entries
         #[arg(long)]
         limit: Option<u64>,
-        /// Filter by substring match in entry data
+        /// filter by substring match in entry data
         #[arg(long)]
         data: Option<String>,
     },
     /// Collect expired entries (those with elapsed --ttl)
     Gc {
-        /// Show what would be collected without deleting
+        /// preview what would be collected without deleting
         #[arg(long)]
         dry_run: bool,
-        /// Output result as JSON
+        /// output as JSON
         #[arg(long)]
         json: bool,
-        /// Treat ALL entries older than this duration as expired (e.g. 30m, 24h, 7d)
+        /// treat all entries older than this duration as expired (e.g. 30m, 24h, 7d)
         #[arg(long)]
         ttl: Option<String>,
     },
     /// Reclaim disk space by running SQLite VACUUM and PRAGMA optimize
     Compact {
-        /// Output result as JSON (sizes in bytes)
+        /// output as JSON (sizes in bytes)
         #[arg(long)]
         json: bool,
     },
@@ -379,37 +379,37 @@ enum Command {
     },
     /// Watch the store and print new entries as they arrive (like tail -f)
     Tail {
-        /// Filter by label (can be repeated, AND logic)
+        /// require this label (repeatable, AND logic)
         #[arg(long)]
         label: Vec<String>,
-        /// Exclude entries with this label (can be repeated)
+        /// exclude entries with this label (repeatable)
         #[arg(long = "not-label")]
         not_label: Vec<String>,
-        /// Filter by entity type
+        /// filter by entity type
         #[arg(long = "type")]
         entity_type: Option<String>,
-        /// Exclude entries with this entity type (can be repeated, NULL-safe)
+        /// exclude entries with this entity type (repeatable)
         #[arg(long = "not-type", action = clap::ArgAction::Append)]
         not_type: Vec<String>,
-        /// Filter by attribute key=value pair (can be repeated, AND logic)
+        /// require this attribute key=value (repeatable, AND logic)
         #[arg(long = "attr")]
         attr: Vec<String>,
-        /// Exclude entries with this attribute key=value pair (can be repeated)
+        /// exclude entries with this attribute key=value (repeatable)
         #[arg(long = "not-attr", action = clap::ArgAction::Append)]
         not_attr: Vec<String>,
-        /// Filter by substring match in entry data
+        /// filter by substring match in entry data
         #[arg(long)]
         data: Option<String>,
-        /// Full-text search query (FTS5 syntax: terms, "phrases", OR, NOT, prefix*)
+        /// full-text search (FTS5 syntax: terms, "phrases", OR, NOT, prefix*)
         #[arg(long)]
         search: Option<String>,
-        /// Output each entry as a JSON object (one per line)
+        /// output each entry as JSON (one per line)
         #[arg(long)]
         json: bool,
-        /// Poll interval in seconds (default: 1)
+        /// poll interval in seconds
         #[arg(long, default_value = "1")]
         interval: u64,
-        /// Start from entries created after this timestamp instead of now (ISO 8601)
+        /// start from entries created after this timestamp (ISO 8601)
         #[arg(long)]
         since: Option<String>,
     },
@@ -419,20 +419,20 @@ enum Command {
 enum AliasCommand {
     /// Save a query as a named alias (everything after -- is captured)
     Set {
-        /// Alias name
+        /// alias name
         name: String,
-        /// Query arguments (put after --)
+        /// query arguments (put after --)
         #[arg(last = true)]
         args: Vec<String>,
     },
     /// Execute a saved alias as query, export, or delete
     Run {
-        /// Alias name to execute
+        /// alias name to execute
         name: String,
-        /// Command mode: query (default), export, or delete
+        /// run as query, export, or delete
         #[arg(long, default_value = "query")]
         mode: String,
-        /// Confirm deletion (only used with --mode delete)
+        /// confirm deletion (required with --mode delete)
         #[arg(long)]
         confirm: bool,
     },
@@ -440,7 +440,7 @@ enum AliasCommand {
     List,
     /// Remove a saved alias
     Rm {
-        /// Alias name to remove
+        /// alias name to remove
         name: String,
     },
 }
@@ -451,15 +451,15 @@ enum SkillsAction {
     List,
     /// Print a skill guide
     Get {
-        /// Skill name
+        /// skill name
         name: String,
-        /// Include references and templates
+        /// include references and templates
         #[arg(long)]
         full: bool,
     },
-    /// Print skill data path
+    /// Print the filesystem path for a skill
     Path {
-        /// Skill name
+        /// skill name
         name: String,
     },
 }
