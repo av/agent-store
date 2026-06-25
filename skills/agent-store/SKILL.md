@@ -139,7 +139,7 @@ agent-store delete 7bf8d3f
 | `stats` | Show entry count and store size. Flags: `--json` |
 | `skills` | List and read built-in usage guides |
 | `export` | Export entries in multiple formats. Flags: `--format jsonl\|json\|csv` (default: jsonl). Filter: `--id`, `--label` (repeat), `--not-label` (repeat), `--type`, `--not-type` (repeat, exclude), `--attr key=value` (repeat), `--not-attr key=value` (repeat, exclude), `--data`, `--search <query>` (FTS5), `--after`, `--before` |
-| `import` | Import entries from JSONL on stdin (complement of export). Generates fresh IDs, preserves timestamps. Flags: `--dry-run` |
+| `import` | Import entries from JSONL on stdin (complement of export). Generates fresh IDs, preserves timestamps. Reconstructs links from `links_from` arrays using old-to-new ID remapping. Flags: `--dry-run`, `--json` |
 | `delete [id]` | Delete entries by ID or by filters. Filters: `--label`, `--not-label`, `--type`, `--not-type`, `--attr`, `--not-attr`, `--data`, `--search` (FTS5), `--after`, `--before`. Single-ID delete needs no confirmation; filter-based delete requires `--confirm`. Flags: `--dry-run`, `--json` |
 | `purge` | Delete ALL entries (destructive). Requires `--confirm` flag. |
 | `labels` | List all unique labels in the store, sorted. Flags: `--json` (JSON array), `--count` (with counts) |

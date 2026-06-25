@@ -126,11 +126,14 @@ agent-store query --json | jq -r '.[].data' > data-only.txt
 ### Restore from backup
 
 ```bash
-# From JSONL backup (preserves timestamps, labels, attributes)
+# From JSONL backup (preserves timestamps, labels, attributes, and links)
 cat backup.jsonl | agent-store import
 
 # From JSON array backup (legacy format)
 jq -c '.[]' backup.json | agent-store import
+
+# Verify import result with JSON output
+cat backup.jsonl | agent-store import --json | jq '{entries: .imported, links: .links_created}'
 ```
 
 ## Round-trip processing

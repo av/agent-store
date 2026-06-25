@@ -228,6 +228,9 @@ enum Command {
         /// validate without inserting, print summary only
         #[arg(long)]
         dry_run: bool,
+        /// output result as JSON
+        #[arg(long)]
+        json: bool,
     },
     /// Delete entries by ID or by filters
     Delete {
@@ -1892,13 +1895,16 @@ fn push(
     }
 }
 
-/// A parsed import row: (data, entity_type, labels, attrs, created_at).
+/// A parsed import row: (old_id, data, entity_type, labels, attrs, created_at, links_from).
+/// links_from: Vec<(to_old_id, rel)> — link targets referencing old IDs from the export.
 type ImportRow = (
+    Option<String>,
     String,
     Option<String>,
     Vec<String>,
     Vec<(String, String)>,
     Option<String>,
+    Vec<(String, String)>,
 );
 
 /// A changelog row: (rowid, entry_id, timestamp, operation, key, old_value, new_value).
@@ -3239,13 +3245,14 @@ fn stats(json: bool) {
     }
 }
 
-fn import(dry_run: bool) {
+fn import(dry_run: bool, json_output: bool) {
     let conn = if dry_run { None } else { Some(open_db()) };
 
     let stdin = io::stdin();
     let mut imported = 0u64;
     let mut errors = 0u64;
     let mut parsed_entries: Vec<ImportRow> = Vec::new();
+    let mut dry_run_link_count = 0u64;
 
     for (line_num, line_result) in io::BufRead::lines(stdin.lock()).enumerate() {
         let line_num = line_num + 1; // 1-based
@@ -3323,16 +3330,48 @@ fn import(dry_run: bool) {
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
 
+        // Extract old ID for link remapping
+        let old_id = obj
+            .get("id")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
+        // Extract links_from array: [{to: "old-id", rel: "rel-name"}, ...]
+        let links_from: Vec<(String, String)> = obj
+            .get("links_from")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|link| {
+                        let to = link.get("to").and_then(|v| v.as_str())?;
+                        let rel = link.get("rel").and_then(|v| v.as_str())?;
+                        Some((to.to_string(), rel.to_string()))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
         // In dry-run mode, we validated the line — count it and move on
         if dry_run {
-            // Suppress unused variable warnings by using them
-            let _ = (data, entity_type, labels, attributes, created_at);
+            dry_run_link_count += links_from.len() as u64;
+            let _ = (data, entity_type, labels, attributes, created_at, old_id);
             imported += 1;
             continue;
         }
 
-        parsed_entries.push((data, entity_type, labels, attributes, created_at));
+        parsed_entries.push((
+            old_id,
+            data,
+            entity_type,
+            labels,
+            attributes,
+            created_at,
+            links_from,
+        ));
     }
+
+    let mut links_created = 0u64;
+    let mut links_skipped = 0u64;
 
     // Insert all parsed entries in a single transaction for performance and atomicity
     if !dry_run {
@@ -3343,20 +3382,31 @@ fn import(dry_run: bool) {
             process::exit(1);
         }
 
-        for (data, entity_type, labels, attributes, created_at) in &parsed_entries {
-            let id = Uuid::new_v4().to_string();
+        // Phase 1: Insert entries and build old_id -> new_id mapping
+        let mut id_map: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
+
+        for (old_id, data, entity_type, labels, attributes, created_at, _links_from) in
+            &parsed_entries
+        {
+            let new_id = Uuid::new_v4().to_string();
+
+            // Record mapping from old ID to new ID
+            if let Some(oid) = old_id {
+                id_map.insert(oid.clone(), new_id.clone());
+            }
 
             let mut failed = false;
 
             let insert_result = if let Some(ts) = created_at {
                 conn.execute(
                     "INSERT INTO entries (id, data, entity_type, created_at) VALUES (?1, ?2, ?3, ?4)",
-                    rusqlite::params![id, data, entity_type, ts],
+                    rusqlite::params![new_id, data, entity_type, ts],
                 )
             } else {
                 conn.execute(
                     "INSERT INTO entries (id, data, entity_type) VALUES (?1, ?2, ?3)",
-                    rusqlite::params![id, data, entity_type],
+                    rusqlite::params![new_id, data, entity_type],
                 )
             };
             if let Err(e) = insert_result {
@@ -3367,7 +3417,7 @@ fn import(dry_run: bool) {
             if !failed
                 && let Err(e) = conn.execute(
                     "INSERT INTO entries_fts(id, data) VALUES (?1, ?2)",
-                    rusqlite::params![id, data],
+                    rusqlite::params![new_id, data],
                 )
             {
                 eprintln!("error: failed to insert FTS entry: {e}");
@@ -3378,7 +3428,7 @@ fn import(dry_run: bool) {
                 for label in labels {
                     if let Err(e) = conn.execute(
                         "INSERT INTO labels (entry_id, label) VALUES (?1, ?2)",
-                        rusqlite::params![id, label],
+                        rusqlite::params![new_id, label],
                     ) {
                         eprintln!("error: failed to insert label: {e}");
                         failed = true;
@@ -3391,7 +3441,7 @@ fn import(dry_run: bool) {
                 for (key, value) in attributes {
                     if let Err(e) = conn.execute(
                         "INSERT INTO attributes (entry_id, key, value) VALUES (?1, ?2, ?3)",
-                        rusqlite::params![id, key, value],
+                        rusqlite::params![new_id, key, value],
                     ) {
                         eprintln!("error: failed to insert attribute: {e}");
                         failed = true;
@@ -3409,22 +3459,96 @@ fn import(dry_run: bool) {
             imported += 1;
         }
 
+        // Phase 2: Reconstruct links using old_id -> new_id mapping
+        for (old_id, _data, _entity_type, _labels, _attributes, _created_at, links_from) in
+            &parsed_entries
+        {
+            if links_from.is_empty() {
+                continue;
+            }
+
+            // Resolve the source entry's new ID
+            let from_new_id = match old_id {
+                Some(oid) => match id_map.get(oid) {
+                    Some(nid) => nid.clone(),
+                    None => continue, // should not happen
+                },
+                None => continue, // no old ID, can't map links
+            };
+
+            for (to_old_id, rel) in links_from {
+                match id_map.get(to_old_id) {
+                    Some(to_new_id) => {
+                        if let Err(e) = conn.execute(
+                            "INSERT OR IGNORE INTO links (from_id, to_id, rel) VALUES (?1, ?2, ?3)",
+                            rusqlite::params![from_new_id, to_new_id, rel],
+                        ) {
+                            eprintln!("error: failed to create link: {e}");
+                            // Non-fatal: continue with remaining links
+                        } else {
+                            links_created += 1;
+                        }
+                    }
+                    None => {
+                        let short_id = if to_old_id.len() >= 8 {
+                            &to_old_id[..8]
+                        } else {
+                            to_old_id
+                        };
+                        eprintln!("warning: link target {short_id}... not in import set, skipping");
+                        links_skipped += 1;
+                    }
+                }
+            }
+        }
+
         if let Err(e) = conn.execute_batch("COMMIT") {
             eprintln!("error: failed to commit transaction: {e}");
             process::exit(1);
         }
     }
 
-    let error_part = if errors == 1 {
-        "1 error".to_string()
+    if json_output {
+        if dry_run {
+            let result = serde_json::json!({
+                "dry_run": true,
+                "entries": imported,
+                "errors": errors,
+                "links_expected": dry_run_link_count,
+            });
+            println!("{}", serde_json::to_string_pretty(&result).unwrap());
+        } else {
+            let result = serde_json::json!({
+                "imported": imported,
+                "errors": errors,
+                "links_created": links_created,
+                "links_skipped": links_skipped,
+            });
+            println!("{}", serde_json::to_string_pretty(&result).unwrap());
+        }
     } else {
-        format!("{errors} errors")
-    };
-    if dry_run {
-        let word = if imported == 1 { "entry" } else { "entries" };
-        eprintln!("Dry run: {imported} {word} would be imported ({error_part})");
-    } else {
-        eprintln!("Imported {imported} entries ({error_part})");
+        let error_part = if errors == 1 {
+            "1 error".to_string()
+        } else {
+            format!("{errors} errors")
+        };
+        let link_part = if links_created > 0 || links_skipped > 0 || dry_run_link_count > 0 {
+            if dry_run {
+                format!(", {dry_run_link_count} links expected")
+            } else if links_skipped > 0 {
+                format!(", {links_created} links created, {links_skipped} links skipped")
+            } else {
+                format!(", {links_created} links created")
+            }
+        } else {
+            String::new()
+        };
+        if dry_run {
+            let word = if imported == 1 { "entry" } else { "entries" };
+            eprintln!("Dry run: {imported} {word} would be imported ({error_part}{link_part})");
+        } else {
+            eprintln!("Imported {imported} entries ({error_part}{link_part})");
+        }
     }
 }
 
@@ -5797,7 +5921,7 @@ fn main() {
             id,
             &format,
         ),
-        Command::Import { dry_run } => import(dry_run),
+        Command::Import { dry_run, json } => import(dry_run, json),
         Command::Delete {
             id,
             confirm,

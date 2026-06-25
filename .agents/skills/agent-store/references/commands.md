@@ -249,30 +249,39 @@ agent-store export | jq -r '.id'
 Import entries from JSONL on stdin. Complement of `export`.
 
 ```
-agent-store import [--dry-run]
+agent-store import [--dry-run] [--json]
 ```
 
 Options:
 - `--dry-run` — Parse and validate without inserting anything. Prints
-  `Dry run: N entries would be imported (M errors)` on stderr. Does not
-  require an initialized store.
+  `Dry run: N entries would be imported (M errors, K links expected)` on stderr.
+  Does not require an initialized store.
+- `--json` — Output result as JSON object to stdout. Fields: `imported`,
+  `errors`, `links_created`, `links_skipped` (or `entries`, `links_expected`
+  for dry-run).
 
 Reads JSONL from stdin (one JSON object per line). For each valid line,
 inserts a new entry with a fresh UUID. The `created_at` field from the input
 is preserved when present (for true backup/restore); when missing, the current
-time is used. The `id` field is ignored to prevent conflicts.
+time is used.
+
+**Link reconstruction:** When entries contain `links_from` arrays (as produced
+by `export`), import builds an old-ID-to-new-ID mapping and recreates links
+with the remapped IDs after all entries are inserted. Link targets that are not
+part of the import set are skipped with a warning to stderr.
 
 Required fields: `data` (string).
 Optional fields: `entity_type` (string), `labels` (array of strings),
-`attributes` (object of string key-value pairs).
+`attributes` (object of string key-value pairs), `links_from` (array of
+`{to, rel}` objects).
 
 On parse errors or missing `data`, prints the error with line number to
 stderr and continues processing. Empty lines are skipped.
 
-Output: `Imported N entries (M errors)` on stderr.
+Output: `Imported N entries (M errors, K links created)` on stderr.
 
 ```bash
-# Round-trip backup/restore
+# Round-trip backup/restore (including links)
 agent-store export > backup.jsonl
 cat backup.jsonl | agent-store import
 
@@ -281,6 +290,9 @@ cat data.jsonl | agent-store import --dry-run
 
 # Import filtered entries from another store
 AGENT_STORE_PATH=./other agent-store export --label shared | agent-store import
+
+# Import with JSON output for scripting
+cat backup.jsonl | agent-store import --json
 ```
 
 ## agent-store delete

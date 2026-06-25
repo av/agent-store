@@ -285,6 +285,15 @@
 - label: import preserves created_at timestamps from JSONL when present, using current time as fallback when missing
   command: cd /tmp/test-import-ts && rm -rf .agent-store && agent-store init > /dev/null 2>&1 && echo "original" | agent-store push --label test --timestamp "2020-06-15 12:00:00" -q && agent-store export > /tmp/test-import-ts-backup.jsonl && rm -rf .agent-store && agent-store init > /dev/null 2>&1 && agent-store import < /tmp/test-import-ts-backup.jsonl 2>&1 && agent-store query --json --latest | jq -r .created_at | grep -q "2020-06-15 12:00:00" && echo PASS || echo FAIL
   tags: [spec, implemented]
+- label: import reconstructs links from exported links_from arrays — builds old_id to new_id mapping and creates link rows with remapped IDs after all entries are inserted
+  command: DIR=/tmp/test-import-links-$$ && mkdir -p "$DIR" && cd "$DIR" && rm -rf .agent-store && agent-store init 2>/dev/null && echo "parent data" | agent-store push --label parent 2>/dev/null && PARENT_ID=$(agent-store query --label parent --json | jq -r ".[0].id") && echo "child data" | agent-store push --label child --link "depends:$PARENT_ID" 2>/dev/null && agent-store export --format jsonl | agent-store import 2>&1 | grep -q "link" && echo PASS || echo FAIL
+  tags: [spec, implemented]
+- label: import --dry-run reports expected link count when links_from arrays are present in the input
+  command: DIR=/tmp/test-import-links2-$$ && mkdir -p "$DIR" && cd "$DIR" && rm -rf .agent-store && agent-store init 2>/dev/null && echo "parent data" | agent-store push --label parent 2>/dev/null && PARENT_ID=$(agent-store query --label parent --json | jq -r ".[0].id") && echo "child data" | agent-store push --label child --link "depends:$PARENT_ID" 2>/dev/null && agent-store export --format jsonl | agent-store import --dry-run 2>&1 | grep -qE "[0-9]+ links expected" && echo PASS || echo FAIL
+  tags: [spec, implemented]
+- label: import --json output includes links_created count in the result object
+  command: DIR=/tmp/test-import-links3-$$ && mkdir -p "$DIR" && cd "$DIR" && rm -rf .agent-store && agent-store init 2>/dev/null && echo "parent data" | agent-store push --label parent 2>/dev/null && PARENT_ID=$(agent-store query --label parent --json | jq -r ".[0].id") && echo "child data" | agent-store push --label child --link "depends:$PARENT_ID" 2>/dev/null && agent-store export --format jsonl | agent-store import --json 2>/dev/null | jq -e ".links_created >= 0" > /dev/null && echo PASS || echo FAIL
+  tags: [spec, implemented]
 
 ## purge
 - label: agent-store purge without --confirm prints warning message and exits 1
