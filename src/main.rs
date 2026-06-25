@@ -568,6 +568,9 @@ enum Command {
         /// filter to entries that have this label (repeatable, AND logic)
         #[arg(long)]
         label: Vec<String>,
+        /// filter by operation type (repeatable, OR logic): tag, untag, set-attr, unset-attr, delete, update
+        #[arg(long)]
+        operation: Vec<String>,
     },
 }
 
@@ -4509,6 +4512,7 @@ fn log_cmd(
     limit: u64,
     json_output: bool,
     labels: Vec<String>,
+    operations: Vec<String>,
 ) {
     let conn = open_db();
 
@@ -4566,6 +4570,17 @@ fn log_cmd(
             params.push(Box::new(label.clone()));
             conditions.push(format!("l.label = ?{}", params.len()));
         }
+    }
+
+    if !operations.is_empty() {
+        let placeholders: Vec<String> = operations
+            .iter()
+            .map(|op| {
+                params.push(Box::new(op.clone()));
+                format!("?{}", params.len())
+            })
+            .collect();
+        conditions.push(format!("c.operation IN ({})", placeholders.join(", ")));
     }
 
     let where_clause = if conditions.is_empty() {
@@ -5466,7 +5481,8 @@ fn main() {
             limit,
             json,
             label,
-        } => log_cmd(id, since, limit, json, label),
+            operation,
+        } => log_cmd(id, since, limit, json, label, operation),
         Command::Compact { json } => compact(json),
         Command::Completions { shell } => {
             let mut cmd = Cli::command();
