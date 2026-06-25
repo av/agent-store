@@ -100,7 +100,7 @@ agent-store stats     # entry count and store size
 | `init` | Create `.agent-store/store.db`, install skills to `.agents/skills/`, set up project docs |
 | `push` | Read stdin, store as entry. Flags: `--label`, `--type`, `--attr key=value`, `-q`/`--quiet`, `--id-only` |
 | `pull <id>` | Retrieve entry by ID, print data to stdout. Flags: `--json` (full entry as JSON object) |
-| `query` | List entries. Filter: `--label` (repeat), `--not-label` (repeat, exclude), `--type`, `--attr key=value` (repeat), `--data <substring>`, `--json`, `--count`, `--latest`, `--limit N`, `--offset N`, `-r`/`--reverse` |
+| `query` | List entries. Filter: `--label` (repeat), `--not-label` (repeat, exclude), `--type`, `--attr key=value` (repeat), `--data <substring>`, `--after <datetime>`, `--before <datetime>`, `--json`, `--count`, `--latest`, `--limit N`, `--offset N`, `-r`/`--reverse` |
 | `schema` | Show entity types and label counts |
 | `stats` | Show entry count and store size. Flags: `--json` |
 | `skills` | List and read built-in usage guides |
@@ -184,9 +184,16 @@ agent-store query --label todo --not-label done         # open todos
 agent-store query --not-label done --not-label archived # exclude multiple labels
 agent-store query --label todo --not-label done --json  # combine with --json
 
+# Date filters
+agent-store query --after "2024-06-01"                # entries after date
+agent-store query --before "2024-06-30"               # entries before date
+agent-store query --after "2024-06-01" --before "2024-06-30"  # date range
+agent-store query --label log --after "2024-06-01 09:00:00"   # combine with filters
+
 # Pagination
 agent-store query --limit 10                  # first 10 entries
 agent-store query --limit 10 --offset 20      # entries 21-30
+agent-store query --count --limit 10          # count within page (respects limit)
 ```
 
 **Default output** is raw entry data (just the payloads) concatenated with no

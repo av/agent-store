@@ -102,6 +102,12 @@ enum Command {
         /// Filter by substring match in entry data
         #[arg(long)]
         data: Option<String>,
+        /// Only entries created after this timestamp (ISO 8601: "2024-01-15" or "2024-01-15 10:30:00")
+        #[arg(long)]
+        after: Option<String>,
+        /// Only entries created before this timestamp (ISO 8601: "2024-01-15" or "2024-01-15 10:30:00")
+        #[arg(long)]
+        before: Option<String>,
     },
     /// Show entity types and label counts
     Schema,
@@ -793,6 +799,8 @@ fn query(
     offset: Option<u64>,
     reverse: bool,
     data_filter: Option<String>,
+    after: Option<String>,
+    before: Option<String>,
 ) {
     // Validate empty strings before any DB work
     for label in &labels {
@@ -819,8 +827,9 @@ fn query(
     let conn = open_db();
 
     // Build query dynamically
-    // When --count + --latest, use a subquery with LIMIT 1 then count the rows
-    let select_cols = if count && latest {
+    // When --count + (--latest or --limit/--offset), select rows first then wrap in COUNT subquery
+    let needs_count_subquery = count && (latest || limit.is_some());
+    let select_cols = if needs_count_subquery {
         "DISTINCT e.id"
     } else if count {
         "COUNT(DISTINCT e.id)"
@@ -879,6 +888,18 @@ fn query(
         params.push(Box::new(nl.clone()));
         param_idx += 1;
     }
+
+    // Date range filters
+    if let Some(ref ts) = after {
+        conditions.push(format!("e.created_at > ?{param_idx}"));
+        params.push(Box::new(ts.clone()));
+        param_idx += 1;
+    }
+    if let Some(ref ts) = before {
+        conditions.push(format!("e.created_at < ?{param_idx}"));
+        params.push(Box::new(ts.clone()));
+        param_idx += 1;
+    }
     let _ = param_idx; // suppress unused assignment warning
 
     if !conditions.is_empty() {
@@ -886,8 +907,8 @@ fn query(
         sql.push_str(&conditions.join(" AND "));
     }
 
-    // Add ORDER BY (not applied when --count without --latest)
-    if !count || latest {
+    // Add ORDER BY (not applied when --count without --latest or --limit)
+    if !count || needs_count_subquery {
         let direction = if reverse { "ASC" } else { "DESC" };
         sql.push_str(&format!(" ORDER BY e.created_at {direction}, e.rowid {direction}"));
     }
@@ -895,16 +916,15 @@ fn query(
     // Add LIMIT/OFFSET
     if latest {
         sql.push_str(" LIMIT 1");
-    } else if !count
-        && let Some(lim) = limit {
-            sql.push_str(&format!(" LIMIT {lim}"));
-            if let Some(off) = offset {
-                sql.push_str(&format!(" OFFSET {off}"));
-            }
+    } else if let Some(lim) = limit {
+        sql.push_str(&format!(" LIMIT {lim}"));
+        if let Some(off) = offset {
+            sql.push_str(&format!(" OFFSET {off}"));
         }
+    }
 
-    // Wrap in COUNT subquery when both --count and --latest are set
-    if count && latest {
+    // Wrap in COUNT subquery when --count is combined with --latest or --limit/--offset
+    if needs_count_subquery {
         sql = format!("SELECT COUNT(*) FROM ({sql})");
     }
 
@@ -1688,7 +1708,9 @@ fn main() {
             offset,
             reverse,
             data,
-        } => query(label, not_label, entity_type, attr, json, count, latest, limit, offset, reverse, data),
+            after,
+            before,
+        } => query(label, not_label, entity_type, attr, json, count, latest, limit, offset, reverse, data, after, before),
 
         Command::Export {
             label,

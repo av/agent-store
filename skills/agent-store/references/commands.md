@@ -66,6 +66,8 @@ Options:
 - `--type <TYPE>` — Filter by entity type (exact match)
 - `--attr <KEY=VALUE>` — Filter by attribute (can be repeated, AND logic — all must match)
 - `--data <SUBSTRING>` — Filter by substring match in entry data
+- `--after <DATETIME>` — Only entries created after this timestamp (ISO 8601: `"2024-01-15"` or `"2024-01-15 10:30:00"`)
+- `--before <DATETIME>` — Only entries created before this timestamp (ISO 8601: `"2024-01-15"` or `"2024-01-15 10:30:00"`)
 - `--json` — Output as JSON array of full entry objects
 - `--count` — Output only the number of matching entries (just a number, for scripting)
 - `--latest` — Return only the single most recent matching entry (conflicts with `--limit`)
@@ -79,8 +81,11 @@ Without any filter flags, returns all entries.
 It conflicts with `--limit` (use one or the other). Combine with `--reverse` to get the
 oldest single entry instead.
 
-`--count` ignores `--limit`/`--offset` and always reports the total matching count.
+`--count` respects `--limit`/`--offset` — it counts entries within the paginated window.
 When combined with `--latest`, `--count` returns 0 or 1.
+
+`--after` and `--before` accept ISO 8601 timestamps. Use date-only (`"2024-01-15"`) or
+date-time (`"2024-01-15 10:30:00"`). Combine both for a date range.
 
 **Default output:** raw entry data (payloads only) concatenated with no
 separator. Entries appear on separate lines only if their data contains

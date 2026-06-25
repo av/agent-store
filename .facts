@@ -181,6 +181,15 @@
 - label: query --not-label excludes entries with the given label; repeatable with AND semantics (all specified labels excluded)
   command: cd /tmp && rm -rf as-test-8kb && mkdir as-test-8kb && cd as-test-8kb && git init -q && agent-store init 2>/dev/null && echo "a" | agent-store push --label todo -q && echo "b" | agent-store push --label todo --label done -q && echo "c" | agent-store push --label todo --label archived -q && test "$(agent-store query --label todo --not-label done --count)" = "2" && test "$(agent-store query --not-label done --not-label archived --count)" = "1" && rm -rf /tmp/as-test-8kb
   tags: [spec, implemented]
+- label: query --count respects --limit and --offset by wrapping in a subquery so count reflects the paginated result set
+  command: cd /tmp/agent-store-test-countlim && rm -rf .agent-store && agent-store init >/dev/null 2>&1 && for i in 1 2 3 4 5; do echo "entry$i" | agent-store push --label counttest -q; done && RESULT=$(agent-store query --label counttest --count --limit 3) && test "$RESULT" = "3"
+  tags: [spec, implemented]
+- label: query --after filters entries to only those created after the given ISO 8601 timestamp
+  command: cd /tmp/agent-store-test-after && rm -rf .agent-store && agent-store init >/dev/null 2>&1 && echo "old" | agent-store push --label timetest -q && sleep 1 && MIDPOINT=$(date -u +"%Y-%m-%d %H:%M:%S") && sleep 1 && echo "new" | agent-store push --label timetest -q && RESULT=$(agent-store query --label timetest --after "$MIDPOINT" --count) && test "$RESULT" = "1"
+  tags: [spec, implemented]
+- label: query --before filters entries to only those created before the given ISO 8601 timestamp
+  command: cd /tmp/agent-store-test-before && rm -rf .agent-store && agent-store init >/dev/null 2>&1 && echo "old" | agent-store push --label timetest -q && sleep 1 && MIDPOINT=$(date -u +"%Y-%m-%d %H:%M:%S") && sleep 1 && echo "new" | agent-store push --label timetest -q && RESULT=$(agent-store query --label timetest --before "$MIDPOINT" --count) && test "$RESULT" = "1"
+  tags: [spec, implemented]
 
 ## push
 - label: push -q/--quiet suppresses all output including the entry ID
