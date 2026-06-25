@@ -1,4 +1,4 @@
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
 use rusqlite::Connection;
 use serde::Serialize;
 use std::collections::HashMap;
@@ -50,8 +50,11 @@ enum Command {
         #[arg(long = "type")]
         entity_type: Option<String>,
         /// Only print the entry ID (for scripting/piping)
-        #[arg(long, short = 'q')]
+        #[arg(long, short = 'q', conflicts_with = "id_only")]
         quiet: bool,
+        /// Output only the raw UUID (no prefix text), for scripting
+        #[arg(long, conflicts_with = "quiet")]
+        id_only: bool,
         /// Set attribute key=value pair (can be repeated)
         #[arg(long = "attr")]
         attr: Vec<String>,
@@ -103,6 +106,11 @@ enum Command {
     Skills {
         #[command(subcommand)]
         action: SkillsAction,
+    },
+    /// Generate shell completions for bash, zsh, fish, elvish, or powershell
+    Completions {
+        /// Shell to generate completions for
+        shell: clap_complete::Shell,
     },
 }
 
@@ -639,7 +647,7 @@ fn parse_attr(attr: &str) -> (&str, &str) {
     }
 }
 
-fn push(labels: Vec<String>, entity_type: Option<String>, quiet: bool, attrs: Vec<String>) {
+fn push(labels: Vec<String>, entity_type: Option<String>, quiet: bool, id_only: bool, attrs: Vec<String>) {
     // Validate empty strings before any DB work
     for label in &labels {
         if label.trim().is_empty() {
@@ -729,7 +737,9 @@ fn push(labels: Vec<String>, entity_type: Option<String>, quiet: bool, attrs: Ve
         process::exit(1);
     }
 
-    if !quiet {
+    if id_only {
+        print!("{id}");
+    } else if !quiet {
         println!("stored entry {id}");
     }
 }
@@ -1202,8 +1212,9 @@ fn main() {
             label,
             entity_type,
             quiet,
+            id_only,
             attr,
-        } => push(label, entity_type, quiet, attr),
+        } => push(label, entity_type, quiet, id_only, attr),
         Command::Pull { id } => pull(&id),
         Command::Query {
             label,
@@ -1224,5 +1235,9 @@ fn main() {
             SkillsAction::Get { name, full } => skills_get(&name, full),
             SkillsAction::Path { name } => skills_path(&name),
         },
+        Command::Completions { shell } => {
+            let mut cmd = Cli::command();
+            clap_complete::generate(shell, &mut cmd, "agent-store", &mut std::io::stdout());
+        }
     }
 }

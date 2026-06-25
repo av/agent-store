@@ -177,6 +177,17 @@
 - label: push -q/--quiet suppresses all output including the entry ID
   command: cd /tmp/as-test-push-quiet && rm -rf .agent-store && mkdir -p .git && agent-store init > /dev/null && output=$(echo "quiet-test" | agent-store push --label qt -q 2>&1) && test -z "$output" && echo "OK"
   tags: [spec, implemented]
+- label: push --id-only outputs only the raw UUID with no prefix text for scripting
+  command: echo test | agent-store push --label idonly-test --id-only 2>&1 | grep -qE "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" && echo PASS || echo FAIL
+  tags: [spec, implemented]
+- label: push --id-only conflicts with --quiet (mutually exclusive via clap)
+  command: echo test | agent-store push --label idonly-conflict --id-only --quiet 2>&1 | grep -qi "cannot be used with\|conflict" && echo PASS || echo FAIL
+  tags: [spec, implemented]
+
+## completions
+- label: agent-store completions <shell> generates shell completion scripts for the specified shell and writes to stdout
+  command: agent-store completions bash 2>&1 | head -3 | grep -q "complete\|_agent" && echo PASS || echo FAIL
+  tags: [spec, implemented]
 
 # resilience
 - PRAGMA foreign_keys = ON is set on every database connection so ON DELETE CASCADE is enforced @spec @implemented

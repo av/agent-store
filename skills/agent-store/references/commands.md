@@ -28,9 +28,15 @@ Options:
 - `--type <TYPE>` — Set entity type classification
 - `--attr <KEY=VALUE>` — Set attribute key-value pair (repeatable, AND logic on query)
 - `-q`, `--quiet` — Suppress all output (for scripting when no feedback is needed)
+- `--id-only` — Output only the raw UUID (no "stored entry" prefix). Conflicts with `--quiet`
 
 Data is read from stdin until EOF. Empty stdin is an error. Labels, type,
 and attribute keys cannot be empty strings.
+
+Scripting example:
+```bash
+ID=$(echo "data" | agent-store push --label tag --id-only)
+```
 
 ## agent-store pull \<ID\>
 
@@ -125,3 +131,22 @@ Available skills:
 - `agent-store` — Core reference (this document)
 - `agent-store-patterns` — Workflow recipes for common agent tasks
 - `agent-store-pipelines` — Shell composition and batch operations
+
+## agent-store completions
+
+Generate shell completion scripts.
+
+```
+agent-store completions <SHELL>
+```
+
+Supported shells: `bash`, `zsh`, `fish`, `elvish`, `powershell`
+
+Writes the completion script to stdout. Redirect to the appropriate file
+for your shell:
+
+```bash
+agent-store completions bash > ~/.bash_completion.d/agent-store
+agent-store completions zsh > ~/.zfunc/_agent-store
+agent-store completions fish > ~/.config/fish/completions/agent-store.fish
+```

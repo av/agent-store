@@ -91,12 +91,13 @@ agent-store stats     # entry count and store size
 | Command | What it does |
 |---------|-------------|
 | `init` | Create `.agent-store/store.db`, install skills to `.agents/skills/`, set up project docs |
-| `push` | Read stdin, store as entry. Flags: `--label`, `--type`, `--attr key=value`, `-q`/`--quiet` |
+| `push` | Read stdin, store as entry. Flags: `--label`, `--type`, `--attr key=value`, `-q`/`--quiet`, `--id-only` |
 | `pull <id>` | Retrieve entry by ID, print data to stdout |
 | `query` | List entries. Filter: `--label` (repeat), `--type`, `--attr key=value` (repeat), `--json`, `--count`, `--latest`, `--limit N`, `--offset N`, `-r`/`--reverse` |
 | `schema` | Show entity types and label counts |
 | `stats` | Show entry count and store size. Flags: `--json` |
 | `skills` | List and read built-in usage guides |
+| `completions <shell>` | Generate shell completions (bash, zsh, fish, elvish, powershell) |
 
 ## Pushing data
 
@@ -116,8 +117,8 @@ echo "data" | agent-store push --attr key1=value1 --attr key2=value2
 # Quiet mode — suppresses all output (for scripts that don't need feedback)
 echo "data" | agent-store push --quiet
 
-# Get the ID for later retrieval
-ID=$(echo "data" | agent-store push | awk '{print $3}')
+# Get the ID for later retrieval (scripting-friendly)
+ID=$(echo "data" | agent-store push --id-only)
 
 # Multi-line data (heredoc)
 agent-store push --type note --label meeting <<'EOF'
@@ -204,4 +205,14 @@ agent-store skills get agent-store --full      # This guide + command reference
 agent-store skills get agent-store-patterns    # Workflow recipes
 agent-store skills get agent-store-pipelines   # Shell composition
 agent-store skills path agent-store            # Print skill data directory
+```
+
+## Shell completions
+
+Generate tab-completion scripts for your shell:
+
+```bash
+agent-store completions bash > ~/.bash_completion.d/agent-store
+agent-store completions zsh > ~/.zfunc/_agent-store
+agent-store completions fish > ~/.config/fish/completions/agent-store.fish
 ```
