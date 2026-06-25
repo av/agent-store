@@ -349,6 +349,45 @@ agent-store attrs --count              # color (3)\n size (1)\n weight (2)
 agent-store attrs --count --json       # {"color":3,"size":1,"weight":2}
 ```
 
+## agent-store history
+
+Show chronological history of entries with a given label. Since agent-store is append-only, pushing multiple entries with the same label tracks changes over time. The `history` subcommand makes this explicit with human-readable output.
+
+```
+agent-store history <LABEL> [--json] [--limit N] [--data <SUBSTRING>]
+```
+
+Arguments:
+- `<LABEL>` — Required. The label to show history for.
+
+Options:
+- `--json` — Output as JSON array (same format as `query --json`)
+- `--limit <N>` — Show only the last N entries (most recent N, still displayed oldest first)
+- `--data <SUBSTRING>` — Filter to entries whose data contains the substring
+
+Default sort is oldest first (ASC), opposite of `query` default.
+
+```bash
+# Show full history of "config" label
+agent-store history config
+
+# Output:
+# [2024-01-15 10:30:00] abc1234
+#   First value
+#
+# [2024-01-15 11:00:00] def4567
+#   Updated value
+
+# JSON output for programmatic use
+agent-store history config --json
+
+# Last 3 entries only
+agent-store history config --limit 3
+
+# Search within history
+agent-store history config --data "database"
+```
+
 ## agent-store completions
 
 Generate shell completion scripts.

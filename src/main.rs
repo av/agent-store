@@ -226,6 +226,20 @@ enum Command {
         #[arg(long)]
         count: bool,
     },
+    /// Show chronological history of entries with a given label
+    History {
+        /// Label to show history for
+        label: String,
+        /// Output as JSON array (same format as query --json)
+        #[arg(long)]
+        json: bool,
+        /// Show only the last N entries
+        #[arg(long)]
+        limit: Option<u64>,
+        /// Filter by substring match in entry data
+        #[arg(long)]
+        data: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -2250,6 +2264,163 @@ fn attrs_cmd(json: bool, count: bool) {
     }
 }
 
+fn history(label: &str, json: bool, limit: Option<u64>, data_filter: Option<String>) {
+    let conn = open_db();
+
+    // Build query: all entries with the given label, oldest first
+    let mut sql = String::from(
+        "SELECT DISTINCT e.id, e.data, e.entity_type, e.created_at \
+         FROM entries e \
+         JOIN labels l0 ON e.id = l0.entry_id \
+         WHERE l0.label = ?1",
+    );
+    let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+    params.push(Box::new(label.to_string()));
+    let mut param_idx = 2u32;
+
+    // Optional data substring filter
+    if let Some(ref substr) = data_filter {
+        sql.push_str(&format!(" AND e.data LIKE '%' || ?{param_idx} || '%'"));
+        params.push(Box::new(substr.clone()));
+        param_idx += 1;
+    }
+    let _ = param_idx;
+
+    // Always oldest first (ASC)
+    sql.push_str(" ORDER BY e.created_at ASC, e.rowid ASC");
+
+    // --limit: show only the last N entries.
+    // To get the *last* N in chronological order: reverse-sort, limit, then re-reverse.
+    if let Some(n) = limit {
+        // Replace the ASC order with DESC + LIMIT, wrapping in a subquery
+        let inner = sql.replace(" ORDER BY e.created_at ASC, e.rowid ASC", "");
+        sql = format!(
+            "SELECT id, data, entity_type, created_at FROM \
+             ({inner} ORDER BY e.created_at DESC, e.rowid DESC LIMIT {n}) \
+             ORDER BY created_at ASC"
+        );
+    }
+
+    let mut stmt = match conn.prepare(&sql) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("error: failed to prepare query: {e}");
+            process::exit(1);
+        }
+    };
+
+    let params_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+    let rows = match stmt.query_map(params_refs.as_slice(), |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, Option<String>>(2)?,
+            row.get::<_, String>(3)?,
+        ))
+    }) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("error: failed to execute query: {e}");
+            process::exit(1);
+        }
+    };
+
+    if json {
+        // JSON output: collect full entry objects with labels and attributes
+        let mut entries: Vec<EntryJson> = Vec::new();
+        for row in rows {
+            match row {
+                Ok((id, data, etype, created_at)) => {
+                    let labels: Vec<String> = {
+                        let mut lstmt =
+                            match conn.prepare("SELECT label FROM labels WHERE entry_id = ?1") {
+                                Ok(s) => s,
+                                Err(e) => {
+                                    eprintln!("error: failed to query labels: {e}");
+                                    process::exit(1);
+                                }
+                            };
+                        match lstmt.query_map(rusqlite::params![id], |r| r.get::<_, String>(0)) {
+                            Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
+                            Err(e) => {
+                                eprintln!("error: failed to query labels: {e}");
+                                process::exit(1);
+                            }
+                        }
+                    };
+                    let attributes: HashMap<String, String> = {
+                        let mut astmt = match conn
+                            .prepare("SELECT key, value FROM attributes WHERE entry_id = ?1")
+                        {
+                            Ok(s) => s,
+                            Err(e) => {
+                                eprintln!("error: failed to query attributes: {e}");
+                                process::exit(1);
+                            }
+                        };
+                        match astmt.query_map(rusqlite::params![id], |r| {
+                            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+                        }) {
+                            Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
+                            Err(e) => {
+                                eprintln!("error: failed to query attributes: {e}");
+                                process::exit(1);
+                            }
+                        }
+                    };
+                    entries.push(EntryJson {
+                        id,
+                        data,
+                        entity_type: etype,
+                        created_at,
+                        labels,
+                        attributes,
+                    });
+                }
+                Err(e) => {
+                    eprintln!("error: failed to read row: {e}");
+                    process::exit(1);
+                }
+            }
+        }
+        match serde_json::to_string(&entries) {
+            Ok(json_str) => println!("{json_str}"),
+            Err(e) => {
+                eprintln!("error: failed to serialize JSON: {e}");
+                process::exit(1);
+            }
+        }
+    } else {
+        // Human-readable output
+        let mut first = true;
+        for row in rows {
+            match row {
+                Ok((id, data, _etype, created_at)) => {
+                    if !first {
+                        println!();
+                    }
+                    first = false;
+                    // Truncate ID to first 7 chars for readability
+                    let short_id = &id[..7.min(id.len())];
+                    println!("[{created_at}] {short_id}");
+                    // Indent each line of data with 2 spaces
+                    for line in data.lines() {
+                        println!("  {line}");
+                    }
+                    // Handle data that is empty or has no lines
+                    if data.is_empty() {
+                        println!("  ");
+                    }
+                }
+                Err(e) => {
+                    eprintln!("error: failed to read row: {e}");
+                    process::exit(1);
+                }
+            }
+        }
+    }
+}
+
 fn main() {
     // Reset SIGPIPE to default so piping to head/tail/etc. exits cleanly
     // instead of panicking with "Broken pipe".
@@ -2345,6 +2516,12 @@ fn main() {
         Command::Labels { json, count } => labels_cmd(json, count),
         Command::Types { json, count } => types_cmd(json, count),
         Command::Attrs { json, count } => attrs_cmd(json, count),
+        Command::History {
+            label,
+            json,
+            limit,
+            data,
+        } => history(&label, json, limit, data),
         Command::Completions { shell } => {
             let mut cmd = Cli::command();
             clap_complete::generate(shell, &mut cmd, "agent-store", &mut std::io::stdout());
