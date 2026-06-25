@@ -93,12 +93,13 @@ agent-store stats     # entry count and store size
 | `init` | Create `.agent-store/store.db`, install skills to `.agents/skills/`, set up project docs |
 | `push` | Read stdin, store as entry. Flags: `--label`, `--type`, `--attr key=value`, `-q`/`--quiet`, `--id-only` |
 | `pull <id>` | Retrieve entry by ID, print data to stdout |
-| `query` | List entries. Filter: `--label` (repeat), `--type`, `--attr key=value` (repeat), `--json`, `--count`, `--latest`, `--limit N`, `--offset N`, `-r`/`--reverse` |
+| `query` | List entries. Filter: `--label` (repeat), `--type`, `--attr key=value` (repeat), `--data <substring>`, `--json`, `--count`, `--latest`, `--limit N`, `--offset N`, `-r`/`--reverse` |
 | `schema` | Show entity types and label counts |
 | `stats` | Show entry count and store size. Flags: `--json` |
 | `skills` | List and read built-in usage guides |
 | `export` | Export entries as JSONL (one JSON object per line). Filter: `--label` (repeat), `--type`, `--attr key=value` (repeat) |
 | `import` | Import entries from JSONL on stdin (complement of export). Generates fresh IDs. |
+| `purge` | Delete ALL entries (destructive). Requires `--confirm` flag. |
 | `completions <shell>` | Generate shell completions (bash, zsh, fish, elvish, powershell) |
 
 ## Pushing data
@@ -166,6 +167,10 @@ agent-store query --label log --reverse
 
 # Oldest single entry
 agent-store query --label log --latest --reverse
+
+# Search by data content (substring match)
+agent-store query --data "error"              # entries containing "error"
+agent-store query --data "error" --label logs # combine with other filters
 
 # Pagination
 agent-store query --limit 10                  # first 10 entries
@@ -253,6 +258,22 @@ The `id` and `created_at` fields from the input are ignored — fresh values are
 always generated to prevent ID conflicts and preserve append-only semantics.
 
 Output: `Imported N entries (M errors)` on stderr.
+
+## Purge
+
+Delete all entries from the store. This is a destructive operation that requires
+explicit confirmation:
+
+```bash
+# Preview what will happen (prints warning, exits 1)
+agent-store purge
+
+# Actually delete everything
+agent-store purge --confirm
+```
+
+Useful for testing and resetting stores. Deletes attributes, labels, and entries
+in FK-safe order.
 
 ## Shell completions
 

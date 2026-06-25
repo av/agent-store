@@ -172,6 +172,12 @@
 - label: query --reverse/-r reverses sort order to oldest-first (ORDER BY created_at ASC)
   command: echo "rev-old" | agent-store push --label reverse-test-fact && sleep 1 && echo "rev-new" | agent-store push --label reverse-test-fact && first=$(agent-store query --label reverse-test-fact --reverse --json | jq -r ".[0].data") && test "$first" = "rev-old"
   tags: [spec, implemented]
+- label: query --data filters entries by substring match in entry data
+  command: export AGENT_STORE_PATH=$(mktemp -d) && agent-store init >/dev/null 2>&1 && echo "hello error world" | agent-store push --label logs --quiet && echo "all good" | agent-store push --label logs --quiet && test "$(agent-store query --data error --count)" = "1"
+  tags: [spec, implemented]
+- label: query --data works with all existing filters including --label, --json, --count, --latest, --reverse, --limit, --offset
+  command: export AGENT_STORE_PATH=$(mktemp -d) && agent-store init >/dev/null 2>&1 && echo "error in logs" | agent-store push --label logs --quiet && echo "error in notes" | agent-store push --label notes --quiet && test "$(agent-store query --data error --label logs --count)" = "1"
+  tags: [spec, implemented]
 
 ## push
 - label: push -q/--quiet suppresses all output including the entry ID
@@ -206,6 +212,14 @@
   tags: [spec, implemented]
 - label: agent-store export | agent-store import round-trips entries — exported entries can be re-imported as new entries with fresh IDs
   command: echo "test-roundtrip" | agent-store push --label rt-test && BEFORE=$(agent-store query --label rt-test --count) && agent-store export --label rt-test | agent-store import && AFTER=$(agent-store query --label rt-test --count) && [ "$AFTER" -gt "$BEFORE" ]
+  tags: [spec, implemented]
+
+## purge
+- label: agent-store purge without --confirm prints warning message and exits 1
+  command: agent-store purge 2>&1; test $? -eq 1
+  tags: [spec, implemented]
+- label: agent-store purge --confirm deletes all entries and prints count of purged entries
+  command: export AGENT_STORE_PATH=$(mktemp -d) && agent-store init >/dev/null 2>&1 && echo "test1" | agent-store push --label x --quiet && echo "test2" | agent-store push --label y --quiet && agent-store purge --confirm 2>&1 | grep -q "Purged 2 entries"
   tags: [spec, implemented]
 
 # resilience

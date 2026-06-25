@@ -61,6 +61,7 @@ Options:
 - `--label <LABEL>` — Filter by label (can be repeated, AND logic — all must match)
 - `--type <TYPE>` — Filter by entity type (exact match)
 - `--attr <KEY=VALUE>` — Filter by attribute (can be repeated, AND logic — all must match)
+- `--data <SUBSTRING>` — Filter by substring match in entry data
 - `--json` — Output as JSON array of full entry objects
 - `--count` — Output only the number of matching entries (just a number, for scripting)
 - `--latest` — Return only the single most recent matching entry (conflicts with `--limit`)
@@ -186,6 +187,23 @@ cat backup.jsonl | agent-store import
 # Import filtered entries from another store
 AGENT_STORE_PATH=./other agent-store export --label shared | agent-store import
 ```
+
+## agent-store purge
+
+Delete ALL entries from the store. Destructive — requires explicit confirmation.
+
+```
+agent-store purge [--confirm]
+```
+
+Options:
+- `--confirm` — Actually perform the deletion. Without this flag, prints a
+  warning and exits with code 1.
+
+Deletes from `attributes`, `labels`, and `entries` tables in FK-safe order.
+Prints `Purged N entries` on success.
+
+Useful for testing and resetting stores.
 
 ## agent-store completions
 

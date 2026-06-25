@@ -93,6 +93,9 @@ enum Command {
         /// Reverse sort order to oldest-first
         #[arg(long, short = 'r')]
         reverse: bool,
+        /// Filter by substring match in entry data
+        #[arg(long)]
+        data: Option<String>,
     },
     /// Show entity types and label counts
     Schema,
@@ -121,6 +124,12 @@ enum Command {
     },
     /// Import entries from JSONL on stdin (complement of export)
     Import,
+    /// Delete ALL entries from the store (destructive, requires --confirm)
+    Purge {
+        /// Confirm you want to delete all data
+        #[arg(long)]
+        confirm: bool,
+    },
     /// Generate shell completions for bash, zsh, fish, elvish, or powershell
     Completions {
         /// Shell to generate completions for
@@ -776,6 +785,7 @@ fn query(
     limit: Option<u64>,
     offset: Option<u64>,
     reverse: bool,
+    data_filter: Option<String>,
 ) {
     // Validate empty strings before any DB work
     for label in &labels {
@@ -846,6 +856,14 @@ fn query(
         params.push(Box::new(value.to_string()));
         param_idx += 1;
     }
+
+    // Data substring filter (uses parameter binding for SQL injection prevention)
+    if let Some(ref substr) = data_filter {
+        conditions.push(format!("e.data LIKE '%' || ?{param_idx} || '%'"));
+        params.push(Box::new(substr.clone()));
+        param_idx += 1;
+    }
+    let _ = param_idx; // suppress unused assignment warning
 
     if !conditions.is_empty() {
         sql.push_str(" WHERE ");
@@ -1511,6 +1529,41 @@ fn import() {
     eprintln!("Imported {imported} entries ({error_part})");
 }
 
+fn purge(confirm: bool) {
+    if !confirm {
+        eprintln!("This will delete ALL entries. Run with --confirm to proceed.");
+        process::exit(1);
+    }
+
+    let conn = open_db();
+
+    // Count entries before deletion
+    let count: i64 = match conn.query_row("SELECT COUNT(*) FROM entries", [], |row| row.get(0)) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("error: failed to count entries: {e}");
+            process::exit(1);
+        }
+    };
+
+    // Delete in FK-safe order: attributes, labels, entries
+    if let Err(e) = conn.execute("DELETE FROM attributes", []) {
+        eprintln!("error: failed to delete attributes: {e}");
+        process::exit(1);
+    }
+    if let Err(e) = conn.execute("DELETE FROM labels", []) {
+        eprintln!("error: failed to delete labels: {e}");
+        process::exit(1);
+    }
+    if let Err(e) = conn.execute("DELETE FROM entries", []) {
+        eprintln!("error: failed to delete entries: {e}");
+        process::exit(1);
+    }
+
+    let word = if count == 1 { "entry" } else { "entries" };
+    println!("Purged {count} {word}");
+}
+
 fn main() {
     // Reset SIGPIPE to default so piping to head/tail/etc. exits cleanly
     // instead of panicking with "Broken pipe".
@@ -1541,7 +1594,8 @@ fn main() {
             limit,
             offset,
             reverse,
-        } => query(label, entity_type, attr, json, count, latest, limit, offset, reverse),
+            data,
+        } => query(label, entity_type, attr, json, count, latest, limit, offset, reverse, data),
 
         Command::Export {
             label,
@@ -1549,6 +1603,7 @@ fn main() {
             attr,
         } => export(label, entity_type, attr),
         Command::Import => import(),
+        Command::Purge { confirm } => purge(confirm),
         Command::Schema => schema(),
         Command::Stats { json } => stats(json),
         Command::Skills { action } => match action {
