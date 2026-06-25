@@ -123,6 +123,9 @@ enum Command {
         /// Filter by substring match in entry data
         #[arg(long)]
         data: Option<String>,
+        /// Full-text search query (FTS5 syntax: terms, "phrases", OR, NOT, prefix*)
+        #[arg(long)]
+        search: Option<String>,
         /// Only entries created after this timestamp (ISO 8601: "2024-01-15" or "2024-01-15 10:30:00")
         #[arg(long)]
         after: Option<String>,
@@ -169,6 +172,9 @@ enum Command {
         /// Filter by substring match in entry data
         #[arg(long)]
         data: Option<String>,
+        /// Full-text search query (FTS5 syntax: terms, "phrases", OR, NOT, prefix*)
+        #[arg(long)]
+        search: Option<String>,
         /// Only entries created after this timestamp (ISO 8601)
         #[arg(long)]
         after: Option<String>,
@@ -210,6 +216,9 @@ enum Command {
         /// Filter by substring match in entry data
         #[arg(long)]
         data: Option<String>,
+        /// Full-text search query (FTS5 syntax: terms, "phrases", OR, NOT, prefix*)
+        #[arg(long)]
+        search: Option<String>,
         /// Only entries created after this timestamp (ISO 8601)
         #[arg(long)]
         after: Option<String>,
@@ -671,7 +680,41 @@ fn open_db() -> Connection {
         eprintln!("error: failed to set database pragmas: {e}");
         process::exit(1);
     }
+    ensure_fts_table(&conn);
     conn
+}
+
+/// Create the FTS5 virtual table if it doesn't exist (migration for pre-FTS stores)
+/// and populate it from existing entries.
+fn ensure_fts_table(conn: &Connection) {
+    // Check if entries_fts already exists
+    let exists: bool = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='entries_fts'",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .map(|c| c > 0)
+        .unwrap_or(false);
+
+    if exists {
+        return;
+    }
+
+    if let Err(e) = conn.execute_batch(
+        "CREATE VIRTUAL TABLE IF NOT EXISTS entries_fts USING fts5(id UNINDEXED, data)",
+    ) {
+        eprintln!("error: failed to create FTS table: {e}");
+        process::exit(1);
+    }
+
+    // Populate from existing entries
+    if let Err(e) =
+        conn.execute_batch("INSERT INTO entries_fts(id, data) SELECT id, data FROM entries")
+    {
+        eprintln!("error: failed to populate FTS index: {e}");
+        process::exit(1);
+    }
 }
 
 /// Ensure .agent-store/ is in .gitignore. Returns true on success, false on error.
@@ -773,6 +816,8 @@ fn init() {
 
         CREATE INDEX IF NOT EXISTS idx_labels_label ON labels(label);
         CREATE INDEX IF NOT EXISTS idx_attributes_key_value ON attributes(key, value);
+
+        CREATE VIRTUAL TABLE IF NOT EXISTS entries_fts USING fts5(id UNINDEXED, data);
     ";
 
     if let Err(e) = conn.execute_batch(schema) {
@@ -924,6 +969,16 @@ fn push(
         process::exit(1);
     }
 
+    // Insert into FTS index
+    if let Err(e) = conn.execute(
+        "INSERT INTO entries_fts(id, data) VALUES (?1, ?2)",
+        rusqlite::params![id, data],
+    ) {
+        let _ = conn.execute("ROLLBACK", []);
+        eprintln!("error: failed to insert FTS entry: {e}");
+        process::exit(1);
+    }
+
     for label in &labels {
         if let Err(e) = conn.execute(
             "INSERT INTO labels (entry_id, label) VALUES (?1, ?2)",
@@ -979,6 +1034,7 @@ struct FilterArgs {
     attrs: Vec<String>,
     not_attrs: Vec<String>,
     data_filter: Option<String>,
+    search: Option<String>,
     after: Option<String>,
     before: Option<String>,
     id_filter: Option<String>,
@@ -1073,6 +1129,15 @@ impl FilterArgs {
             param_idx += 1;
         }
 
+        // Full-text search via FTS5
+        if let Some(ref query) = self.search {
+            joins.push_str(&format!(
+                " JOIN entries_fts ON entries_fts.id = e.id AND entries_fts MATCH ?{param_idx}"
+            ));
+            params.push(Box::new(query.clone()));
+            param_idx += 1;
+        }
+
         // Not-label exclusion conditions (one subquery per excluded label)
         for nl in &self.not_labels {
             conditions.push(format!(
@@ -1120,6 +1185,11 @@ impl FilterArgs {
 
         (joins, conditions, params)
     }
+
+    /// Returns true when full-text search is active (affects sort order).
+    fn has_search(&self) -> bool {
+        self.search.is_some()
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1137,6 +1207,7 @@ fn query(
     offset: Option<u64>,
     reverse: bool,
     data_filter: Option<String>,
+    search: Option<String>,
     after: Option<String>,
     before: Option<String>,
     id_filter: Option<String>,
@@ -1149,6 +1220,7 @@ fn query(
         attrs,
         not_attrs,
         data_filter,
+        search,
         after,
         before,
         id_filter,
@@ -1180,10 +1252,15 @@ fn query(
 
     // Add ORDER BY (not applied when --count without --latest or --limit)
     if !count || needs_count_subquery {
-        let direction = if reverse { "ASC" } else { "DESC" };
-        sql.push_str(&format!(
-            " ORDER BY e.created_at {direction}, e.rowid {direction}"
-        ));
+        if filters.has_search() && !reverse {
+            // When searching, order by relevance (FTS5 rank) by default
+            sql.push_str(" ORDER BY entries_fts.rank");
+        } else {
+            let direction = if reverse { "ASC" } else { "DESC" };
+            sql.push_str(&format!(
+                " ORDER BY e.created_at {direction}, e.rowid {direction}"
+            ));
+        }
     }
 
     // Add LIMIT/OFFSET
@@ -1349,6 +1426,7 @@ fn export(
     attrs: Vec<String>,
     not_attrs: Vec<String>,
     data_filter: Option<String>,
+    search: Option<String>,
     after: Option<String>,
     before: Option<String>,
     id_filter: Option<String>,
@@ -1361,6 +1439,7 @@ fn export(
         attrs,
         not_attrs,
         data_filter,
+        search,
         after,
         before,
         id_filter,
@@ -1378,7 +1457,11 @@ fn export(
         sql.push_str(&conditions.join(" AND "));
     }
 
-    sql.push_str(" ORDER BY e.created_at DESC, e.rowid DESC");
+    if filters.has_search() {
+        sql.push_str(" ORDER BY entries_fts.rank");
+    } else {
+        sql.push_str(" ORDER BY e.created_at DESC, e.rowid DESC");
+    }
 
     let mut stmt = match conn.prepare(&sql) {
         Ok(s) => s,
@@ -1932,6 +2015,16 @@ fn import(dry_run: bool) {
         }
 
         if !failed {
+            if let Err(e) = conn.execute(
+                "INSERT INTO entries_fts(id, data) VALUES (?1, ?2)",
+                rusqlite::params![id, data],
+            ) {
+                eprintln!("error: line {line_num}: failed to insert FTS entry: {e}");
+                failed = true;
+            }
+        }
+
+        if !failed {
             for label in &labels {
                 if let Err(e) = conn.execute(
                     "INSERT INTO labels (entry_id, label) VALUES (?1, ?2)",
@@ -2003,7 +2096,11 @@ fn purge(confirm: bool) {
         }
     };
 
-    // Delete in FK-safe order: attributes, labels, entries
+    // Delete in FK-safe order: FTS, attributes, labels, entries
+    if let Err(e) = conn.execute("DELETE FROM entries_fts", []) {
+        eprintln!("error: failed to delete FTS entries: {e}");
+        process::exit(1);
+    }
     if let Err(e) = conn.execute("DELETE FROM attributes", []) {
         eprintln!("error: failed to delete attributes: {e}");
         process::exit(1);
@@ -2032,6 +2129,7 @@ fn delete(
     attrs: Vec<String>,
     not_attrs: Vec<String>,
     data_filter: Option<String>,
+    search: Option<String>,
     after: Option<String>,
     before: Option<String>,
 ) {
@@ -2041,7 +2139,14 @@ fn delete(
         // Single-entry delete by ID — no --confirm needed
         let resolved = resolve_entry_id(&conn, entry_id);
 
-        // Delete in FK-safe order: attributes, labels, entry
+        // Delete in FK-safe order: FTS, attributes, labels, entry
+        if let Err(e) = conn.execute(
+            "DELETE FROM entries_fts WHERE id = ?1",
+            rusqlite::params![resolved],
+        ) {
+            eprintln!("error: failed to delete FTS entry: {e}");
+            process::exit(1);
+        }
         if let Err(e) = conn.execute(
             "DELETE FROM attributes WHERE entry_id = ?1",
             rusqlite::params![resolved],
@@ -2075,6 +2180,7 @@ fn delete(
             || !attrs.is_empty()
             || !not_attrs.is_empty()
             || data_filter.is_some()
+            || search.is_some()
             || after.is_some()
             || before.is_some();
 
@@ -2091,6 +2197,7 @@ fn delete(
             attrs,
             not_attrs,
             data_filter,
+            search,
             after,
             before,
             id_filter: None,
@@ -2157,6 +2264,13 @@ fn delete(
 
         // Delete in FK-safe order for each matched entry
         for entry_id in &ids {
+            if let Err(e) = conn.execute(
+                "DELETE FROM entries_fts WHERE id = ?1",
+                rusqlite::params![entry_id],
+            ) {
+                eprintln!("error: failed to delete FTS entry: {e}");
+                process::exit(1);
+            }
             if let Err(e) = conn.execute(
                 "DELETE FROM attributes WHERE entry_id = ?1",
                 rusqlite::params![entry_id],
@@ -2756,6 +2870,7 @@ fn main() {
             offset,
             reverse,
             data,
+            search,
             after,
             before,
         } => query(
@@ -2772,6 +2887,7 @@ fn main() {
             offset,
             reverse,
             data,
+            search,
             after,
             before,
             id,
@@ -2786,6 +2902,7 @@ fn main() {
             attr,
             not_attr,
             data,
+            search,
             after,
             before,
         } => export(
@@ -2796,6 +2913,7 @@ fn main() {
             attr,
             not_attr,
             data,
+            search,
             after,
             before,
             id,
@@ -2811,6 +2929,7 @@ fn main() {
             attr,
             not_attr,
             data,
+            search,
             after,
             before,
         } => delete(
@@ -2823,6 +2942,7 @@ fn main() {
             attr,
             not_attr,
             data,
+            search,
             after,
             before,
         ),
