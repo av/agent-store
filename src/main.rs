@@ -583,9 +583,12 @@ enum Command {
         /// filter to entries that have this label (repeatable, AND logic)
         #[arg(long)]
         label: Vec<String>,
-        /// filter by operation type (repeatable, OR logic): tag, untag, set-attr, unset-attr, delete, update
+        /// filter by operation type (repeatable, OR logic): tag, untag, set-attr, unset-attr, delete, update, link, unlink
         #[arg(long)]
         operation: Vec<String>,
+        /// show full entry IDs instead of 7-char prefix in plain text output
+        #[arg(long)]
+        full_id: bool,
     },
 }
 
@@ -2183,12 +2186,21 @@ fn link_cmd(from: &str, to: &str, rel: Option<String>, json: bool) {
     let to_id = resolve_entry_id(&conn, to);
     let rel = rel.unwrap_or_default();
 
-    if let Err(e) = conn.execute(
+    let changes = match conn.execute(
         "INSERT OR IGNORE INTO links (from_id, to_id, rel) VALUES (?1, ?2, ?3)",
         rusqlite::params![from_id, to_id, rel],
     ) {
-        eprintln!("error: failed to create link: {e}");
-        process::exit(1);
+        Ok(n) => n,
+        Err(e) => {
+            eprintln!("error: failed to create link: {e}");
+            process::exit(1);
+        }
+    };
+
+    // Log to changelog only if a new link was actually created (not idempotent no-op)
+    if changes > 0 {
+        let key = if rel.is_empty() { "(none)" } else { &rel };
+        log_change(&conn, &from_id, "link", Some(key), None, Some(&to_id));
     }
 
     if json {
@@ -2210,6 +2222,27 @@ fn unlink_cmd(from: &str, to: &str, rel: Option<String>, json: bool) {
     let conn = open_db();
     let from_id = resolve_entry_id(&conn, from);
     let to_id = resolve_entry_id(&conn, to);
+
+    // Capture link rels before deletion so we can log them
+    let rels_to_remove: Vec<String> = if let Some(ref rel) = rel {
+        vec![rel.clone()]
+    } else {
+        let mut stmt = conn
+            .prepare("SELECT rel FROM links WHERE from_id = ?1 AND to_id = ?2")
+            .unwrap_or_else(|e| {
+                eprintln!("error: failed to query links: {e}");
+                process::exit(1);
+            });
+        stmt.query_map(rusqlite::params![from_id, to_id], |row| {
+            row.get::<_, String>(0)
+        })
+        .unwrap_or_else(|e| {
+            eprintln!("error: failed to query links: {e}");
+            process::exit(1);
+        })
+        .filter_map(|r| r.ok())
+        .collect()
+    };
 
     let removed = if let Some(ref rel) = rel {
         // Remove only the specific relationship
@@ -2236,6 +2269,14 @@ fn unlink_cmd(from: &str, to: &str, rel: Option<String>, json: bool) {
             }
         }
     };
+
+    // Log changelog entries for each removed link
+    if removed > 0 {
+        for r in &rels_to_remove {
+            let key = if r.is_empty() { "(none)" } else { r.as_str() };
+            log_change(&conn, &from_id, "unlink", Some(key), Some(&to_id), None);
+        }
+    }
 
     if json {
         let obj = serde_json::json!({
@@ -3924,6 +3965,12 @@ fn tally_cmd(
         format!(
             "SELECT COALESCE(e.entity_type, '(none)'), COUNT(DISTINCT e.id) FROM entries e{joins}{where_clause} GROUP BY COALESCE(e.entity_type, '(none)') ORDER BY COUNT(DISTINCT e.id) DESC, COALESCE(e.entity_type, '(none)') ASC"
         )
+    } else if by == "rel" {
+        // JOIN links on from_id, GROUP BY rel — count links per relationship type
+        // If filters are provided, only count links where from_id matches filtered entries
+        format!(
+            "SELECT COALESCE(NULLIF(lk.rel, ''), '(none)'), COUNT(*) FROM entries e{joins} JOIN links lk ON e.id = lk.from_id{where_clause} GROUP BY COALESCE(NULLIF(lk.rel, ''), '(none)') ORDER BY COUNT(*) DESC, COALESCE(NULLIF(lk.rel, ''), '(none)') ASC"
+        )
     } else if let Some(attr_key) = by.strip_prefix("attr:") {
         if attr_key.is_empty() {
             eprintln!("error: attribute key cannot be empty in --by attr:<key>");
@@ -3935,7 +3982,7 @@ fn tally_cmd(
             "SELECT ta.value, COUNT(DISTINCT e.id) FROM entries e{joins} JOIN attributes ta ON e.id = ta.entry_id AND ta.key = ?{next_param}{where_clause} GROUP BY ta.value ORDER BY COUNT(DISTINCT e.id) DESC, ta.value ASC"
         )
     } else {
-        eprintln!("error: invalid --by dimension '{by}'. Use: label, type, or attr:<key>");
+        eprintln!("error: invalid --by dimension '{by}'. Use: label, type, rel, or attr:<key>");
         process::exit(1);
     };
 
@@ -4710,6 +4757,7 @@ fn log_cmd(
     json_output: bool,
     labels: Vec<String>,
     operations: Vec<String>,
+    full_id: bool,
 ) {
     let conn = open_db();
 
@@ -4845,7 +4893,11 @@ fn log_cmd(
         println!("{}", serde_json::json!(entries));
     } else {
         for (_rowid, entry_id, ts, op, key, old, new) in &rows {
-            let short_id = &entry_id[..7.min(entry_id.len())];
+            let display_id = if full_id {
+                entry_id.as_str()
+            } else {
+                &entry_id[..7.min(entry_id.len())]
+            };
             let key_str = key.as_deref().unwrap_or("");
             let change = match (old.as_deref(), new.as_deref()) {
                 (Some(o), Some(n)) => format!("{o} -> {n}"),
@@ -4854,9 +4906,9 @@ fn log_cmd(
                 (None, None) => String::new(),
             };
             if change.is_empty() {
-                println!("[{ts}] {op} {short_id} {key_str}");
+                println!("[{ts}] {op} {display_id} {key_str}");
             } else {
-                println!("[{ts}] {op} {short_id} {key_str} {change}");
+                println!("[{ts}] {op} {display_id} {key_str} {change}");
             }
         }
     }
@@ -5684,7 +5736,8 @@ fn main() {
             json,
             label,
             operation,
-        } => log_cmd(id, since, limit, json, label, operation),
+            full_id,
+        } => log_cmd(id, since, limit, json, label, operation, full_id),
         Command::Compact { json } => compact(json),
         Command::Completions { shell } => {
             let mut cmd = Cli::command();

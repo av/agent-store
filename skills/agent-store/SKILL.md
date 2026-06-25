@@ -153,11 +153,11 @@ agent-store delete 7bf8d3f
 | `set-attr <id> <key> <value>` | Set or update an attribute on an existing entry. Idempotent (overwrites existing value). Flags: `--json` |
 | `unset-attr <id> <key>` | Remove an attribute from an existing entry. Idempotent (missing key is a no-op). Flags: `--json` |
 | `gc` | Collect expired entries (those past their TTL). Also cleans changelog entries older than 30 days (or `--ttl`). Flags: `--ttl <duration>`, `--dry-run`, `--json` |
-| `log [id]` | Show audit trail of mutations. With `<id>`: changelog for that entry. Without: recent changes across all entries. Flags: `--since <ISO timestamp>`, `--limit N` (default 50), `--label` (filter by entry label), `--json` |
+| `log [id]` | Show audit trail of mutations (tag, untag, set-attr, unset-attr, delete, update, link, unlink). With `<id>`: changelog for that entry. Without: recent changes across all entries. Flags: `--since <ISO timestamp>`, `--limit N` (default 50), `--label` (filter by entry label), `--operation` (filter by op type, repeatable), `--full-id` (show full IDs), `--json` |
 | `compact` | Optimize store by running SQLite VACUUM and PRAGMA optimize. Reports before/after sizes. Flags: `--json` |
 | `history <label>` | Show chronological history of entries with a given label (oldest first). Flags: `--json`, `--limit N`, `--data <substring>` |
 | `alias` | Named queries. Subcommands: `set <name> -- [query flags]` (save), `run <name> [--mode query\|export\|delete] [--confirm]` (execute), `list` (show all), `rm <name>` (delete) |
-| `tally` | Count entries grouped by a dimension. `--by label\|type\|attr:<key>`. Supports all filter flags. Output: tab-separated `value\tcount` (descending by count). Flags: `--json` (array of `{value, count}`) |
+| `tally` | Count entries grouped by a dimension. `--by label\|type\|rel\|attr:<key>`. Supports all filter flags. Output: tab-separated `value\tcount` (descending by count). Flags: `--json` (array of `{value, count}`) |
 | `update [id]` | Compound metadata mutations in one transaction. Mutation flags: `--tag` (add label, repeat), `--untag` (remove label, repeat), `--set key=value` (set attr, repeat), `--unset key` (remove attr, repeat). Single-ID mode: no `--confirm` needed. Bulk mode (filters): requires `--confirm`. Flags: `--dry-run`, `--json`. Supports all filter flags. |
 | `tail` | Watch the store for new entries (like `tail -f`). Flags: `--interval <N>` (poll seconds, default 1), `--since <datetime>`, `--json`. Supports all filter flags: `--label`, `--not-label`, `--type`, `--not-type`, `--attr`, `--not-attr`, `--data`, `--search` |
 | `completions <shell>` | Generate shell completions (bash, zsh, fish, elvish, powershell) |

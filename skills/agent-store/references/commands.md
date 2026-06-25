@@ -549,7 +549,7 @@ Arguments:
 - `<TO>` — Target entry ID or prefix
 - `[REL]` — Relationship type (optional, defaults to empty string)
 
-Idempotent — creating the same link twice is a no-op (INSERT OR IGNORE on the composite primary key `from_id, to_id, rel`). Both entry IDs must exist. Supports prefix matching.
+Idempotent — creating the same link twice is a no-op (INSERT OR IGNORE on the composite primary key `from_id, to_id, rel`). Both entry IDs must exist. Supports prefix matching. Records a changelog entry with operation=`link`, key=rel, new_value=to_id.
 
 ```bash
 # Create a typed link
@@ -576,7 +576,7 @@ Arguments:
 - `<TO>` — Target entry ID or prefix
 - `[REL]` — If provided, removes only this specific relationship. If omitted, removes ALL links from FROM to TO regardless of rel
 
-Idempotent — removing a non-existent link is a no-op (no error).
+Idempotent — removing a non-existent link is a no-op (no error). Records a changelog entry per removed link with operation=`unlink`, key=rel, old_value=to_id.
 
 ```bash
 # Remove a specific relationship
@@ -816,11 +816,11 @@ agent-store gc --ttl 30m --json
 
 ## agent-store log
 
-Show audit trail of mutations (tag, untag, set-attr, unset-attr, delete, update).
+Show audit trail of mutations (tag, untag, set-attr, unset-attr, delete, update, link, unlink).
 All mutation commands automatically record changelog entries.
 
 ```
-agent-store log [ID] [--since <ISO_TIMESTAMP>] [--limit N] [--label <LABEL>] [--json]
+agent-store log [ID] [--since <ISO_TIMESTAMP>] [--limit N] [--label <LABEL>] [--operation <OP>] [--full-id] [--json]
 ```
 
 Options:
@@ -828,9 +828,12 @@ Options:
 - `--since <ISO_TIMESTAMP>` — Show only changelog entries after this timestamp (ISO 8601 format)
 - `--limit N` — Maximum number of changelog entries to show (default: 50)
 - `--label <LABEL>` — Filter to entries that have this label (repeatable, AND logic)
+- `--operation <OP>` — Filter by operation type (repeatable, OR logic): tag, untag, set-attr, unset-attr, delete, update, link, unlink
+- `--full-id` — Show full entry IDs instead of 7-char prefix in plain text output. Useful for piping into other commands
 - `--json` — Output as JSON array of objects with fields: `entry_id`, `timestamp`, `operation`, `key`, `old_value`, `new_value`
 
 Plain text output format: `[timestamp] operation entry_id_prefix key old -> new`
+With `--full-id`: `[timestamp] operation full_entry_id key old -> new`
 
 The `gc` command automatically cleans changelog entries older than 30 days (or uses `--ttl` if provided).
 
@@ -849,6 +852,12 @@ agent-store log --limit 10 --json
 
 # Filter to entries with a specific label
 agent-store log --label task
+
+# Filter by operation type
+agent-store log --operation link --operation unlink
+
+# Show full IDs for piping
+agent-store log --full-id | awk '{print $4}' | xargs agent-store pull
 ```
 
 ## agent-store compact
@@ -971,6 +980,7 @@ Arguments:
 - `--by <DIMENSION>` — Required. The dimension to group by:
   - `label` — Group by label. Entries with multiple labels are counted once per label.
   - `type` — Group by entity type. Entries with no type appear as `(none)`.
+  - `rel` — Group by link relationship type. Counts the number of links per relationship. Empty rel appears as `(none)`. Composes with entry filters (only counts links where from_id matches filtered entries).
   - `attr:<KEY>` — Group by the value of attribute `<KEY>`. Entries without that attribute are excluded.
 
 Options:
@@ -1010,6 +1020,14 @@ agent-store tally --by attr:status
 # JSON output
 agent-store tally --by label --json
 # [{"value":"todo","count":5},{"value":"done","count":3}]
+
+# Count links per relationship type
+agent-store tally --by rel
+# blocks	5
+# depends	3
+
+# Count link rels only for task entries
+agent-store tally --by rel --label task
 
 # Combine with filters
 agent-store tally --by type --label urgent
