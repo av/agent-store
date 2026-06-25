@@ -140,7 +140,7 @@ agent-store delete 7bf8d3f
 | `skills` | List and read built-in usage guides |
 | `export` | Export entries as JSONL (one JSON object per line). Filter: `--id`, `--label` (repeat), `--not-label` (repeat), `--type`, `--not-type` (repeat, exclude), `--attr key=value` (repeat), `--not-attr key=value` (repeat, exclude), `--data`, `--search <query>` (FTS5), `--after`, `--before` |
 | `import` | Import entries from JSONL on stdin (complement of export). Generates fresh IDs, preserves timestamps. Flags: `--dry-run` |
-| `delete [id]` | Delete entries by ID or by filters. Filters: `--label`, `--not-label`, `--type`, `--not-type`, `--attr`, `--not-attr`, `--data`, `--search` (FTS5), `--after`, `--before`. Single-ID delete needs no confirmation; filter-based delete requires `--confirm`. Flags: `--json` |
+| `delete [id]` | Delete entries by ID or by filters. Filters: `--label`, `--not-label`, `--type`, `--not-type`, `--attr`, `--not-attr`, `--data`, `--search` (FTS5), `--after`, `--before`. Single-ID delete needs no confirmation; filter-based delete requires `--confirm`. Flags: `--dry-run`, `--json` |
 | `purge` | Delete ALL entries (destructive). Requires `--confirm` flag. |
 | `labels` | List all unique labels in the store, sorted. Flags: `--json` (JSON array), `--count` (with counts) |
 | `types` | List all unique entity types in the store, sorted. Flags: `--json` (JSON array), `--count` (with counts) |
@@ -495,6 +495,13 @@ entries, see `purge`.
 # Delete a single entry by ID (no --confirm needed)
 agent-store delete $ID
 
+# Dry run — list what would be deleted without deleting
+agent-store delete --label old-tag --dry-run
+# Prints: short ID, created_at, type, labels for each matching entry
+
+# Dry run with JSON output — full entry objects to stdout
+agent-store delete --label old-tag --dry-run --json
+
 # Preview what a filter-based delete would do (prints count, exits 1)
 agent-store delete --label old-tag
 
@@ -517,6 +524,12 @@ With `--confirm`, it deletes and prints `Deleted N entries` on stderr.
 
 Calling `delete` with no ID and no filters prints an error (prevents
 accidental delete-all — use `purge` for that).
+
+Use `--dry-run` to list entries that would be deleted without actually deleting.
+Without `--json`, it prints a human-readable summary to stderr (short ID, created_at,
+type, labels per entry). With `--json`, it outputs a JSON array of full entry objects
+to stdout. `--dry-run` conflicts with `--confirm` and does not require it. Works with
+all filter args and single-ID mode. Read-only, always exits 0.
 
 Use `--json` for structured output: `{"deleted":1,"ids":["..."]}` (confirmed) or `{"dry_run":true,"count":1}` (preview).
 

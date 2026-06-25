@@ -265,6 +265,7 @@ Arguments:
 Options:
 - `--confirm` — Required for filter-based deletes. Without it, prints how many
   entries would be deleted and exits 1.
+- `--dry-run` — List entries that would be deleted without actually deleting. Prints a human-readable summary to stderr (short ID, created_at, type, labels per entry). With `--json`, outputs a JSON array of full entry objects to stdout. Conflicts with `--confirm`. Works with all filter args and single-ID mode. Read-only, always exits 0
 - `--json` — Output as JSON object: `{"deleted":1,"ids":["..."]}` (confirmed) or `{"dry_run":true,"count":1}` (without `--confirm`)
 - `--label <LABEL>` — Filter by label (can be repeated, AND logic)
 - `--not-label <LABEL>` — Exclude entries with this label (can be repeated)
@@ -295,6 +296,16 @@ Deletes in FK-safe order: attributes, labels, entries.
 ```bash
 # Delete one entry by ID
 agent-store delete $ID
+
+# Dry run — see exactly what would be deleted
+agent-store delete --label stale --dry-run
+# Lists each matching entry: short ID, created_at, type, labels
+
+# Dry run with JSON — full entry objects
+agent-store delete --label stale --dry-run --json
+
+# Dry run on a single entry
+agent-store delete $ID --dry-run
 
 # Preview filter-based delete
 agent-store delete --label stale
