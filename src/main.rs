@@ -377,6 +377,42 @@ enum Command {
         #[command(subcommand)]
         action: AliasCommand,
     },
+    /// Watch the store and print new entries as they arrive (like tail -f)
+    Tail {
+        /// Filter by label (can be repeated, AND logic)
+        #[arg(long)]
+        label: Vec<String>,
+        /// Exclude entries with this label (can be repeated)
+        #[arg(long = "not-label")]
+        not_label: Vec<String>,
+        /// Filter by entity type
+        #[arg(long = "type")]
+        entity_type: Option<String>,
+        /// Exclude entries with this entity type (can be repeated, NULL-safe)
+        #[arg(long = "not-type", action = clap::ArgAction::Append)]
+        not_type: Vec<String>,
+        /// Filter by attribute key=value pair (can be repeated, AND logic)
+        #[arg(long = "attr")]
+        attr: Vec<String>,
+        /// Exclude entries with this attribute key=value pair (can be repeated)
+        #[arg(long = "not-attr", action = clap::ArgAction::Append)]
+        not_attr: Vec<String>,
+        /// Filter by substring match in entry data
+        #[arg(long)]
+        data: Option<String>,
+        /// Full-text search query (FTS5 syntax: terms, "phrases", OR, NOT, prefix*)
+        #[arg(long)]
+        search: Option<String>,
+        /// Output each entry as a JSON object (one per line)
+        #[arg(long)]
+        json: bool,
+        /// Poll interval in seconds (default: 1)
+        #[arg(long, default_value = "1")]
+        interval: u64,
+        /// Start from entries created after this timestamp instead of now (ISO 8601)
+        #[arg(long)]
+        since: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -3748,6 +3784,191 @@ fn alias_rm(name: &str) {
     eprintln!("Alias '{}' removed", name);
 }
 
+#[allow(clippy::too_many_arguments)]
+fn tail(
+    labels: Vec<String>,
+    not_labels: Vec<String>,
+    entity_type: Option<String>,
+    not_types: Vec<String>,
+    attrs: Vec<String>,
+    not_attrs: Vec<String>,
+    data_filter: Option<String>,
+    search: Option<String>,
+    json: bool,
+    interval: u64,
+    since: Option<String>,
+) {
+    let filters = FilterArgs {
+        labels,
+        not_labels,
+        entity_type,
+        not_types,
+        attrs,
+        not_attrs,
+        data_filter,
+        search,
+        after: None,
+        before: None,
+        id_filter: None,
+    };
+    filters.validate();
+
+    let conn = open_db();
+
+    // Determine starting timestamp
+    let mut last_seen = match since {
+        Some(ref ts) => ts.clone(),
+        None => {
+            // Use current UTC time so we only show entries created after tail starts
+            let now = chrono::Utc::now().naive_utc();
+            now.format("%Y-%m-%d %H:%M:%S").to_string()
+        }
+    };
+
+    let poll_duration = std::time::Duration::from_secs(interval);
+
+    // Loop forever; Ctrl+C (SIGINT) or SIGTERM will kill the process via default handlers.
+    // Broken pipe from downstream consumer also terminates cleanly (SIGPIPE is SIG_DFL).
+    loop {
+        // Build filtered query with created_at > last_seen as an additional condition
+        let (joins, mut conditions, mut params) = filters.build_filter_sql();
+
+        // Add the "after last_seen" condition
+        let param_idx = params.len() as u32 + 1;
+        conditions.push(format!("e.created_at > ?{param_idx}"));
+        params.push(Box::new(last_seen.clone()));
+
+        // Always select data + created_at; add id + entity_type for JSON mode
+        let select_cols = if json {
+            "e.id, e.data, e.entity_type, e.created_at"
+        } else {
+            "e.data, e.created_at"
+        };
+
+        let mut sql = format!("SELECT {select_cols} FROM entries e{joins}");
+        if !conditions.is_empty() {
+            sql.push_str(" WHERE ");
+            sql.push_str(&conditions.join(" AND "));
+        }
+
+        // Order oldest first so we print in chronological order
+        if filters.has_search() {
+            sql.push_str(" ORDER BY entries_fts.rank");
+        } else {
+            sql.push_str(" ORDER BY e.created_at ASC, e.rowid ASC");
+        }
+
+        let params_refs: Vec<&dyn rusqlite::types::ToSql> =
+            params.iter().map(|p| p.as_ref()).collect();
+
+        let mut stmt = match conn.prepare(&sql) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("error: failed to prepare query: {e}");
+                process::exit(1);
+            }
+        };
+
+        if json {
+            let rows = match stmt.query_map(params_refs.as_slice(), |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, String>(3)?,
+                ))
+            }) {
+                Ok(r) => r,
+                Err(e) => {
+                    eprintln!("error: failed to execute query: {e}");
+                    process::exit(1);
+                }
+            };
+
+            for row in rows {
+                match row {
+                    Ok((id, data, etype, created_at)) => {
+                        let labels: Vec<String> = conn
+                            .prepare("SELECT label FROM labels WHERE entry_id = ?1")
+                            .and_then(|mut s| {
+                                s.query_map(rusqlite::params![id], |r| r.get::<_, String>(0))
+                                    .map(|rows| rows.filter_map(|r| r.ok()).collect())
+                            })
+                            .unwrap_or_default();
+
+                        let attributes: HashMap<String, String> = conn
+                            .prepare("SELECT key, value FROM attributes WHERE entry_id = ?1")
+                            .and_then(|mut s| {
+                                s.query_map(rusqlite::params![id], |r| {
+                                    Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+                                })
+                                .map(|rows| rows.filter_map(|r| r.ok()).collect())
+                            })
+                            .unwrap_or_default();
+
+                        // Update last_seen to this entry's timestamp
+                        if created_at > last_seen {
+                            last_seen = created_at.clone();
+                        }
+
+                        let entry = EntryJson {
+                            id,
+                            data,
+                            entity_type: etype,
+                            created_at,
+                            labels,
+                            attributes,
+                        };
+
+                        match serde_json::to_string(&entry) {
+                            Ok(json_str) => println!("{json_str}"),
+                            Err(e) => {
+                                eprintln!("error: failed to serialize JSON: {e}");
+                                process::exit(1);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("error: failed to read row: {e}");
+                        process::exit(1);
+                    }
+                }
+            }
+        } else {
+            let rows = match stmt.query_map(params_refs.as_slice(), |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            }) {
+                Ok(r) => r,
+                Err(e) => {
+                    eprintln!("error: failed to execute query: {e}");
+                    process::exit(1);
+                }
+            };
+
+            for row in rows {
+                match row {
+                    Ok((data, created_at)) => {
+                        if created_at > last_seen {
+                            last_seen = created_at;
+                        }
+                        print!("{data}");
+                    }
+                    Err(e) => {
+                        eprintln!("error: failed to read row: {e}");
+                        process::exit(1);
+                    }
+                }
+            }
+        }
+
+        // Flush stdout to ensure output is visible immediately
+        use std::io::Write;
+        let _ = std::io::stdout().flush();
+
+        std::thread::sleep(poll_duration);
+    }
+}
+
 fn main() {
     // Reset SIGPIPE to default so piping to head/tail/etc. exits cleanly
     // instead of panicking with "Broken pipe".
@@ -3929,5 +4150,30 @@ fn main() {
             AliasCommand::List => alias_list(),
             AliasCommand::Rm { name } => alias_rm(&name),
         },
+        Command::Tail {
+            label,
+            not_label,
+            entity_type,
+            not_type,
+            attr,
+            not_attr,
+            data,
+            search,
+            json,
+            interval,
+            since,
+        } => tail(
+            label,
+            not_label,
+            entity_type,
+            not_type,
+            attr,
+            not_attr,
+            data,
+            search,
+            json,
+            interval,
+            since,
+        ),
     }
 }
