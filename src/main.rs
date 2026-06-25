@@ -29,8 +29,8 @@ Start here (for AI agents):
   skills get agent-store-pipelines         Shell composition (import, export, chaining)
   skills path [name]                       Print skill directory path",
     after_long_help = "\
-agent-store is append-only for data by design. Entry payloads cannot be \
-modified after push. Labels can be added or removed with `tag` and `untag`."
+Entry payloads cannot be modified after push. Labels can be added or \
+removed with `tag` and `untag`. Entries can be removed with `delete`."
 )]
 struct Cli {
     #[command(subcommand)]
@@ -181,6 +181,41 @@ enum Command {
         /// Parse and validate without inserting; print summary only
         #[arg(long)]
         dry_run: bool,
+    },
+    /// Delete entries by ID or by filters
+    Delete {
+        /// Entry ID to delete (if provided, deletes a single entry without --confirm)
+        id: Option<String>,
+        /// Require confirmation for filter-based deletes
+        #[arg(long)]
+        confirm: bool,
+        /// Filter by label (can be repeated, AND logic)
+        #[arg(long)]
+        label: Vec<String>,
+        /// Exclude entries with this label (can be repeated)
+        #[arg(long = "not-label")]
+        not_label: Vec<String>,
+        /// Filter by entity type
+        #[arg(long = "type")]
+        entity_type: Option<String>,
+        /// Exclude entries with this entity type (can be repeated, NULL-safe)
+        #[arg(long = "not-type", action = clap::ArgAction::Append)]
+        not_type: Vec<String>,
+        /// Filter by attribute key=value pair (can be repeated, AND logic)
+        #[arg(long = "attr")]
+        attr: Vec<String>,
+        /// Exclude entries with this attribute key=value pair (can be repeated)
+        #[arg(long = "not-attr", action = clap::ArgAction::Append)]
+        not_attr: Vec<String>,
+        /// Filter by substring match in entry data
+        #[arg(long)]
+        data: Option<String>,
+        /// Only entries created after this timestamp (ISO 8601)
+        #[arg(long)]
+        after: Option<String>,
+        /// Only entries created before this timestamp (ISO 8601)
+        #[arg(long)]
+        before: Option<String>,
     },
     /// Delete ALL entries from the store (destructive, requires --confirm)
     Purge {
@@ -1986,6 +2021,172 @@ fn purge(confirm: bool) {
     println!("Purged {count} {word}");
 }
 
+#[allow(clippy::too_many_arguments)]
+fn delete(
+    id: Option<String>,
+    confirm: bool,
+    labels: Vec<String>,
+    not_labels: Vec<String>,
+    entity_type: Option<String>,
+    not_types: Vec<String>,
+    attrs: Vec<String>,
+    not_attrs: Vec<String>,
+    data_filter: Option<String>,
+    after: Option<String>,
+    before: Option<String>,
+) {
+    let conn = open_db();
+
+    if let Some(ref entry_id) = id {
+        // Single-entry delete by ID — no --confirm needed
+        let resolved = resolve_entry_id(&conn, entry_id);
+
+        // Delete in FK-safe order: attributes, labels, entry
+        if let Err(e) = conn.execute(
+            "DELETE FROM attributes WHERE entry_id = ?1",
+            rusqlite::params![resolved],
+        ) {
+            eprintln!("error: failed to delete attributes: {e}");
+            process::exit(1);
+        }
+        if let Err(e) = conn.execute(
+            "DELETE FROM labels WHERE entry_id = ?1",
+            rusqlite::params![resolved],
+        ) {
+            eprintln!("error: failed to delete labels: {e}");
+            process::exit(1);
+        }
+        if let Err(e) = conn.execute(
+            "DELETE FROM entries WHERE id = ?1",
+            rusqlite::params![resolved],
+        ) {
+            eprintln!("error: failed to delete entry: {e}");
+            process::exit(1);
+        }
+
+        let short_id = &resolved[..7.min(resolved.len())];
+        eprintln!("Deleted {short_id}");
+    } else {
+        // Filter-based delete
+        let has_filters = !labels.is_empty()
+            || !not_labels.is_empty()
+            || entity_type.is_some()
+            || !not_types.is_empty()
+            || !attrs.is_empty()
+            || !not_attrs.is_empty()
+            || data_filter.is_some()
+            || after.is_some()
+            || before.is_some();
+
+        if !has_filters {
+            eprintln!("error: specify an ID or at least one filter");
+            process::exit(1);
+        }
+
+        let filters = FilterArgs {
+            labels,
+            not_labels,
+            entity_type,
+            not_types,
+            attrs,
+            not_attrs,
+            data_filter,
+            after,
+            before,
+            id_filter: None,
+        };
+        filters.validate();
+
+        let (joins, conditions, params) = filters.build_filter_sql();
+
+        // Count matching entries first
+        let count_sql = if conditions.is_empty() {
+            format!("SELECT COUNT(DISTINCT e.id) FROM entries e{joins}")
+        } else {
+            format!(
+                "SELECT COUNT(DISTINCT e.id) FROM entries e{joins} WHERE {}",
+                conditions.join(" AND ")
+            )
+        };
+
+        let params_refs: Vec<&dyn rusqlite::types::ToSql> =
+            params.iter().map(|p| p.as_ref()).collect();
+        let count: i64 =
+            match conn.query_row(&count_sql, params_refs.as_slice(), |row| row.get(0)) {
+                Ok(c) => c,
+                Err(e) => {
+                    eprintln!("error: failed to count matching entries: {e}");
+                    process::exit(1);
+                }
+            };
+
+        if !confirm {
+            let word = if count == 1 { "entry" } else { "entries" };
+            eprintln!("Would delete {count} {word}. Run with --confirm to proceed.");
+            process::exit(1);
+        }
+
+        // Collect matching IDs
+        let ids_sql = if conditions.is_empty() {
+            format!("SELECT DISTINCT e.id FROM entries e{joins}")
+        } else {
+            format!(
+                "SELECT DISTINCT e.id FROM entries e{joins} WHERE {}",
+                conditions.join(" AND ")
+            )
+        };
+
+        let mut stmt = match conn.prepare(&ids_sql) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("error: failed to prepare query: {e}");
+                process::exit(1);
+            }
+        };
+
+        let params_refs: Vec<&dyn rusqlite::types::ToSql> =
+            params.iter().map(|p| p.as_ref()).collect();
+        let ids: Vec<String> = match stmt.query_map(params_refs.as_slice(), |row| {
+            row.get::<_, String>(0)
+        }) {
+            Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
+            Err(e) => {
+                eprintln!("error: failed to query matching entries: {e}");
+                process::exit(1);
+            }
+        };
+
+        // Delete in FK-safe order for each matched entry
+        for entry_id in &ids {
+            if let Err(e) = conn.execute(
+                "DELETE FROM attributes WHERE entry_id = ?1",
+                rusqlite::params![entry_id],
+            ) {
+                eprintln!("error: failed to delete attributes: {e}");
+                process::exit(1);
+            }
+            if let Err(e) = conn.execute(
+                "DELETE FROM labels WHERE entry_id = ?1",
+                rusqlite::params![entry_id],
+            ) {
+                eprintln!("error: failed to delete labels: {e}");
+                process::exit(1);
+            }
+            if let Err(e) = conn.execute(
+                "DELETE FROM entries WHERE id = ?1",
+                rusqlite::params![entry_id],
+            ) {
+                eprintln!("error: failed to delete entry: {e}");
+                process::exit(1);
+            }
+        }
+
+        let deleted = ids.len() as i64;
+        let word = if deleted == 1 { "entry" } else { "entries" };
+        eprintln!("Deleted {deleted} {word}");
+    }
+}
+
 fn info(json: bool) {
     let store_path = store_dir();
     let db_path = store_db();
@@ -2601,6 +2802,31 @@ fn main() {
             id,
         ),
         Command::Import { dry_run } => import(dry_run),
+        Command::Delete {
+            id,
+            confirm,
+            label,
+            not_label,
+            entity_type,
+            not_type,
+            attr,
+            not_attr,
+            data,
+            after,
+            before,
+        } => delete(
+            id,
+            confirm,
+            label,
+            not_label,
+            entity_type,
+            not_type,
+            attr,
+            not_attr,
+            data,
+            after,
+            before,
+        ),
         Command::Purge { confirm } => purge(confirm),
         Command::Schema => schema(),
         Command::Stats { json } => stats(json),
