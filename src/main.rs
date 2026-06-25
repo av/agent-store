@@ -616,6 +616,9 @@ enum Command {
         /// include only changelog entries after this timestamp (ISO 8601)
         #[arg(long)]
         since: Option<String>,
+        /// include only changelog entries before this timestamp (ISO 8601)
+        #[arg(long)]
+        before: Option<String>,
         /// maximum number of changelog entries to show
         #[arg(long, default_value = "50")]
         limit: u64,
@@ -5110,6 +5113,7 @@ fn history(label: &str, json: bool, limit: Option<u64>, data_filter: Option<Stri
 fn log_cmd(
     id: Option<String>,
     since: Option<String>,
+    before: Option<String>,
     limit: u64,
     json_output: bool,
     labels: Vec<String>,
@@ -5164,6 +5168,11 @@ fn log_cmd(
     if let Some(ref since_ts) = since {
         params.push(Box::new(since_ts.clone()));
         conditions.push(format!("c.timestamp > ?{}", params.len()));
+    }
+
+    if let Some(ref before_ts) = before {
+        params.push(Box::new(before_ts.clone()));
+        conditions.push(format!("c.timestamp < ?{}", params.len()));
     }
 
     if !labels.is_empty() {
@@ -6120,12 +6129,13 @@ fn main() {
         Command::Log {
             id,
             since,
+            before,
             limit,
             json,
             label,
             operation,
             full_id,
-        } => log_cmd(id, since, limit, json, label, operation, full_id),
+        } => log_cmd(id, since, before, limit, json, label, operation, full_id),
         Command::Compact { json } => compact(json),
         Command::Completions { shell } => {
             let mut cmd = Cli::command();

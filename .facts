@@ -740,3 +740,8 @@
 - label: update --link and --unlink operations produce changelog entries with operation=link and operation=unlink
   command: D=/tmp/test-upd-link-log-$$ && mkdir -p "$D" && cd "$D" && agent-store init >/dev/null 2>&1 && ID1=$(echo "a" | agent-store push --id-only) && ID2=$(echo "b" | agent-store push --id-only) && agent-store update $ID1 --link "ref:$ID2" 2>/dev/null && agent-store log --operation link --json | grep -q ref && rm -rf "$D"
   tags: [spec, implemented]
+
+## log
+- label: agent-store log --before filters changelog entries older than the timestamp
+  command: bash -c 'cargo build --release >/dev/null && TESTDIR=$(mktemp -d) && export AGENT_STORE_PATH="$TESTDIR/.agent-store" && AS="$PWD/target/release/agent-store" && "$AS" init >/dev/null 2>&1 && ID=$(printf data | "$AS" push --id-only --strip) && "$AS" tag "$ID" early >/dev/null && sleep 1 && MID=$(date -u +"%Y-%m-%d %H:%M:%S") && sleep 1 && "$AS" tag "$ID" late >/dev/null && OUT=$("$AS" log "$ID" --before "$MID" --json) && rm -rf "$TESTDIR" && printf "%s" "$OUT" | python3 -c "import sys,json; rows=json.load(sys.stdin); keys=[r.get(\"key\") for r in rows]; assert \"early\" in keys and \"late\" not in keys; print(\"OK\")"'
+  tags: [implemented]

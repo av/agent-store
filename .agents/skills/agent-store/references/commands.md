@@ -880,12 +880,13 @@ agent-store gc --ttl 30m --json
 Show the audit trail of mutations (tag, untag, set-attr, unset-attr, delete, update).
 
 ```
-agent-store log [ID] [--since <TIMESTAMP>] [--limit N] [--label <LABEL>...] [--operation <OP>...] [--json]
+agent-store log [ID] [--since <TIMESTAMP>] [--before <TIMESTAMP>] [--limit N] [--label <LABEL>...] [--operation <OP>...] [--json]
 ```
 
 Options:
 - `ID` — Show changelog for a specific entry (supports prefix matching). If omitted, shows recent changes across all entries
 - `--since <TIMESTAMP>` — Include only changelog entries after this timestamp (ISO 8601 format)
+- `--before <TIMESTAMP>` — Include only changelog entries before this timestamp (ISO 8601 format)
 - `--limit N` — Maximum number of changelog entries to show (default: 50)
 - `--label <LABEL>` — Filter to entries that have this label (repeatable, AND logic)
 - `--operation <OP>` — Filter by operation type (repeatable, OR logic). Valid operations: `tag`, `untag`, `set-attr`, `unset-attr`, `delete`, `update`
@@ -909,6 +910,9 @@ agent-store log --operation delete --json
 
 # Combine time and operation filters
 agent-store log --since "2024-06-01" --operation tag --limit 20
+
+# Show changelog entries before a timestamp
+agent-store log --before "2024-07-01"
 ```
 
 Plain text output format: `[timestamp] operation short_id key change`
