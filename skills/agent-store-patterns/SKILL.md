@@ -25,11 +25,14 @@ echo "$PARSED_OUTPUT"   | agent-store push --type scratch --label step2 --attr t
 # Retrieve a specific step
 agent-store query --type scratch --label step1 --attr task=refactor-auth
 
+# Get the latest scratchpad value for a label
+agent-store query --type scratch --label step1 --attr task=refactor-auth --latest
+
 # Retrieve all steps for a task
 agent-store query --type scratch --attr task=refactor-auth
 
 # Capture an ID for immediate round-trip
-ID=$(echo "$EXPENSIVE_RESULT" | agent-store push --type scratch --quiet)
+ID=$(echo "$EXPENSIVE_RESULT" | agent-store push --type scratch --id-only)
 # ... do other work ...
 agent-store pull "$ID"
 ```
@@ -58,6 +61,9 @@ agent-store query --type task --attr status=pending --attr priority=high
 
 # Find tasks by area
 agent-store query --type task --label backend
+
+# Exclude completed tasks
+agent-store query --type task --attr status=pending --not-label done
 
 # View everything as JSON for structured processing
 agent-store query --type task --json | jq '.[] | select(.attributes.status == "pending")'
@@ -126,7 +132,7 @@ Next:
 EOF
 
 # Retrieve last session state at start of new session
-agent-store query --type session --label summary
+agent-store query --type session --label summary --latest
 
 # Save what files were modified
 echo "src/main.rs src/query.rs tests/cli.rs" | \
@@ -149,7 +155,7 @@ echo "$ANALYSIS_RESULT" | agent-store push --type cache \
   --label file-analysis --attr hash="$HASH" --attr file=large-file.json
 
 # Check cache before recomputing
-CACHED=$(agent-store query --type cache --label file-analysis --attr hash="$HASH" 2>/dev/null)
+CACHED=$(agent-store query --type cache --label file-analysis --attr hash="$HASH" --latest 2>/dev/null)
 if [ -n "$CACHED" ]; then
   echo "Cache hit"
   echo "$CACHED"
@@ -349,32 +355,19 @@ agent-store query --type cache --json | \
 #   2. Remove the store directory
 #   3. Re-init and re-import
 
-# Export keepers
-agent-store query --type decision --json > /tmp/decisions.json
-agent-store query --type knowledge --json > /tmp/knowledge.json
+# Export keepers (JSONL format preserves all metadata including timestamps)
+agent-store export --type decision > /tmp/decisions.jsonl
+agent-store export --type knowledge > /tmp/knowledge.jsonl
 
 # Nuke and rebuild
 rm -rf .agent-store
 agent-store init
 
-# Re-import (requires scripting since push reads stdin)
-jq -c '.[]' /tmp/decisions.json | while IFS= read -r entry; do
-  DATA=$(echo "$entry" | jq -r '.data')
-  TYPE=$(echo "$entry" | jq -r '.entity_type // empty')
-  LABELS=$(echo "$entry" | jq -r '.labels[]' 2>/dev/null)
-  ATTRS=$(echo "$entry" | jq -r '.attributes // {} | to_entries[] | "--attr " + .key + "=" + .value' 2>/dev/null)
-
-  CMD="echo $(printf '%q' "$DATA") | agent-store push"
-  [ -n "$TYPE" ] && CMD="$CMD --type $TYPE"
-  for L in $LABELS; do CMD="$CMD --label $L"; done
-  while IFS= read -r attr_flag; do
-    [ -n "$attr_flag" ] && CMD="$CMD $attr_flag"
-  done <<< "$ATTRS"
-  eval "$CMD"
-done
+# Re-import (preserves timestamps, labels, attributes — only IDs change)
+cat /tmp/decisions.jsonl /tmp/knowledge.jsonl | agent-store import
 ```
 
-**Gotcha:** The re-init approach loses entry IDs and timestamps. If
+**Gotcha:** The re-init approach loses entry IDs (timestamps are preserved by import). If
 other entries reference IDs (e.g., "see entry abc123"), those references
 break. For stores where referential integrity matters, prefer growing
 the store and using labels/attributes to mark entries as superseded

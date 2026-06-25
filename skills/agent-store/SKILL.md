@@ -30,7 +30,7 @@ Every piece of data in the store is an **entry**. An entry has:
 | **type**     | Optional entity classification             | `--type`             |
 | **labels**   | Zero or more tags                          | `--label` (repeat)   |
 | **attributes** | Zero or more key-value pairs             | `--attr k=v` (repeat)|
-| **created_at** | Timestamp                                | automatic            |
+| **created_at** | Timestamp                                | automatic / `--timestamp` |
 
 **When to use what:**
 - **type** — what the entry *is* (task, decision, note, config, artifact)
@@ -101,14 +101,14 @@ agent-store stats     # entry count and store size
 | Command | What it does |
 |---------|-------------|
 | `init` | Create `.agent-store/store.db`, install skills to `.agents/skills/`, set up project docs |
-| `push` | Read stdin, store as entry. Flags: `--label`, `--type`, `--attr key=value`, `-q`/`--quiet`, `--id-only` |
+| `push` | Read stdin, store as entry. Flags: `--label`, `--type`, `--attr key=value`, `--timestamp`, `-q`/`--quiet`, `--id-only` |
 | `pull <id>` | Retrieve entry by ID, print data to stdout. Flags: `--json` (full entry as JSON object), `--raw` (omit trailing newline for binary-safe piping) |
 | `query` | List entries. Filter: `--label` (repeat), `--not-label` (repeat, exclude), `--type`, `--attr key=value` (repeat), `--data <substring>`, `--after <datetime>`, `--before <datetime>`, `--json`, `--count`, `--latest`, `--limit N`, `--offset N`, `-r`/`--reverse` |
 | `schema` | Show entity types and label counts |
 | `stats` | Show entry count and store size. Flags: `--json` |
 | `skills` | List and read built-in usage guides |
 | `export` | Export entries as JSONL (one JSON object per line). Filter: `--id`, `--label` (repeat), `--not-label` (repeat), `--type`, `--attr key=value` (repeat), `--data`, `--after`, `--before` |
-| `import` | Import entries from JSONL on stdin (complement of export). Generates fresh IDs. Flags: `--dry-run` |
+| `import` | Import entries from JSONL on stdin (complement of export). Generates fresh IDs, preserves timestamps. Flags: `--dry-run` |
 | `purge` | Delete ALL entries (destructive). Requires `--confirm` flag. |
 | `completions <shell>` | Generate shell completions (bash, zsh, fish, elvish, powershell) |
 
@@ -140,6 +140,9 @@ Sprint review notes:
 - Dashboard redesign blocked on API changes
 - Next sprint: focus on performance
 EOF
+
+# Override the created_at timestamp (for migrations, imports)
+echo "historical data" | agent-store push --type note --timestamp "2020-01-15 10:30:00"
 ```
 
 ## Querying data
@@ -291,8 +294,9 @@ cat data.jsonl | agent-store import --dry-run
 
 Each input line must be a JSON object. The `data` field is required; `entity_type`,
 `labels`, and `attributes` are optional (default to null, [], and {} respectively).
-The `id` and `created_at` fields from the input are ignored — fresh values are
-always generated to prevent ID conflicts and preserve append-only semantics.
+Fresh IDs are always generated to prevent conflicts. The `created_at` field from
+the input is preserved when present (enabling true backup/restore); when missing,
+the current time is used.
 
 Output: `Imported N entries (M errors)` on stderr.
 With `--dry-run`: `Dry run: N entries would be imported (M errors)` on stderr. Nothing is inserted.

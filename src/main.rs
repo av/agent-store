@@ -1694,15 +1694,21 @@ fn import(dry_run: bool) {
             })
             .unwrap_or_default();
 
+        // Preserve created_at timestamp from JSONL when present
+        let created_at = obj
+            .get("created_at")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
         // In dry-run mode, we validated the line — count it and move on
         if dry_run {
             // Suppress unused variable warnings by using them
-            let _ = (data, entity_type, labels, attributes);
+            let _ = (data, entity_type, labels, attributes, created_at);
             imported += 1;
             continue;
         }
 
-        // Generate fresh ID (always — skip imported id/created_at)
+        // Generate fresh ID (always — don't preserve original id to avoid conflicts)
         let id = Uuid::new_v4().to_string();
         let conn = conn.as_ref().unwrap();
 
@@ -1715,10 +1721,18 @@ fn import(dry_run: bool) {
 
         let mut failed = false;
 
-        if let Err(e) = conn.execute(
-            "INSERT INTO entries (id, data, entity_type) VALUES (?1, ?2, ?3)",
-            rusqlite::params![id, data, entity_type],
-        ) {
+        let insert_result = if let Some(ref ts) = created_at {
+            conn.execute(
+                "INSERT INTO entries (id, data, entity_type, created_at) VALUES (?1, ?2, ?3, ?4)",
+                rusqlite::params![id, data, entity_type, ts],
+            )
+        } else {
+            conn.execute(
+                "INSERT INTO entries (id, data, entity_type) VALUES (?1, ?2, ?3)",
+                rusqlite::params![id, data, entity_type],
+            )
+        };
+        if let Err(e) = insert_result {
             eprintln!("error: line {line_num}: failed to insert entry: {e}");
             failed = true;
         }

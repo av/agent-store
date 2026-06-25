@@ -29,6 +29,7 @@ Options:
 - `--attr <KEY=VALUE>` — Set attribute key-value pair (repeatable, AND logic on query)
 - `-q`, `--quiet` — Suppress all output (for scripting when no feedback is needed)
 - `--id-only` — Output only the raw UUID (no "stored entry" prefix). Conflicts with `--quiet`
+- `--timestamp <DATETIME>` — Override created_at timestamp (ISO 8601: `"2024-01-15 10:30:00"` or `"2024-01-15"`). Default: current time
 
 Data is read from stdin until EOF. Empty stdin is an error. Labels, type,
 and attribute keys cannot be empty strings.
@@ -119,7 +120,7 @@ agent-store stats --json
 ```
 
 Options:
-- `--json` — Output stats as a JSON object with fields: `entries`, `entity_types`, `labels`, `entity_type_count`, `label_count`
+- `--json` — Output stats as a JSON object with fields: `entries`, `entity_types`, `labels`, `entity_type_count`, `label_count`, `entries_by_type`, `entries_by_label`
 
 Reports (human-readable mode):
 - Total entry count
@@ -191,8 +192,9 @@ Options:
   require an initialized store.
 
 Reads JSONL from stdin (one JSON object per line). For each valid line,
-inserts a new entry with a fresh UUID and timestamp. The `id` and
-`created_at` fields from the input are ignored to prevent ID conflicts.
+inserts a new entry with a fresh UUID. The `created_at` field from the input
+is preserved when present (for true backup/restore); when missing, the current
+time is used. The `id` field is ignored to prevent conflicts.
 
 Required fields: `data` (string).
 Optional fields: `entity_type` (string), `labels` (array of strings),

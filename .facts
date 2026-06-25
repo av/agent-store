@@ -258,6 +258,9 @@
 - label: import --dry-run parses and validates JSONL without inserting, prints summary with count of entries that would be imported and errors
   command: echo "{\"data\":\"test\"}" | agent-store import --dry-run 2>&1 | grep -q "Dry run" && echo PASS || echo FAIL
   tags: [spec, implemented]
+- label: import preserves created_at timestamps from JSONL when present, using current time as fallback when missing
+  command: cd /tmp/test-import-ts && rm -rf .agent-store && agent-store init > /dev/null 2>&1 && echo "original" | agent-store push --label test --timestamp "2020-06-15 12:00:00" -q && agent-store export > /tmp/test-import-ts-backup.jsonl && rm -rf .agent-store && agent-store init > /dev/null 2>&1 && agent-store import < /tmp/test-import-ts-backup.jsonl 2>&1 && agent-store query --json --latest | jq -r .created_at | grep -q "2020-06-15 12:00:00" && echo PASS || echo FAIL
+  tags: [spec, implemented]
 
 ## purge
 - label: agent-store purge without --confirm prints warning message and exits 1

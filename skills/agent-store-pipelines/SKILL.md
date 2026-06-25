@@ -75,6 +75,9 @@ done < data.txt
 
 ```bash
 agent-store query --json > backup.json
+
+# JSONL format (preferred — each line is independent, streamable)
+agent-store export > backup.jsonl
 ```
 
 ### Filtered export
@@ -88,6 +91,12 @@ agent-store query --label critical --json > critical.json
 
 # Export with compound filters
 agent-store query --type task --attr status=open --json > open-tasks.json
+
+# Using export command (native JSONL, with all filters)
+agent-store export --type task > tasks.jsonl
+agent-store export --label critical > critical.jsonl
+agent-store export --type task --not-label done > open-tasks.jsonl
+agent-store export --after "2024-06-01" --before "2024-07-01" > june.jsonl
 ```
 
 ### One file per entry
@@ -108,23 +117,11 @@ agent-store query --json | jq -r '.[].data' > data-only.txt
 ### Restore from backup
 
 ```bash
-jq -c '.[]' backup.json | while IFS= read -r entry; do
-  DATA=$(echo "$entry" | jq -r '.data')
-  TYPE=$(echo "$entry" | jq -r '.entity_type // empty')
-  LABELS=$(echo "$entry" | jq -r '.labels[]' 2>/dev/null)
-  ATTRS=$(echo "$entry" | jq -r '.attributes // {} | to_entries[] | "--attr " + .key + "=" + .value' 2>/dev/null)
-  
-  CMD="echo $(printf '%q' "$DATA") | agent-store push"
-  [ -n "$TYPE" ] && CMD="$CMD --type $TYPE"
-  while IFS= read -r label; do
-    [ -n "$label" ] && CMD="$CMD --label $label"
-  done <<< "$LABELS"
-  while IFS= read -r attr_flag; do
-    [ -n "$attr_flag" ] && CMD="$CMD $attr_flag"
-  done <<< "$ATTRS"
-  
-  eval "$CMD"
-done
+# From JSONL backup (preserves timestamps, labels, attributes)
+cat backup.jsonl | agent-store import
+
+# From JSON array backup (legacy format)
+jq -c '.[]' backup.json | agent-store import
 ```
 
 ## Round-trip processing
@@ -239,7 +236,7 @@ agent-store query --type task --attr status=open --json \
 
 ```bash
 # Total count
-agent-store stats | head -1
+agent-store query --count
 
 # Count by type
 agent-store query --json | jq 'group_by(.entity_type) | .[] | {type: .[0].entity_type, count: length}'
@@ -266,6 +263,9 @@ agent-store query --type task --json | jq '
 # Entries created today
 TODAY=$(date +%Y-%m-%d)
 agent-store query --json | jq --arg d "$TODAY" '[.[] | select(.created_at | startswith($d))]'
+
+# Simpler: use --after filter
+agent-store query --after "$(date +%Y-%m-%d)"
 
 # Entries per day
 agent-store query --json | jq '
@@ -296,30 +296,15 @@ AGENT_STORE_PATH=/path/to/other agent-store query --json
 ### Copy entries between stores
 
 ```bash
-# Export from source, import to destination
-AGENT_STORE_PATH=./source agent-store query --type task --json \
-  | jq -c '.[]' | while IFS= read -r entry; do
-    echo "$entry" | jq -r '.data' | AGENT_STORE_PATH=./dest agent-store push --type task
-  done
+# Export from source, import to destination (preserves all metadata)
+AGENT_STORE_PATH=./source agent-store export --type task | AGENT_STORE_PATH=./dest agent-store import
 ```
 
 ### Sync with label and attribute preservation
 
 ```bash
-AGENT_STORE_PATH=./source agent-store query --label shared --json \
-  | jq -c '.[]' | while IFS= read -r entry; do
-    DATA=$(echo "$entry" | jq -r '.data')
-    LABELS=$(echo "$entry" | jq -r '.labels[]')
-    ATTRS=$(echo "$entry" | jq -r '.attributes // {} | to_entries[] | "--attr " + .key + "=" + .value' 2>/dev/null)
-    CMD="echo $(printf '%q' "$DATA") | AGENT_STORE_PATH=./dest agent-store push --type synced"
-    while IFS= read -r label; do
-      [ -n "$label" ] && CMD="$CMD --label $label"
-    done <<< "$LABELS"
-    while IFS= read -r attr_flag; do
-      [ -n "$attr_flag" ] && CMD="$CMD $attr_flag"
-    done <<< "$ATTRS"
-    eval "$CMD"
-  done
+# Export/import preserves labels, attributes, and timestamps automatically
+AGENT_STORE_PATH=./source agent-store export --label shared | AGENT_STORE_PATH=./dest agent-store import
 ```
 
 ### Shared team store
@@ -441,7 +426,7 @@ querying for the latest:
 echo "v2 config" | agent-store push --type config --label current --attr version=2
 
 # Always get the newest entry of a type+label
-agent-store query --type config --label current --json | jq -r 'sort_by(.created_at) | last | .data'
+agent-store query --type config --label current --latest
 ```
 
 ### Deduplicate existing entries
