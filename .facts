@@ -256,3 +256,8 @@
 - label: PRAGMA busy_timeout = 5000 is set on every database connection so concurrent writes retry instead of failing with database locked
   command: rm -rf /tmp/as-busy-test && mkdir -p /tmp/as-busy-test/.git && cd /tmp/as-busy-test && agent-store init && seq 100 | xargs -P50 -I{} sh -c "echo data-{} | agent-store push --quiet --label batch" && COUNT=$(agent-store query --label batch --json | python3 -c "import sys,json; print(len(json.load(sys.stdin)))") && test "$COUNT" -eq 100 && echo "OK"
   tags: [spec, implemented]
+
+# cli > query
+- label: query --id filters entries by exact ID match, returning the entry in query format with --json support
+  command: ID=$(echo "id-test-data" | agent-store push --label id-test --id-only) && agent-store query --id "$ID" --json | jq -e ".[0].id == \"$ID\""
+  tags: [spec, implemented]

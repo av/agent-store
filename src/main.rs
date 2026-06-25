@@ -69,6 +69,9 @@ enum Command {
     },
     /// List and filter entries
     Query {
+        /// Filter by entry ID (returns entry in query format with JSON support)
+        #[arg(long)]
+        id: Option<String>,
         /// Filter by label (can be repeated, AND logic)
         #[arg(long)]
         label: Vec<String>,
@@ -802,6 +805,126 @@ struct EntryJson {
     attributes: HashMap<String, String>,
 }
 
+/// Shared filter arguments used by both query and export commands.
+/// Eliminates duplicated SQL-building logic.
+struct FilterArgs {
+    labels: Vec<String>,
+    not_labels: Vec<String>,
+    entity_type: Option<String>,
+    attrs: Vec<String>,
+    data_filter: Option<String>,
+    after: Option<String>,
+    before: Option<String>,
+    id_filter: Option<String>,
+}
+
+impl FilterArgs {
+    /// Validate filter inputs. Prints error and exits on invalid input.
+    fn validate(&self) {
+        for label in &self.labels {
+            if label.trim().is_empty() {
+                eprintln!("error: label cannot be empty");
+                process::exit(1);
+            }
+        }
+        if let Some(ref t) = self.entity_type {
+            if t.trim().is_empty() {
+                eprintln!("error: type cannot be empty");
+                process::exit(1);
+            }
+        }
+        let parsed_attrs: Vec<(&str, &str)> = self.attrs.iter().map(|a| parse_attr(a)).collect();
+        for (key, _) in &parsed_attrs {
+            if key.trim().is_empty() {
+                eprintln!("error: attribute key cannot be empty");
+                process::exit(1);
+            }
+        }
+    }
+
+    /// Build SQL JOINs, WHERE conditions, and parameter values from the filters.
+    /// Returns (joins_sql, conditions, params) where:
+    /// - joins_sql: JOIN clauses to append after "FROM entries e"
+    /// - conditions: WHERE condition strings (to be joined with " AND ")
+    /// - params: ordered parameter values matching ?N placeholders
+    fn build_filter_sql(&self) -> (String, Vec<String>, Vec<Box<dyn rusqlite::types::ToSql>>) {
+        let mut joins = String::new();
+        let mut conditions: Vec<String> = Vec::new();
+        let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+        let mut param_idx = 1u32;
+
+        let parsed_attrs: Vec<(&str, &str)> = self.attrs.iter().map(|a| parse_attr(a)).collect();
+
+        // ID filter
+        if let Some(ref id) = self.id_filter {
+            conditions.push(format!("e.id = ?{param_idx}"));
+            params.push(Box::new(id.clone()));
+            param_idx += 1;
+        }
+
+        // Label joins + conditions (one join per label filter, AND logic)
+        for (i, l) in self.labels.iter().enumerate() {
+            let alias = format!("l{i}");
+            joins.push_str(&format!(" JOIN labels {alias} ON e.id = {alias}.entry_id"));
+            conditions.push(format!("{alias}.label = ?{param_idx}"));
+            params.push(Box::new(l.clone()));
+            param_idx += 1;
+        }
+
+        // Entity type condition
+        if let Some(ref t) = self.entity_type {
+            conditions.push(format!("e.entity_type = ?{param_idx}"));
+            params.push(Box::new(t.clone()));
+            param_idx += 1;
+        }
+
+        // Attribute joins + conditions (one join per attr filter, AND logic)
+        for (i, (key, value)) in parsed_attrs.iter().enumerate() {
+            let alias = format!("a{i}");
+            joins.push_str(&format!(
+                " JOIN attributes {alias} ON e.id = {alias}.entry_id"
+            ));
+            conditions.push(format!("{alias}.key = ?{param_idx}"));
+            params.push(Box::new(key.to_string()));
+            param_idx += 1;
+            conditions.push(format!("{alias}.value = ?{param_idx}"));
+            params.push(Box::new(value.to_string()));
+            param_idx += 1;
+        }
+
+        // Data substring filter (uses parameter binding for SQL injection prevention)
+        if let Some(ref substr) = self.data_filter {
+            conditions.push(format!("e.data LIKE '%' || ?{param_idx} || '%'"));
+            params.push(Box::new(substr.clone()));
+            param_idx += 1;
+        }
+
+        // Not-label exclusion conditions (one subquery per excluded label)
+        for nl in &self.not_labels {
+            conditions.push(format!(
+                "e.id NOT IN (SELECT entry_id FROM labels WHERE label = ?{param_idx})"
+            ));
+            params.push(Box::new(nl.clone()));
+            param_idx += 1;
+        }
+
+        // Date range filters
+        if let Some(ref ts) = self.after {
+            conditions.push(format!("e.created_at > ?{param_idx}"));
+            params.push(Box::new(ts.clone()));
+            param_idx += 1;
+        }
+        if let Some(ref ts) = self.before {
+            conditions.push(format!("e.created_at < ?{param_idx}"));
+            params.push(Box::new(ts.clone()));
+            param_idx += 1;
+        }
+        let _ = param_idx; // suppress unused assignment warning
+
+        (joins, conditions, params)
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn query(
     labels: Vec<String>,
@@ -817,32 +940,25 @@ fn query(
     data_filter: Option<String>,
     after: Option<String>,
     before: Option<String>,
+    id_filter: Option<String>,
 ) {
-    // Validate empty strings before any DB work
-    for label in &labels {
-        if label.trim().is_empty() {
-            eprintln!("error: label cannot be empty");
-            process::exit(1);
-        }
-    }
-    if let Some(ref t) = entity_type
-        && t.trim().is_empty() {
-            eprintln!("error: type cannot be empty");
-            process::exit(1);
-        }
-
-    // Parse and validate attribute filters
-    let parsed_attrs: Vec<(&str, &str)> = attrs.iter().map(|a| parse_attr(a)).collect();
-    for (key, _) in &parsed_attrs {
-        if key.trim().is_empty() {
-            eprintln!("error: attribute key cannot be empty");
-            process::exit(1);
-        }
-    }
+    let filters = FilterArgs {
+        labels,
+        not_labels,
+        entity_type,
+        attrs,
+        data_filter,
+        after,
+        before,
+        id_filter,
+    };
+    filters.validate();
 
     let conn = open_db();
 
     // Build query dynamically
+    let (joins, conditions, params) = filters.build_filter_sql();
+
     // When --count + (--latest or --limit/--offset), select rows first then wrap in COUNT subquery
     let needs_count_subquery = count && (latest || limit.is_some());
     let select_cols = if needs_count_subquery {
@@ -854,69 +970,7 @@ fn query(
     } else {
         "DISTINCT e.data"
     };
-    let mut sql = format!("SELECT {select_cols} FROM entries e");
-    let mut conditions: Vec<String> = Vec::new();
-    let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
-    let mut param_idx = 1u32;
-
-    // Label joins + conditions (one join per label filter, AND logic)
-    for (i, l) in labels.iter().enumerate() {
-        let alias = format!("l{i}");
-        sql.push_str(&format!(" JOIN labels {alias} ON e.id = {alias}.entry_id"));
-        conditions.push(format!("{alias}.label = ?{param_idx}"));
-        params.push(Box::new(l.clone()));
-        param_idx += 1;
-    }
-
-    // Entity type condition
-    if let Some(ref t) = entity_type {
-        conditions.push(format!("e.entity_type = ?{param_idx}"));
-        params.push(Box::new(t.clone()));
-        param_idx += 1;
-    }
-
-    // Attribute joins + conditions (one join per attr filter, AND logic)
-    for (i, (key, value)) in parsed_attrs.iter().enumerate() {
-        let alias = format!("a{i}");
-        sql.push_str(&format!(
-            " JOIN attributes {alias} ON e.id = {alias}.entry_id"
-        ));
-        conditions.push(format!("{alias}.key = ?{param_idx}"));
-        params.push(Box::new(key.to_string()));
-        param_idx += 1;
-        conditions.push(format!("{alias}.value = ?{param_idx}"));
-        params.push(Box::new(value.to_string()));
-        param_idx += 1;
-    }
-
-    // Data substring filter (uses parameter binding for SQL injection prevention)
-    if let Some(ref substr) = data_filter {
-        conditions.push(format!("e.data LIKE '%' || ?{param_idx} || '%'"));
-        params.push(Box::new(substr.clone()));
-        param_idx += 1;
-    }
-
-    // Not-label exclusion conditions (one subquery per excluded label)
-    for nl in &not_labels {
-        conditions.push(format!(
-            "e.id NOT IN (SELECT entry_id FROM labels WHERE label = ?{param_idx})"
-        ));
-        params.push(Box::new(nl.clone()));
-        param_idx += 1;
-    }
-
-    // Date range filters
-    if let Some(ref ts) = after {
-        conditions.push(format!("e.created_at > ?{param_idx}"));
-        params.push(Box::new(ts.clone()));
-        param_idx += 1;
-    }
-    if let Some(ref ts) = before {
-        conditions.push(format!("e.created_at < ?{param_idx}"));
-        params.push(Box::new(ts.clone()));
-        param_idx += 1;
-    }
-    let _ = param_idx; // suppress unused assignment warning
+    let mut sql = format!("SELECT {select_cols} FROM entries e{joins}");
 
     if !conditions.is_empty() {
         sql.push_str(" WHERE ");
@@ -1092,90 +1146,23 @@ fn export(
     after: Option<String>,
     before: Option<String>,
 ) {
-    // Validate empty strings before any DB work
-    for label in &labels {
-        if label.trim().is_empty() {
-            eprintln!("error: label cannot be empty");
-            process::exit(1);
-        }
-    }
-    if let Some(ref t) = entity_type
-        && t.trim().is_empty() {
-            eprintln!("error: type cannot be empty");
-            process::exit(1);
-        }
-
-    let parsed_attrs: Vec<(&str, &str)> = attrs.iter().map(|a| parse_attr(a)).collect();
-    for (key, _) in &parsed_attrs {
-        if key.trim().is_empty() {
-            eprintln!("error: attribute key cannot be empty");
-            process::exit(1);
-        }
-    }
+    let filters = FilterArgs {
+        labels,
+        not_labels,
+        entity_type,
+        attrs,
+        data_filter,
+        after,
+        before,
+        id_filter: None,
+    };
+    filters.validate();
 
     let conn = open_db();
 
-    // Build query — same pattern as query() but always fetches full entry data
-    let mut sql = String::from("SELECT e.id, e.data, e.entity_type, e.created_at FROM entries e");
-    let mut conditions: Vec<String> = Vec::new();
-    let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
-    let mut param_idx = 1u32;
+    let (joins, conditions, params) = filters.build_filter_sql();
 
-    for (i, l) in labels.iter().enumerate() {
-        let alias = format!("l{i}");
-        sql.push_str(&format!(" JOIN labels {alias} ON e.id = {alias}.entry_id"));
-        conditions.push(format!("{alias}.label = ?{param_idx}"));
-        params.push(Box::new(l.clone()));
-        param_idx += 1;
-    }
-
-    if let Some(ref t) = entity_type {
-        conditions.push(format!("e.entity_type = ?{param_idx}"));
-        params.push(Box::new(t.clone()));
-        param_idx += 1;
-    }
-
-    for (i, (key, value)) in parsed_attrs.iter().enumerate() {
-        let alias = format!("a{i}");
-        sql.push_str(&format!(
-            " JOIN attributes {alias} ON e.id = {alias}.entry_id"
-        ));
-        conditions.push(format!("{alias}.key = ?{param_idx}"));
-        params.push(Box::new(key.to_string()));
-        param_idx += 1;
-        conditions.push(format!("{alias}.value = ?{param_idx}"));
-        params.push(Box::new(value.to_string()));
-        param_idx += 1;
-    }
-
-    // Data substring filter
-    if let Some(ref substr) = data_filter {
-        conditions.push(format!("e.data LIKE '%' || ?{param_idx} || '%'"));
-        params.push(Box::new(substr.clone()));
-        param_idx += 1;
-    }
-
-    // Not-label exclusion conditions
-    for nl in &not_labels {
-        conditions.push(format!(
-            "e.id NOT IN (SELECT entry_id FROM labels WHERE label = ?{param_idx})"
-        ));
-        params.push(Box::new(nl.clone()));
-        param_idx += 1;
-    }
-
-    // Date range filters
-    if let Some(ref ts) = after {
-        conditions.push(format!("e.created_at > ?{param_idx}"));
-        params.push(Box::new(ts.clone()));
-        param_idx += 1;
-    }
-    if let Some(ref ts) = before {
-        conditions.push(format!("e.created_at < ?{param_idx}"));
-        params.push(Box::new(ts.clone()));
-        param_idx += 1;
-    }
-    let _ = param_idx; // suppress unused assignment warning
+    let mut sql = format!("SELECT e.id, e.data, e.entity_type, e.created_at FROM entries e{joins}");
 
     if !conditions.is_empty() {
         sql.push_str(" WHERE ");
@@ -1764,6 +1751,7 @@ fn main() {
         } => push(label, entity_type, quiet, id_only, attr),
         Command::Pull { id, json } => pull(&id, json),
         Command::Query {
+            id,
             label,
             not_label,
             entity_type,
@@ -1777,7 +1765,7 @@ fn main() {
             data,
             after,
             before,
-        } => query(label, not_label, entity_type, attr, json, count, latest, limit, offset, reverse, data, after, before),
+        } => query(label, not_label, entity_type, attr, json, count, latest, limit, offset, reverse, data, after, before, id),
 
         Command::Export {
             label,
