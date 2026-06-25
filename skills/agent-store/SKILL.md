@@ -70,6 +70,9 @@ agent-store pull $ID
 # Retrieve full entry as JSON (with labels, attributes, timestamps)
 agent-store pull $ID --json | jq .labels
 
+# Binary-safe pull (omit trailing newline)
+agent-store pull $ID --raw | sha256sum
+
 # Find entries by label, type, or attributes
 agent-store query --label urgent
 agent-store query --type task
@@ -99,12 +102,12 @@ agent-store stats     # entry count and store size
 |---------|-------------|
 | `init` | Create `.agent-store/store.db`, install skills to `.agents/skills/`, set up project docs |
 | `push` | Read stdin, store as entry. Flags: `--label`, `--type`, `--attr key=value`, `-q`/`--quiet`, `--id-only` |
-| `pull <id>` | Retrieve entry by ID, print data to stdout. Flags: `--json` (full entry as JSON object) |
+| `pull <id>` | Retrieve entry by ID, print data to stdout. Flags: `--json` (full entry as JSON object), `--raw` (omit trailing newline for binary-safe piping) |
 | `query` | List entries. Filter: `--label` (repeat), `--not-label` (repeat, exclude), `--type`, `--attr key=value` (repeat), `--data <substring>`, `--after <datetime>`, `--before <datetime>`, `--json`, `--count`, `--latest`, `--limit N`, `--offset N`, `-r`/`--reverse` |
 | `schema` | Show entity types and label counts |
 | `stats` | Show entry count and store size. Flags: `--json` |
 | `skills` | List and read built-in usage guides |
-| `export` | Export entries as JSONL (one JSON object per line). Filter: `--label` (repeat), `--not-label` (repeat), `--type`, `--attr key=value` (repeat), `--data`, `--after`, `--before` |
+| `export` | Export entries as JSONL (one JSON object per line). Filter: `--id`, `--label` (repeat), `--not-label` (repeat), `--type`, `--attr key=value` (repeat), `--data`, `--after`, `--before` |
 | `import` | Import entries from JSONL on stdin (complement of export). Generates fresh IDs. Flags: `--dry-run` |
 | `purge` | Delete ALL entries (destructive). Requires `--confirm` flag. |
 | `completions <shell>` | Generate shell completions (bash, zsh, fish, elvish, powershell) |
@@ -240,6 +243,9 @@ Dump entries as JSONL (one JSON object per line) for backup and migration:
 ```bash
 # Export all entries
 agent-store export > backup.jsonl
+
+# Export a single entry by ID
+agent-store export --id <uuid>
 
 # Export filtered entries
 agent-store export --label important > important.jsonl

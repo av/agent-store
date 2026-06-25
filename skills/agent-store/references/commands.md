@@ -43,7 +43,7 @@ ID=$(echo "data" | agent-store push --label tag --id-only)
 Retrieve an entry by ID.
 
 ```
-agent-store pull <ID> [--json]
+agent-store pull <ID> [--json] [--raw]
 ```
 
 Prints the entry's data to stdout (raw payload, no metadata). Exit code 1
@@ -51,6 +51,7 @@ if the entry is not found.
 
 Options:
 - `--json` — Output the full entry as a JSON object (same format as `query --json` entries: `id`, `data`, `entity_type`, `created_at`, `labels`, `attributes`)
+- `--raw` — Omit trailing newline for binary-safe piping. Useful for checksums: `agent-store pull <id> --raw | sha256sum`
 
 ## agent-store query
 
@@ -154,6 +155,7 @@ agent-store export [OPTIONS]
 
 | Flag | Description |
 |------|-------------|
+| `--id <ID>` | Filter by entry ID (export a single entry) |
 | `--label <LABEL>` | Filter by label (can be repeated, AND logic) |
 | `--not-label <LABEL>` | Exclude entries with this label (can be repeated) |
 | `--type <TYPE>` | Filter by entity type |

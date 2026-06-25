@@ -223,6 +223,9 @@
 - label: export --after and --before filter entries by date range, matching query filter parity
   command: agent-store export --after "2020-01-01" --before "2099-01-01" 2>&1 | head -1 | grep -qE "^\{" && echo PASS || echo FAIL
   tags: [spec, implemented]
+- label: export --id filters to a single entry by UUID, matching query --id filter parity
+  command: TEST_ID=$(echo "export-id-test" | agent-store push --id-only --label export-id-test) && agent-store export --id "$TEST_ID" | jq -r .id | grep -q "$TEST_ID"
+  tags: [spec, implemented]
 
 ## import
 - label: agent-store import reads JSONL from stdin and inserts entries into the store, printing a summary of imported entries and errors
@@ -249,6 +252,9 @@
 ## pull
 - label: pull --json outputs full entry as JSON object matching query --json format (id, entity_type, labels, data, created_at, attributes)
   command: cd /tmp && rm -rf as-test-r1q && mkdir as-test-r1q && cd as-test-r1q && git init -q && agent-store init 2>/dev/null && ID=$(echo "test data" | agent-store push --label tag1 --type note --attr k=v --id-only) && OUT=$(agent-store pull "$ID" --json) && echo "$OUT" | jq -e ".id and .data and .labels and .created_at and .attributes and (.entity_type == \"note\")" > /dev/null && rm -rf /tmp/as-test-r1q
+  tags: [spec, implemented]
+- label: pull --raw omits trailing newline for binary-safe piping
+  command: TEST_ID=$(echo -n "rawtest" | agent-store push --id-only --label raw-test) && BYTES=$(agent-store pull "$TEST_ID" --raw | wc -c) && test "$BYTES" = "7"
   tags: [spec, implemented]
 
 # resilience

@@ -66,6 +66,9 @@ enum Command {
         /// Output the full entry as a JSON object (same format as query --json)
         #[arg(long)]
         json: bool,
+        /// Omit trailing newline (binary-safe piping)
+        #[arg(long)]
+        raw: bool,
     },
     /// List and filter entries
     Query {
@@ -127,6 +130,9 @@ enum Command {
     },
     /// Export entries as JSONL (one JSON object per line) for backup and migration
     Export {
+        /// Filter by entry ID
+        #[arg(long)]
+        id: Option<String>,
         /// Filter by label (can be repeated, AND logic)
         #[arg(long)]
         label: Vec<String>,
@@ -827,11 +833,11 @@ impl FilterArgs {
                 process::exit(1);
             }
         }
-        if let Some(ref t) = self.entity_type {
-            if t.trim().is_empty() {
-                eprintln!("error: type cannot be empty");
-                process::exit(1);
-            }
+        if let Some(ref t) = self.entity_type
+            && t.trim().is_empty()
+        {
+            eprintln!("error: type cannot be empty");
+            process::exit(1);
         }
         let parsed_attrs: Vec<(&str, &str)> = self.attrs.iter().map(|a| parse_attr(a)).collect();
         for (key, _) in &parsed_attrs {
@@ -1137,6 +1143,7 @@ fn query(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn export(
     labels: Vec<String>,
     not_labels: Vec<String>,
@@ -1145,6 +1152,7 @@ fn export(
     data_filter: Option<String>,
     after: Option<String>,
     before: Option<String>,
+    id_filter: Option<String>,
 ) {
     let filters = FilterArgs {
         labels,
@@ -1154,7 +1162,7 @@ fn export(
         data_filter,
         after,
         before,
-        id_filter: None,
+        id_filter,
     };
     filters.validate();
 
@@ -1265,7 +1273,7 @@ fn export(
     }
 }
 
-fn pull(id: &str, json: bool) {
+fn pull(id: &str, json: bool, raw: bool) {
     let conn = open_db();
 
     if json {
@@ -1350,7 +1358,13 @@ fn pull(id: &str, json: bool) {
         );
 
         match result {
-            Ok(data) => print!("{data}"),
+            Ok(data) => {
+                if raw {
+                    print!("{data}");
+                } else {
+                    println!("{data}");
+                }
+            }
             Err(rusqlite::Error::QueryReturnedNoRows) => {
                 eprintln!("error: entry not found: {id}");
                 process::exit(1);
@@ -1749,7 +1763,7 @@ fn main() {
             id_only,
             attr,
         } => push(label, entity_type, quiet, id_only, attr),
-        Command::Pull { id, json } => pull(&id, json),
+        Command::Pull { id, json, raw } => pull(&id, json, raw),
         Command::Query {
             id,
             label,
@@ -1768,6 +1782,7 @@ fn main() {
         } => query(label, not_label, entity_type, attr, json, count, latest, limit, offset, reverse, data, after, before, id),
 
         Command::Export {
+            id,
             label,
             not_label,
             entity_type,
@@ -1775,7 +1790,7 @@ fn main() {
             data,
             after,
             before,
-        } => export(label, not_label, entity_type, attr, data, after, before),
+        } => export(label, not_label, entity_type, attr, data, after, before, id),
         Command::Import { dry_run } => import(dry_run),
         Command::Purge { confirm } => purge(confirm),
         Command::Schema => schema(),
