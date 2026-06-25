@@ -796,9 +796,20 @@ fn delete_entry(conn: &Connection, entry_id: &str) {
 
 /// Delete multiple entries by their IDs in FK-safe order.
 fn delete_entries(conn: &Connection, ids: &[String]) {
+    if ids.is_empty() {
+        return;
+    }
+    conn.execute_batch("BEGIN").unwrap_or_else(|e| {
+        eprintln!("error: failed to begin transaction: {e}");
+        process::exit(1);
+    });
     for entry_id in ids {
         delete_entry(conn, entry_id);
     }
+    conn.execute_batch("COMMIT").unwrap_or_else(|e| {
+        eprintln!("error: failed to commit transaction: {e}");
+        process::exit(1);
+    });
 }
 
 /// Resolve an entry ID that may be a prefix.
