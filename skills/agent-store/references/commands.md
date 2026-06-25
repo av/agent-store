@@ -73,7 +73,9 @@ Options:
 - `--label <LABEL>` — Filter by label (can be repeated, AND logic — all must match)
 - `--not-label <LABEL>` — Exclude entries with this label (can be repeated — entries with ANY specified label are excluded)
 - `--type <TYPE>` — Filter by entity type (exact match)
+- `--not-type <TYPE>` — Exclude entries with this entity type (can be repeated, NULL-safe — entries with no type are kept)
 - `--attr <KEY=VALUE>` — Filter by attribute (can be repeated, AND logic — all must match)
+- `--not-attr <KEY=VALUE>` — Exclude entries with this attribute key=value pair (can be repeated — entries with ANY specified pair are excluded)
 - `--data <SUBSTRING>` — Filter by substring match in entry data
 - `--after <DATETIME>` — Only entries created after this timestamp (ISO 8601: `"2024-01-15"` or `"2024-01-15 10:30:00"`)
 - `--before <DATETIME>` — Only entries created before this timestamp (ISO 8601: `"2024-01-15"` or `"2024-01-15 10:30:00"`)
@@ -167,7 +169,9 @@ agent-store export [OPTIONS]
 | `--label <LABEL>` | Filter by label (can be repeated, AND logic) |
 | `--not-label <LABEL>` | Exclude entries with this label (can be repeated) |
 | `--type <TYPE>` | Filter by entity type |
+| `--not-type <TYPE>` | Exclude entries with this entity type (can be repeated, NULL-safe) |
 | `--attr <KEY=VALUE>` | Filter by attribute (can be repeated, AND logic) |
+| `--not-attr <KEY=VALUE>` | Exclude entries with this attribute (can be repeated) |
 | `--data <SUBSTRING>` | Filter by substring match in entry data |
 | `--after <DATETIME>` | Only entries created after this timestamp (ISO 8601) |
 | `--before <DATETIME>` | Only entries created before this timestamp (ISO 8601) |

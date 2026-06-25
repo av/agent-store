@@ -202,6 +202,12 @@
 - label: query --before filters entries to only those created before the given ISO 8601 timestamp
   command: cd /tmp/agent-store-test-before && rm -rf .agent-store && agent-store init >/dev/null 2>&1 && echo "old" | agent-store push --label timetest -q && sleep 1 && MIDPOINT=$(date -u +"%Y-%m-%d %H:%M:%S") && sleep 1 && echo "new" | agent-store push --label timetest -q && RESULT=$(agent-store query --label timetest --before "$MIDPOINT" --count) && test "$RESULT" = "1"
   tags: [spec, implemented]
+- label: query --not-type excludes entries with given entity type; repeatable and NULL-safe so entries with no type are not excluded
+  command: agent-store init 2>/dev/null; echo "a" | agent-store push --type note --label test-nt; echo "b" | agent-store push --type log --label test-nt; echo "c" | agent-store push --label test-nt; RESULT=$(agent-store query --label test-nt --not-type note --json 2>/dev/null | jq -r ".[].data" | sort); [ "$RESULT" = "$(printf "b\nc")" ] && echo "PASS" || echo "FAIL: got $RESULT"
+  tags: [spec, implemented]
+- label: query --not-attr key=value excludes entries having the specified attribute; repeatable with AND semantics
+  command: agent-store init 2>/dev/null; echo "keep" | agent-store push --attr status=active --label test-na; echo "drop" | agent-store push --attr status=archived --label test-na; RESULT=$(agent-store query --label test-na --not-attr status=archived --json 2>/dev/null | jq -r ".[].data"); [ "$RESULT" = "keep" ] && echo "PASS" || echo "FAIL: got $RESULT"
+  tags: [spec, implemented]
 
 ## push
 - label: push -q/--quiet suppresses all output including the entry ID
@@ -249,6 +255,9 @@
   tags: [spec, implemented]
 - label: export --id filters to a single entry by UUID, matching query --id filter parity
   command: TEST_ID=$(echo "export-id-test" | agent-store push --id-only --label export-id-test) && agent-store export --id "$TEST_ID" | jq -r .id | grep -q "$TEST_ID"
+  tags: [spec, implemented]
+- label: export --not-type and --not-attr exclusion filters match query filter parity
+  command: agent-store init 2>/dev/null; echo "a" | agent-store push --type note --label test-ent; echo "b" | agent-store push --type log --label test-ent; RESULT=$(agent-store export --label test-ent --not-type note 2>/dev/null | jq -r ".data"); [ "$RESULT" = "b" ] && echo "PASS" || echo "FAIL: got $RESULT"
   tags: [spec, implemented]
 
 ## import

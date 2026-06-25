@@ -82,6 +82,14 @@ agent-store query --attr priority=high
 agent-store query --label todo --not-label done       # open todos
 agent-store query --not-label done --not-label archived  # exclude multiple
 
+# Exclude entries with a type (NULL-safe: entries with no type are kept)
+agent-store query --not-type log                      # everything except logs
+agent-store query --not-type log --not-type debug     # exclude multiple types
+
+# Exclude entries with a specific attribute
+agent-store query --not-attr status=archived          # exclude archived
+agent-store query --label todo --not-attr status=done # open todos by attr
+
 # Combine filters (AND logic)
 agent-store query --label urgent --type task --attr priority=high
 
@@ -103,11 +111,11 @@ agent-store stats     # entry count and store size
 | `init` | Create `.agent-store/store.db`, install skills to `.agents/skills/`, set up project docs |
 | `push` | Read stdin (or `--file`), store as entry. Flags: `--label`, `--type`, `--attr key=value`, `--timestamp`, `-f`/`--file`, `-q`/`--quiet`, `--id-only`, `--strip` |
 | `pull <id>` | Retrieve entry by ID, print data to stdout. Flags: `--json` (full entry as JSON object), `--raw` (omit trailing newline for binary-safe piping) |
-| `query` | List entries. Filter: `--label` (repeat), `--not-label` (repeat, exclude), `--type`, `--attr key=value` (repeat), `--data <substring>`, `--after <datetime>`, `--before <datetime>`, `--json`, `--count`, `--latest`, `--limit N`, `--offset N`, `-r`/`--reverse` |
+| `query` | List entries. Filter: `--label` (repeat), `--not-label` (repeat, exclude), `--type`, `--not-type` (repeat, exclude, NULL-safe), `--attr key=value` (repeat), `--not-attr key=value` (repeat, exclude), `--data <substring>`, `--after <datetime>`, `--before <datetime>`, `--json`, `--count`, `--latest`, `--limit N`, `--offset N`, `-r`/`--reverse` |
 | `schema` | Show entity types and label counts |
 | `stats` | Show entry count and store size. Flags: `--json` |
 | `skills` | List and read built-in usage guides |
-| `export` | Export entries as JSONL (one JSON object per line). Filter: `--id`, `--label` (repeat), `--not-label` (repeat), `--type`, `--attr key=value` (repeat), `--data`, `--after`, `--before` |
+| `export` | Export entries as JSONL (one JSON object per line). Filter: `--id`, `--label` (repeat), `--not-label` (repeat), `--type`, `--not-type` (repeat, exclude), `--attr key=value` (repeat), `--not-attr key=value` (repeat, exclude), `--data`, `--after`, `--before` |
 | `import` | Import entries from JSONL on stdin (complement of export). Generates fresh IDs, preserves timestamps. Flags: `--dry-run` |
 | `purge` | Delete ALL entries (destructive). Requires `--confirm` flag. |
 | `labels` | List all unique labels in the store, sorted. Flags: `--json` (JSON array), `--count` (with counts) |
@@ -202,6 +210,14 @@ agent-store query --label todo --not-label done         # open todos
 agent-store query --not-label done --not-label archived # exclude multiple labels
 agent-store query --label todo --not-label done --json  # combine with --json
 
+# Exclude entries by type (repeatable, NULL-safe)
+agent-store query --not-type log                        # everything except logs
+agent-store query --not-type log --not-type debug       # exclude multiple types
+
+# Exclude entries by attribute (repeatable, AND semantics)
+agent-store query --not-attr status=archived            # exclude archived
+agent-store query --not-attr status=archived --not-attr priority=low  # exclude both
+
 # Date filters
 agent-store query --after "2024-06-01"                # entries after date
 agent-store query --before "2024-06-30"               # entries before date
@@ -268,6 +284,12 @@ agent-store export --type note --label active > notes.jsonl
 
 # Exclude entries with a label
 agent-store export --not-label archived > active.jsonl
+
+# Exclude entries with a type (NULL-safe)
+agent-store export --not-type debug > no-debug.jsonl
+
+# Exclude entries with an attribute
+agent-store export --not-attr status=archived > active-by-attr.jsonl
 
 # Export entries matching a data substring
 agent-store export --data "error" > errors.jsonl

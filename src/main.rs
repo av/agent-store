@@ -93,9 +93,15 @@ enum Command {
         /// Filter by entity type
         #[arg(long = "type")]
         entity_type: Option<String>,
+        /// Exclude entries with this entity type (can be repeated, NULL-safe)
+        #[arg(long = "not-type", action = clap::ArgAction::Append)]
+        not_type: Vec<String>,
         /// Filter by attribute key=value pair (can be repeated, AND logic)
         #[arg(long = "attr")]
         attr: Vec<String>,
+        /// Exclude entries with this attribute key=value pair (can be repeated)
+        #[arg(long = "not-attr", action = clap::ArgAction::Append)]
+        not_attr: Vec<String>,
         /// Output as JSON array
         #[arg(long)]
         json: bool,
@@ -151,9 +157,15 @@ enum Command {
         /// Filter by entity type
         #[arg(long = "type")]
         entity_type: Option<String>,
+        /// Exclude entries with this entity type (can be repeated, NULL-safe)
+        #[arg(long = "not-type", action = clap::ArgAction::Append)]
+        not_type: Vec<String>,
         /// Filter by attribute key=value pair (can be repeated, AND logic)
         #[arg(long = "attr")]
         attr: Vec<String>,
+        /// Exclude entries with this attribute key=value pair (can be repeated)
+        #[arg(long = "not-attr", action = clap::ArgAction::Append)]
+        not_attr: Vec<String>,
         /// Filter by substring match in entry data
         #[arg(long)]
         data: Option<String>,
@@ -407,9 +419,10 @@ fn is_claude_available(root: &Path) -> bool {
         return true;
     }
     if let Ok(home) = std::env::var("HOME")
-        && Path::new(&home).join(".claude").exists() {
-            return true;
-        }
+        && Path::new(&home).join(".claude").exists()
+    {
+        return true;
+    }
     which_exists("claude")
 }
 
@@ -435,10 +448,11 @@ fn link_skill_for_claude(root: &Path, name: &str) -> bool {
 
     if link_path.is_symlink() {
         if let Ok(current) = fs::read_link(&link_path)
-            && current == target {
-                println!("  skip  .claude/skills/{name} (link up to date)");
-                return true;
-            }
+            && current == target
+        {
+            println!("  skip  .claude/skills/{name} (link up to date)");
+            return true;
+        }
         let _ = fs::remove_file(&link_path);
     } else if link_path.exists() {
         println!("  skip  .claude/skills/{name} (exists, not a symlink)");
@@ -748,7 +762,16 @@ fn parse_attr(attr: &str) -> (&str, &str) {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn push(labels: Vec<String>, entity_type: Option<String>, quiet: bool, id_only: bool, attrs: Vec<String>, timestamp: Option<String>, file: Option<String>, strip: bool) {
+fn push(
+    labels: Vec<String>,
+    entity_type: Option<String>,
+    quiet: bool,
+    id_only: bool,
+    attrs: Vec<String>,
+    timestamp: Option<String>,
+    file: Option<String>,
+    strip: bool,
+) {
     // Validate empty strings before any DB work
     for label in &labels {
         if label.trim().is_empty() {
@@ -757,10 +780,11 @@ fn push(labels: Vec<String>, entity_type: Option<String>, quiet: bool, id_only: 
         }
     }
     if let Some(ref t) = entity_type
-        && t.trim().is_empty() {
-            eprintln!("error: type cannot be empty");
-            process::exit(1);
-        }
+        && t.trim().is_empty()
+    {
+        eprintln!("error: type cannot be empty");
+        process::exit(1);
+    }
     let parsed_attrs: Vec<(&str, &str)> = attrs.iter().map(|a| parse_attr(a)).collect();
     for (key, _) in &parsed_attrs {
         if key.trim().is_empty() {
@@ -886,7 +910,9 @@ struct FilterArgs {
     labels: Vec<String>,
     not_labels: Vec<String>,
     entity_type: Option<String>,
+    not_types: Vec<String>,
     attrs: Vec<String>,
+    not_attrs: Vec<String>,
     data_filter: Option<String>,
     after: Option<String>,
     before: Option<String>,
@@ -910,6 +936,14 @@ impl FilterArgs {
         }
         let parsed_attrs: Vec<(&str, &str)> = self.attrs.iter().map(|a| parse_attr(a)).collect();
         for (key, _) in &parsed_attrs {
+            if key.trim().is_empty() {
+                eprintln!("error: attribute key cannot be empty");
+                process::exit(1);
+            }
+        }
+        let parsed_not_attrs: Vec<(&str, &str)> =
+            self.not_attrs.iter().map(|a| parse_attr(a)).collect();
+        for (key, _) in &parsed_not_attrs {
             if key.trim().is_empty() {
                 eprintln!("error: attribute key cannot be empty");
                 process::exit(1);
@@ -983,6 +1017,29 @@ impl FilterArgs {
             param_idx += 1;
         }
 
+        // Not-type exclusion conditions (NULL-safe: entries with no type are not excluded)
+        for nt in &self.not_types {
+            conditions.push(format!(
+                "(e.entity_type IS NULL OR e.entity_type != ?{param_idx})"
+            ));
+            params.push(Box::new(nt.clone()));
+            param_idx += 1;
+        }
+
+        // Not-attr exclusion conditions (one subquery per excluded key=value pair)
+        let parsed_not_attrs: Vec<(&str, &str)> =
+            self.not_attrs.iter().map(|a| parse_attr(a)).collect();
+        for (key, value) in &parsed_not_attrs {
+            conditions.push(format!(
+                "e.id NOT IN (SELECT entry_id FROM attributes WHERE key = ?{param_idx} AND value = ?{})",
+                param_idx + 1
+            ));
+            params.push(Box::new(key.to_string()));
+            param_idx += 1;
+            params.push(Box::new(value.to_string()));
+            param_idx += 1;
+        }
+
         // Date range filters
         if let Some(ref ts) = self.after {
             conditions.push(format!("e.created_at > ?{param_idx}"));
@@ -1005,7 +1062,9 @@ fn query(
     labels: Vec<String>,
     not_labels: Vec<String>,
     entity_type: Option<String>,
+    not_types: Vec<String>,
     attrs: Vec<String>,
+    not_attrs: Vec<String>,
     json: bool,
     count: bool,
     latest: bool,
@@ -1021,7 +1080,9 @@ fn query(
         labels,
         not_labels,
         entity_type,
+        not_types,
         attrs,
+        not_attrs,
         data_filter,
         after,
         before,
@@ -1055,7 +1116,9 @@ fn query(
     // Add ORDER BY (not applied when --count without --latest or --limit)
     if !count || needs_count_subquery {
         let direction = if reverse { "ASC" } else { "DESC" };
-        sql.push_str(&format!(" ORDER BY e.created_at {direction}, e.rowid {direction}"));
+        sql.push_str(&format!(
+            " ORDER BY e.created_at {direction}, e.rowid {direction}"
+        ));
     }
 
     // Add LIMIT/OFFSET
@@ -1217,7 +1280,9 @@ fn export(
     labels: Vec<String>,
     not_labels: Vec<String>,
     entity_type: Option<String>,
+    not_types: Vec<String>,
     attrs: Vec<String>,
+    not_attrs: Vec<String>,
     data_filter: Option<String>,
     after: Option<String>,
     before: Option<String>,
@@ -1227,7 +1292,9 @@ fn export(
         labels,
         not_labels,
         entity_type,
+        not_types,
         attrs,
+        not_attrs,
         data_filter,
         after,
         before,
@@ -1256,8 +1323,7 @@ fn export(
         }
     };
 
-    let params_refs: Vec<&dyn rusqlite::types::ToSql> =
-        params.iter().map(|p| p.as_ref()).collect();
+    let params_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
     let rows = match stmt.query_map(params_refs.as_slice(), |row| {
         Ok((
             row.get::<_, String>(0)?,
@@ -1357,13 +1423,14 @@ fn pull(id: &str, json: bool, raw: bool) {
             Ok((eid, data, etype, created_at)) => {
                 // Fetch labels
                 let labels: Vec<String> = {
-                    let mut lstmt = match conn.prepare("SELECT label FROM labels WHERE entry_id = ?1") {
-                        Ok(s) => s,
-                        Err(e) => {
-                            eprintln!("error: failed to query labels: {e}");
-                            process::exit(1);
-                        }
-                    };
+                    let mut lstmt =
+                        match conn.prepare("SELECT label FROM labels WHERE entry_id = ?1") {
+                            Ok(s) => s,
+                            Err(e) => {
+                                eprintln!("error: failed to query labels: {e}");
+                                process::exit(1);
+                            }
+                        };
                     match lstmt.query_map(rusqlite::params![eid], |r| r.get::<_, String>(0)) {
                         Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
                         Err(e) => {
@@ -1375,7 +1442,9 @@ fn pull(id: &str, json: bool, raw: bool) {
 
                 // Fetch attributes
                 let attributes: HashMap<String, String> = {
-                    let mut astmt = match conn.prepare("SELECT key, value FROM attributes WHERE entry_id = ?1") {
+                    let mut astmt = match conn
+                        .prepare("SELECT key, value FROM attributes WHERE entry_id = ?1")
+                    {
                         Ok(s) => s,
                         Err(e) => {
                             eprintln!("error: failed to query attributes: {e}");
@@ -1571,7 +1640,9 @@ fn stats(json: bool) {
                 process::exit(1);
             }
         };
-        match stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))) {
+        match stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+        }) {
             Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
             Err(e) => {
                 eprintln!("error: failed to query entries by type: {e}");
@@ -1582,16 +1653,16 @@ fn stats(json: bool) {
 
     // Per-label entry counts
     let entries_by_label: HashMap<String, i64> = {
-        let mut stmt = match conn.prepare(
-            "SELECT label, COUNT(*) FROM labels GROUP BY label",
-        ) {
+        let mut stmt = match conn.prepare("SELECT label, COUNT(*) FROM labels GROUP BY label") {
             Ok(s) => s,
             Err(e) => {
                 eprintln!("error: failed to query entries by label: {e}");
                 process::exit(1);
             }
         };
-        match stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))) {
+        match stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+        }) {
             Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
             Err(e) => {
                 eprintln!("error: failed to query entries by label: {e}");
@@ -2109,15 +2180,14 @@ fn attrs_cmd(json: bool, count: bool) {
 
     if count {
         // Attr keys with counts
-        let mut stmt = match conn
-            .prepare("SELECT key, COUNT(*) FROM attributes GROUP BY key ORDER BY key")
-        {
-            Ok(s) => s,
-            Err(e) => {
-                eprintln!("error: failed to query attributes: {e}");
-                process::exit(1);
-            }
-        };
+        let mut stmt =
+            match conn.prepare("SELECT key, COUNT(*) FROM attributes GROUP BY key ORDER BY key") {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("error: failed to query attributes: {e}");
+                    process::exit(1);
+                }
+            };
 
         let rows: Vec<(String, i64)> =
             match stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?))) {
@@ -2148,14 +2218,13 @@ fn attrs_cmd(json: bool, count: bool) {
         }
     } else {
         // Just unique attr keys, sorted
-        let mut stmt =
-            match conn.prepare("SELECT DISTINCT key FROM attributes ORDER BY key") {
-                Ok(s) => s,
-                Err(e) => {
-                    eprintln!("error: failed to query attributes: {e}");
-                    process::exit(1);
-                }
-            };
+        let mut stmt = match conn.prepare("SELECT DISTINCT key FROM attributes ORDER BY key") {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("error: failed to query attributes: {e}");
+                process::exit(1);
+            }
+        };
 
         let rows: Vec<String> = match stmt.query_map([], |row| row.get::<_, String>(0)) {
             Ok(r) => r.filter_map(|r| r.ok()).collect(),
@@ -2202,14 +2271,25 @@ fn main() {
             timestamp,
             file,
             strip,
-        } => push(label, entity_type, quiet, id_only, attr, timestamp, file, strip),
+        } => push(
+            label,
+            entity_type,
+            quiet,
+            id_only,
+            attr,
+            timestamp,
+            file,
+            strip,
+        ),
         Command::Pull { id, json, raw } => pull(&id, json, raw),
         Command::Query {
             id,
             label,
             not_label,
             entity_type,
+            not_type,
             attr,
+            not_attr,
             json,
             count,
             latest,
@@ -2219,18 +2299,39 @@ fn main() {
             data,
             after,
             before,
-        } => query(label, not_label, entity_type, attr, json, count, latest, limit, offset, reverse, data, after, before, id),
+        } => query(
+            label,
+            not_label,
+            entity_type,
+            not_type,
+            attr,
+            not_attr,
+            json,
+            count,
+            latest,
+            limit,
+            offset,
+            reverse,
+            data,
+            after,
+            before,
+            id,
+        ),
 
         Command::Export {
             id,
             label,
             not_label,
             entity_type,
+            not_type,
             attr,
+            not_attr,
             data,
             after,
             before,
-        } => export(label, not_label, entity_type, attr, data, after, before, id),
+        } => export(
+            label, not_label, entity_type, not_type, attr, not_attr, data, after, before, id,
+        ),
         Command::Import { dry_run } => import(dry_run),
         Command::Purge { confirm } => purge(confirm),
         Command::Schema => schema(),
