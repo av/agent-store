@@ -228,6 +228,12 @@ enum Command {
         /// output format: jsonl (one object per line), json (array), csv
         #[arg(long, default_value = "jsonl")]
         format: String,
+        /// only entries with at least one outgoing link
+        #[arg(long = "has-links")]
+        has_links: bool,
+        /// only entries with no outgoing links
+        #[arg(long = "no-links")]
+        no_links: bool,
     },
     /// Import entries from JSONL on stdin (complement of export)
     Import {
@@ -281,6 +287,12 @@ enum Command {
         /// output as JSON
         #[arg(long)]
         json: bool,
+        /// only entries with at least one outgoing link
+        #[arg(long = "has-links")]
+        has_links: bool,
+        /// only entries with no outgoing links
+        #[arg(long = "no-links")]
+        no_links: bool,
     },
     /// Delete ALL entries from the store (destructive, requires --confirm)
     Purge {
@@ -447,6 +459,12 @@ enum Command {
         /// output as JSON array of {value, count} objects
         #[arg(long)]
         json: bool,
+        /// only entries with at least one outgoing link
+        #[arg(long = "has-links")]
+        has_links: bool,
+        /// only entries with no outgoing links
+        #[arg(long = "no-links")]
+        no_links: bool,
     },
     /// Apply compound metadata mutations (tag/untag/set/unset) atomically
     Update {
@@ -509,6 +527,12 @@ enum Command {
         /// output as JSON
         #[arg(long)]
         json: bool,
+        /// only entries with at least one outgoing link (bulk mode filter)
+        #[arg(long = "has-links")]
+        has_links: bool,
+        /// only entries with no outgoing links (bulk mode filter)
+        #[arg(long = "no-links")]
+        no_links: bool,
     },
     /// Create a directional link between two entries
     Link {
@@ -2631,6 +2655,8 @@ fn export(
     before: Option<String>,
     id_filter: Option<String>,
     format: &str,
+    has_links: bool,
+    no_links: bool,
 ) {
     match format {
         "jsonl" | "json" | "csv" => {}
@@ -2652,8 +2678,8 @@ fn export(
         after,
         before,
         id_filter,
-        has_links: false,
-        no_links: false,
+        has_links,
+        no_links,
     };
     filters.validate();
 
@@ -3642,6 +3668,8 @@ fn delete(
     after: Option<String>,
     before: Option<String>,
     json: bool,
+    has_links: bool,
+    no_links: bool,
 ) {
     let conn = open_db();
 
@@ -3683,7 +3711,9 @@ fn delete(
             || data_filter.is_some()
             || search.is_some()
             || after.is_some()
-            || before.is_some();
+            || before.is_some()
+            || has_links
+            || no_links;
 
         if !has_filters {
             eprintln!("error: specify an ID or at least one filter");
@@ -3702,8 +3732,8 @@ fn delete(
             after,
             before,
             id_filter: None,
-            has_links: false,
-            no_links: false,
+            has_links,
+            no_links,
         };
         filters.validate();
 
@@ -4085,6 +4115,8 @@ fn tally_cmd(
     after: Option<String>,
     before: Option<String>,
     json: bool,
+    has_links: bool,
+    no_links: bool,
 ) {
     let filters = FilterArgs {
         labels,
@@ -4098,8 +4130,8 @@ fn tally_cmd(
         after,
         before,
         id_filter: None,
-        has_links: false,
-        no_links: false,
+        has_links,
+        no_links,
     };
     filters.validate();
 
@@ -4588,6 +4620,8 @@ fn update_cmd(
     after: Option<String>,
     before: Option<String>,
     json: bool,
+    has_links: bool,
+    no_links: bool,
 ) {
     // Validate: at least one mutation flag required
     if tags.is_empty()
@@ -4755,7 +4789,9 @@ fn update_cmd(
             || data_filter.is_some()
             || search.is_some()
             || after.is_some()
-            || before.is_some();
+            || before.is_some()
+            || has_links
+            || no_links;
 
         if !has_filters {
             eprintln!("error: specify an ID or at least one filter");
@@ -4774,8 +4810,8 @@ fn update_cmd(
             after,
             before,
             id_filter: None,
-            has_links: false,
-            no_links: false,
+            has_links,
+            no_links,
         };
         filters.validate();
 
@@ -5541,6 +5577,8 @@ fn alias_run(name: &str, mode: &str, confirm: bool) {
             after,
             before,
             format,
+            has_links,
+            no_links,
         } => export(
             label,
             not_label,
@@ -5554,6 +5592,8 @@ fn alias_run(name: &str, mode: &str, confirm: bool) {
             before,
             id,
             &format,
+            has_links,
+            no_links,
         ),
         Command::Delete {
             id,
@@ -5570,6 +5610,8 @@ fn alias_run(name: &str, mode: &str, confirm: bool) {
             after,
             before,
             json,
+            has_links,
+            no_links,
         } => delete(
             id,
             confirm,
@@ -5585,6 +5627,8 @@ fn alias_run(name: &str, mode: &str, confirm: bool) {
             after,
             before,
             json,
+            has_links,
+            no_links,
         ),
         _ => {
             eprintln!("error: stored alias did not parse as a {cmd} command");
@@ -5947,6 +5991,8 @@ fn main() {
             after,
             before,
             format,
+            has_links,
+            no_links,
         } => export(
             label,
             not_label,
@@ -5960,6 +6006,8 @@ fn main() {
             before,
             id,
             &format,
+            has_links,
+            no_links,
         ),
         Command::Import { dry_run, json } => import(dry_run, json),
         Command::Delete {
@@ -5977,6 +6025,8 @@ fn main() {
             after,
             before,
             json,
+            has_links,
+            no_links,
         } => delete(
             id,
             confirm,
@@ -5992,6 +6042,8 @@ fn main() {
             after,
             before,
             json,
+            has_links,
+            no_links,
         ),
         Command::Purge { confirm } => purge(confirm),
         Command::Schema => schema(),
@@ -6018,6 +6070,8 @@ fn main() {
             after,
             before,
             json,
+            has_links,
+            no_links,
         } => tally_cmd(
             &by,
             label,
@@ -6031,6 +6085,8 @@ fn main() {
             after,
             before,
             json,
+            has_links,
+            no_links,
         ),
         Command::Links { json, rel, entry } => links_cmd(json, rel, entry),
         Command::Link {
@@ -6131,6 +6187,8 @@ fn main() {
             after,
             before,
             json,
+            has_links,
+            no_links,
         } => update_cmd(
             id,
             tag,
@@ -6152,6 +6210,8 @@ fn main() {
             after,
             before,
             json,
+            has_links,
+            no_links,
         ),
     }
 }
