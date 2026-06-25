@@ -352,6 +352,19 @@
 - label: agent-store untag rejects empty label with error and exit 1
   command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && ID=\$(echo test | \$AS push --id-only --strip) && \$AS untag \"\$ID\" '' 2>&1 | grep -q 'label cannot be empty' && rm -rf \"\$TESTDIR\""
 
+## cli/search @spec
+
+- label: agent-store query --search returns entries matching a full-text query
+  command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && echo 'The auth middleware validates tokens' | \$AS push -q && echo 'Database connection pooling config' | \$AS push -q && \$AS query --search 'auth tokens' | grep -q 'middleware' && rm -rf \"\$TESTDIR\""
+- label: agent-store query --search combines with other filters
+  command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && echo 'auth docs' | \$AS push --type knowledge --label auth -q && echo 'auth code' | \$AS push --type source --label auth -q && test \"\$(\$AS query --search auth --type knowledge --count)\" = '1' && rm -rf \"\$TESTDIR\""
+- label: agent-store query --search orders results by relevance
+  command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && echo 'unrelated content' | \$AS push -q && echo 'JWT token validation in auth' | \$AS push -q && FIRST=\$(\$AS query --search 'JWT auth' --json | python3 -c 'import sys,json; print(json.load(sys.stdin)[0][\"data\"])') && echo \"\$FIRST\" | grep -q JWT && rm -rf \"\$TESTDIR\""
+- label: --search works on stores created before FTS was added (automatic migration)
+  command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && echo 'searchable content' | \$AS push -q && RESULT=\$(\$AS query --search searchable --count) && rm -rf \"\$TESTDIR\" && test \"\$RESULT\" = '1' && echo OK"
+- label: --search supports FTS5 syntax including phrases, OR, NOT, and prefix*
+  command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && echo 'quick brown fox' | \$AS push -q && echo 'slow brown dog' | \$AS push -q && echo 'quick red cat' | \$AS push -q && PH=\$(\$AS query --search '\"quick brown\"' --count) && OR=\$(\$AS query --search 'fox OR dog' --count) && NOT=\$(\$AS query --search 'brown NOT fox' --count) && PRE=\$(\$AS query --search 'qui*' --count) && rm -rf \"\$TESTDIR\" && test \"\$PH\" = '1' && test \"\$OR\" = '2' && test \"\$NOT\" = '1' && test \"\$PRE\" = '2' && echo OK"
+
 ## history
 - label: agent-store history <LABEL> shows all entries with the given label in chronological order (oldest first) with timestamp and ID headers
   command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && echo v1 | \$AS push --label hist-test --strip --timestamp \"2024-01-01 10:00:00\" -q && echo v2 | \$AS push --label hist-test --strip --timestamp \"2024-01-01 11:00:00\" -q && OUT=\$(\$AS history hist-test) && rm -rf \"\$TESTDIR\" && echo \"\$OUT\" | head -1 | grep -q \"\\[2024-01-01 10:00:00\\]\" && echo \"\$OUT\" | grep -q v1 && echo \"\$OUT\" | grep -q v2"

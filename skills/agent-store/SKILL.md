@@ -111,13 +111,13 @@ agent-store stats     # entry count and store size
 | `init` | Create `.agent-store/store.db`, install skills to `.agents/skills/`, set up project docs |
 | `push` | Read stdin (or `--file`), store as entry. Flags: `--label`, `--type`, `--attr key=value`, `--timestamp`, `-f`/`--file`, `-q`/`--quiet`, `--id-only`, `--strip` |
 | `pull <id>` | Retrieve entry by ID, print data to stdout. Flags: `--json` (full entry as JSON object), `--raw` (omit trailing newline for binary-safe piping) |
-| `query` | List entries. Filter: `--label` (repeat), `--not-label` (repeat, exclude), `--type`, `--not-type` (repeat, exclude, NULL-safe), `--attr key=value` (repeat), `--not-attr key=value` (repeat, exclude), `--data <substring>`, `--after <datetime>`, `--before <datetime>`, `--json`, `--count`, `--latest`, `--limit N`, `--offset N`, `-r`/`--reverse` |
+| `query` | List entries. Filter: `--label` (repeat), `--not-label` (repeat, exclude), `--type`, `--not-type` (repeat, exclude, NULL-safe), `--attr key=value` (repeat), `--not-attr key=value` (repeat, exclude), `--data <substring>`, `--search <query>` (FTS5 full-text search), `--after <datetime>`, `--before <datetime>`, `--json`, `--count`, `--latest`, `--limit N`, `--offset N`, `-r`/`--reverse` |
 | `schema` | Show entity types and label counts |
 | `stats` | Show entry count and store size. Flags: `--json` |
 | `skills` | List and read built-in usage guides |
-| `export` | Export entries as JSONL (one JSON object per line). Filter: `--id`, `--label` (repeat), `--not-label` (repeat), `--type`, `--not-type` (repeat, exclude), `--attr key=value` (repeat), `--not-attr key=value` (repeat, exclude), `--data`, `--after`, `--before` |
+| `export` | Export entries as JSONL (one JSON object per line). Filter: `--id`, `--label` (repeat), `--not-label` (repeat), `--type`, `--not-type` (repeat, exclude), `--attr key=value` (repeat), `--not-attr key=value` (repeat, exclude), `--data`, `--search <query>` (FTS5), `--after`, `--before` |
 | `import` | Import entries from JSONL on stdin (complement of export). Generates fresh IDs, preserves timestamps. Flags: `--dry-run` |
-| `delete [id]` | Delete entries by ID or by filters. Filters: `--label`, `--not-label`, `--type`, `--not-type`, `--attr`, `--not-attr`, `--data`, `--after`, `--before`. Single-ID delete needs no confirmation; filter-based delete requires `--confirm` |
+| `delete [id]` | Delete entries by ID or by filters. Filters: `--label`, `--not-label`, `--type`, `--not-type`, `--attr`, `--not-attr`, `--data`, `--search` (FTS5), `--after`, `--before`. Single-ID delete needs no confirmation; filter-based delete requires `--confirm` |
 | `purge` | Delete ALL entries (destructive). Requires `--confirm` flag. |
 | `labels` | List all unique labels in the store, sorted. Flags: `--json` (JSON array), `--count` (with counts) |
 | `types` | List all unique entity types in the store, sorted. Flags: `--json` (JSON array), `--count` (with counts) |

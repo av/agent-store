@@ -174,7 +174,7 @@ agent-store export [OPTIONS]
 | `--attr <KEY=VALUE>` | Filter by attribute (can be repeated, AND logic) |
 | `--not-attr <KEY=VALUE>` | Exclude entries with this attribute (can be repeated) |
 | `--data <SUBSTRING>` | Filter by substring match in entry data |
-| `--search <QUERY>` | Full-text search query (FTS5 syntax: terms, "phrases", OR, NOT, prefix*) |
+| `--search <QUERY>` | Full-text search query (FTS5 syntax: terms, "phrases", OR, NOT, prefix*). Results ordered by relevance. Overrides default chronological sort unless `--reverse` is specified |
 | `--after <DATETIME>` | Only entries created after this timestamp (ISO 8601) |
 | `--before <DATETIME>` | Only entries created before this timestamp (ISO 8601) |
 
@@ -252,7 +252,7 @@ Options:
 - `--attr <KEY=VALUE>` — Filter by attribute (can be repeated, AND logic)
 - `--not-attr <KEY=VALUE>` — Exclude entries with this attribute (can be repeated)
 - `--data <SUBSTRING>` — Filter by substring match in entry data
-- `--search <QUERY>` — Full-text search query (FTS5 syntax: terms, "phrases", OR, NOT, prefix*)
+- `--search <QUERY>` — Full-text search query (FTS5 syntax: terms, "phrases", OR, NOT, prefix*). Results ordered by relevance. Overrides default chronological sort unless `--reverse` is specified
 - `--after <DATETIME>` — Only entries created after this timestamp (ISO 8601)
 - `--before <DATETIME>` — Only entries created before this timestamp (ISO 8601)
 
