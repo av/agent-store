@@ -455,6 +455,12 @@ enum Command {
         /// remove an attribute by key (repeatable)
         #[arg(long)]
         unset: Vec<String>,
+        /// create a link from entry to target (format: rel:id, repeatable)
+        #[arg(long)]
+        link: Vec<String>,
+        /// remove a link from entry to target (format: rel:id, repeatable)
+        #[arg(long)]
+        unlink: Vec<String>,
         /// confirm bulk update (required for filter-based mode)
         #[arg(long, conflicts_with = "dry_run")]
         confirm: bool,
@@ -4227,6 +4233,7 @@ fn unset_attr(id: &str, key: &str, json: bool) {
 
 /// Apply tag/untag/set/unset mutations to a single entry within a transaction.
 /// Returns (tags_added, tags_removed, attrs_set, attrs_unset).
+#[allow(dead_code)]
 fn apply_mutations(
     conn: &Connection,
     entry_id: &str,
@@ -4235,10 +4242,30 @@ fn apply_mutations(
     sets: &[(String, String)],
     unsets: &[String],
 ) -> (i64, i64, i64, i64) {
+    let (ta, tr, as_, au, _, _) =
+        apply_mutations_with_links(conn, entry_id, tags, untags, sets, unsets, &[], &[]);
+    (ta, tr, as_, au)
+}
+
+/// Extended version of apply_mutations that also handles --link and --unlink.
+/// Returns (tags_added, tags_removed, attrs_set, attrs_unset, links_added, links_removed).
+#[allow(clippy::too_many_arguments)]
+fn apply_mutations_with_links(
+    conn: &Connection,
+    entry_id: &str,
+    tags: &[String],
+    untags: &[String],
+    sets: &[(String, String)],
+    unsets: &[String],
+    links: &[(String, String)],
+    unlinks: &[(String, String)],
+) -> (i64, i64, i64, i64, i64, i64) {
     let mut tags_added: i64 = 0;
     let mut tags_removed: i64 = 0;
     let mut attrs_set: i64 = 0;
     let mut attrs_unset: i64 = 0;
+    let mut links_added: i64 = 0;
+    let mut links_removed: i64 = 0;
 
     for label in tags {
         match conn.execute(
@@ -4339,7 +4366,52 @@ fn apply_mutations(
         }
     }
 
-    (tags_added, tags_removed, attrs_set, attrs_unset)
+    // Handle --link: create links from this entry
+    for (rel, to_id) in links {
+        match conn.execute(
+            "INSERT OR IGNORE INTO links (from_id, to_id, rel) VALUES (?1, ?2, ?3)",
+            rusqlite::params![entry_id, to_id, rel],
+        ) {
+            Ok(n) if n > 0 => {
+                let key = if rel.is_empty() { "(none)" } else { rel };
+                log_change(conn, entry_id, "link", Some(key), None, Some(to_id));
+                links_added += 1;
+            }
+            Ok(_) => {} // idempotent no-op
+            Err(e) => {
+                eprintln!("error: failed to create link: {e}");
+                process::exit(1);
+            }
+        }
+    }
+
+    // Handle --unlink: remove links from this entry
+    for (rel, to_id) in unlinks {
+        match conn.execute(
+            "DELETE FROM links WHERE from_id = ?1 AND to_id = ?2 AND rel = ?3",
+            rusqlite::params![entry_id, to_id, rel],
+        ) {
+            Ok(n) if n > 0 => {
+                let key = if rel.is_empty() { "(none)" } else { rel };
+                log_change(conn, entry_id, "unlink", Some(key), Some(to_id), None);
+                links_removed += 1;
+            }
+            Ok(_) => {} // no link existed — silent
+            Err(e) => {
+                eprintln!("error: failed to remove link: {e}");
+                process::exit(1);
+            }
+        }
+    }
+
+    (
+        tags_added,
+        tags_removed,
+        attrs_set,
+        attrs_unset,
+        links_added,
+        links_removed,
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -4349,6 +4421,8 @@ fn update_cmd(
     untags: Vec<String>,
     sets: Vec<String>,
     unsets: Vec<String>,
+    links: Vec<String>,
+    unlinks: Vec<String>,
     confirm: bool,
     dry_run: bool,
     labels: Vec<String>,
@@ -4364,8 +4438,16 @@ fn update_cmd(
     json: bool,
 ) {
     // Validate: at least one mutation flag required
-    if tags.is_empty() && untags.is_empty() && sets.is_empty() && unsets.is_empty() {
-        eprintln!("error: at least one mutation flag required (--tag, --untag, --set, --unset)");
+    if tags.is_empty()
+        && untags.is_empty()
+        && sets.is_empty()
+        && unsets.is_empty()
+        && links.is_empty()
+        && unlinks.is_empty()
+    {
+        eprintln!(
+            "error: at least one mutation flag required (--tag, --untag, --set, --unset, --link, --unlink)"
+        );
         process::exit(1);
     }
 
@@ -4404,7 +4486,68 @@ fn update_cmd(
         }
     }
 
+    // Parse --link rel:id pairs (resolve IDs after opening DB)
+    let parsed_link_strs: Vec<(String, String)> = links
+        .iter()
+        .map(|link_str| match link_str.split_once(':') {
+            Some((rel, id_part)) => {
+                if rel.is_empty() {
+                    eprintln!("error: invalid --link format '{link_str}', expected rel:id");
+                    process::exit(1);
+                }
+                if id_part.is_empty() {
+                    eprintln!("error: invalid --link format '{link_str}', expected rel:id");
+                    process::exit(1);
+                }
+                (rel.to_string(), id_part.to_string())
+            }
+            None => {
+                eprintln!("error: invalid --link format '{link_str}', expected rel:id");
+                process::exit(1);
+            }
+        })
+        .collect();
+
+    // Parse --unlink rel:id pairs
+    let parsed_unlink_strs: Vec<(String, String)> = unlinks
+        .iter()
+        .map(|link_str| match link_str.split_once(':') {
+            Some((rel, id_part)) => {
+                if rel.is_empty() {
+                    eprintln!("error: invalid --unlink format '{link_str}', expected rel:id");
+                    process::exit(1);
+                }
+                if id_part.is_empty() {
+                    eprintln!("error: invalid --unlink format '{link_str}', expected rel:id");
+                    process::exit(1);
+                }
+                (rel.to_string(), id_part.to_string())
+            }
+            None => {
+                eprintln!("error: invalid --unlink format '{link_str}', expected rel:id");
+                process::exit(1);
+            }
+        })
+        .collect();
+
     let conn = open_db();
+
+    // Resolve link/unlink target IDs
+    let parsed_links: Vec<(String, String)> = parsed_link_strs
+        .iter()
+        .map(|(rel, id_part)| {
+            let resolved = resolve_entry_id(&conn, id_part);
+            (rel.clone(), resolved)
+        })
+        .collect();
+
+    let parsed_unlinks: Vec<(String, String)> = parsed_unlink_strs
+        .iter()
+        .map(|(rel, id_part)| {
+            let resolved = resolve_entry_id(&conn, id_part);
+            (rel.clone(), resolved)
+        })
+        .collect();
 
     if let Some(ref entry_id) = id {
         // Single-ID mode — no --confirm needed
@@ -4415,8 +4558,17 @@ fn update_cmd(
             process::exit(1);
         });
 
-        let (tags_added, tags_removed, attrs_set, attrs_unset) =
-            apply_mutations(&conn, &resolved, &tags, &untags, &parsed_sets, &unsets);
+        let (tags_added, tags_removed, attrs_set, attrs_unset, links_added, links_removed) =
+            apply_mutations_with_links(
+                &conn,
+                &resolved,
+                &tags,
+                &untags,
+                &parsed_sets,
+                &unsets,
+                &parsed_links,
+                &parsed_unlinks,
+            );
 
         conn.execute_batch("COMMIT").unwrap_or_else(|e| {
             eprintln!("error: failed to commit transaction: {e}");
@@ -4432,6 +4584,8 @@ fn update_cmd(
                     "tags_removed": tags_removed,
                     "attrs_set": attrs_set,
                     "attrs_unset": attrs_unset,
+                    "links_added": links_added,
+                    "links_removed": links_removed,
                 })
             );
         } else {
@@ -4558,14 +4712,26 @@ fn update_cmd(
         let mut total_tags_removed: i64 = 0;
         let mut total_attrs_set: i64 = 0;
         let mut total_attrs_unset: i64 = 0;
+        let mut total_links_added: i64 = 0;
+        let mut total_links_removed: i64 = 0;
 
         for entry_id in &ids {
-            let (ta, tr, as_, au) =
-                apply_mutations(&conn, entry_id, &tags, &untags, &parsed_sets, &unsets);
+            let (ta, tr, as_, au, la, lr) = apply_mutations_with_links(
+                &conn,
+                entry_id,
+                &tags,
+                &untags,
+                &parsed_sets,
+                &unsets,
+                &parsed_links,
+                &parsed_unlinks,
+            );
             total_tags_added += ta;
             total_tags_removed += tr;
             total_attrs_set += as_;
             total_attrs_unset += au;
+            total_links_added += la;
+            total_links_removed += lr;
         }
 
         conn.execute_batch("COMMIT").unwrap_or_else(|e| {
@@ -4584,6 +4750,8 @@ fn update_cmd(
                     "tags_removed": total_tags_removed,
                     "attrs_set": total_attrs_set,
                     "attrs_unset": total_attrs_unset,
+                    "links_added": total_links_added,
+                    "links_removed": total_links_removed,
                 })
             );
         } else {
@@ -5784,6 +5952,8 @@ fn main() {
             untag,
             set,
             unset,
+            link,
+            unlink,
             confirm,
             dry_run,
             label,
@@ -5803,6 +5973,8 @@ fn main() {
             untag,
             set,
             unset,
+            link,
+            unlink,
             confirm,
             dry_run,
             label,

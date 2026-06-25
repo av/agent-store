@@ -158,7 +158,7 @@ agent-store delete 7bf8d3f
 | `history <label>` | Show chronological history of entries with a given label (oldest first). Flags: `--json`, `--limit N`, `--data <substring>` |
 | `alias` | Named queries. Subcommands: `set <name> -- [query flags]` (save), `run <name> [--mode query\|export\|delete] [--confirm]` (execute), `list` (show all), `rm <name>` (delete) |
 | `tally` | Count entries grouped by a dimension. `--by label\|type\|rel\|attr:<key>`. Supports all filter flags. Output: tab-separated `value\tcount` (descending by count). Flags: `--json` (array of `{value, count}`) |
-| `update [id]` | Compound metadata mutations in one transaction. Mutation flags: `--tag` (add label, repeat), `--untag` (remove label, repeat), `--set key=value` (set attr, repeat), `--unset key` (remove attr, repeat). Single-ID mode: no `--confirm` needed. Bulk mode (filters): requires `--confirm`. Flags: `--dry-run`, `--json`. Supports all filter flags. |
+| `update [id]` | Compound metadata mutations in one transaction. Mutation flags: `--tag` (add label, repeat), `--untag` (remove label, repeat), `--set key=value` (set attr, repeat), `--unset key` (remove attr, repeat), `--link rel:id` (create link, repeat), `--unlink rel:id` (remove link, repeat). Single-ID mode: no `--confirm` needed. Bulk mode (filters): requires `--confirm`. JSON output includes `links_added`/`links_removed` counters. Flags: `--dry-run`, `--json`. Supports all filter flags. |
 | `tail` | Watch the store for new entries (like `tail -f`). Flags: `--interval <N>` (poll seconds, default 1), `--since <datetime>`, `--json`. Supports all filter flags: `--label`, `--not-label`, `--type`, `--not-type`, `--attr`, `--not-attr`, `--data`, `--search` |
 | `completions <shell>` | Generate shell completions (bash, zsh, fish, elvish, powershell) |
 
@@ -694,9 +694,9 @@ version chain traversal and iterative draft workflows.
 
 ## Batch update (compound mutations)
 
-Apply multiple metadata mutations (tag, untag, set attribute, unset attribute)
-atomically in a single transaction. Use `update` when you need to change several
-things at once without multiple round-trips.
+Apply multiple metadata mutations (tag, untag, set attribute, unset attribute,
+link, unlink) atomically in a single transaction. Use `update` when you need to
+change several things at once without multiple round-trips.
 
 ```bash
 # Single entry: tag + untag + set attr + unset attr in one operation
@@ -704,10 +704,22 @@ agent-store update $ID --tag done --untag pending --set status=closed --unset pr
 
 # Single entry JSON output
 agent-store update $ID --tag archived --json
-# {"id":"...","tags_added":1,"tags_removed":0,"attrs_set":0,"attrs_unset":0}
+# {"id":"...","tags_added":1,"tags_removed":0,"attrs_set":0,"attrs_unset":0,"links_added":0,"links_removed":0}
+
+# Create links via update (same rel:id format as push --link)
+agent-store update $ID --link "depends:$OTHER_ID" --link "blocks:$THIRD_ID"
+
+# Remove links via update
+agent-store update $ID --unlink "depends:$OTHER_ID"
+
+# Combine link mutations with other mutations
+agent-store update $ID --tag linked --link "ref:$TARGET" --json
 
 # Bulk: update all entries matching filters (requires --confirm)
 agent-store update --label task --attr status=stale --set status=archived --tag archived --confirm
+
+# Bulk: link all matching entries to a target
+agent-store update --label task --link "parent:$PROJECT_ID" --confirm
 
 # Preview bulk update (prints count, exits 1)
 agent-store update --label task --tag archived
@@ -721,7 +733,7 @@ agent-store update --label task --tag archived --dry-run --json
 
 # Bulk JSON output (with --confirm)
 agent-store update --label old --untag old --tag migrated --confirm --json
-# {"updated":3,"ids":[...],"tags_added":3,"tags_removed":3,"attrs_set":0,"attrs_unset":0}
+# {"updated":3,"ids":[...],"tags_added":3,"tags_removed":3,"attrs_set":0,"attrs_unset":0,"links_added":0,"links_removed":0}
 ```
 
 **Mutation flags** (all repeatable):
@@ -729,6 +741,8 @@ agent-store update --label old --untag old --tag migrated --confirm --json
 - `--untag <label>` — remove a label (DELETE, idempotent)
 - `--set <key>=<value>` — set an attribute (INSERT OR REPLACE, overwrites)
 - `--unset <key>` — remove an attribute (DELETE, idempotent)
+- `--link <rel>:<id>` — create a directional link to target entry (INSERT OR IGNORE, idempotent)
+- `--unlink <rel>:<id>` — remove a link to target entry (DELETE, idempotent)
 
 At least one mutation flag is required (error if none provided).
 

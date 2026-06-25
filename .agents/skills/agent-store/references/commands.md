@@ -696,8 +696,8 @@ agent-store unset-attr $ID priority --json
 
 ## agent-store update
 
-Apply compound metadata mutations (tag/untag/set/unset) atomically in a single
-transaction. Supports single-ID mode and bulk mode with query filters.
+Apply compound metadata mutations (tag/untag/set/unset/link/unlink) atomically
+in a single transaction. Supports single-ID mode and bulk mode with query filters.
 
 ```
 agent-store update [ID] [OPTIONS]
@@ -712,6 +712,8 @@ Arguments:
 - `--untag <LABEL>` — Remove a label (repeatable, DELETE, idempotent)
 - `--set <KEY=VALUE>` — Set an attribute (repeatable, INSERT OR REPLACE, overwrites)
 - `--unset <KEY>` — Remove an attribute by key (repeatable, DELETE, idempotent)
+- `--link <REL>:<ID>` — Create a directional link to target entry (repeatable, INSERT OR IGNORE, idempotent). Same `rel:id` format as `push --link`
+- `--unlink <REL>:<ID>` — Remove a link to target entry (repeatable, DELETE, idempotent). Same `rel:id` format as `--link`
 
 **Control flags:**
 - `--confirm` — Required for bulk (filter-based) updates. Without it, prints count and exits 1. Conflicts with `--dry-run`
@@ -734,12 +736,12 @@ Arguments:
 - Resolves ID via prefix matching
 - No `--confirm` required (explicit ID = intentional)
 - Output: `Updated <short-id>` on stderr
-- JSON: `{"id":"...","tags_added":N,"tags_removed":N,"attrs_set":N,"attrs_unset":N}`
+- JSON: `{"id":"...","tags_added":N,"tags_removed":N,"attrs_set":N,"attrs_unset":N,"links_added":N,"links_removed":N}`
 
 **Bulk mode (no ID, uses filters):**
 - Without `--confirm`: `Would update N entries. Run with --confirm to proceed.` on stderr, exits 1
 - With `--confirm`: applies mutations, `Updated N entries` on stderr
-- JSON (confirmed): `{"updated":N,"ids":[...],"tags_added":N,"tags_removed":N,"attrs_set":N,"attrs_unset":N}`
+- JSON (confirmed): `{"updated":N,"ids":[...],"tags_added":N,"tags_removed":N,"attrs_set":N,"attrs_unset":N,"links_added":N,"links_removed":N}`
 - JSON (no confirm): `{"dry_run":true,"count":N}`
 - `--dry-run`: lists affected entries without modifying; with `--json`, outputs entry objects
 - No ID and no filters: `error: specify an ID or at least one filter`, exits 1
@@ -751,9 +753,21 @@ agent-store update $ID --tag done --untag pending --set status=closed --unset pr
 # Single entry with JSON
 agent-store update $ID --tag archived --json
 
+# Create links via update
+agent-store update $ID --link "depends:$OTHER_ID" --link "blocks:$THIRD_ID"
+
+# Remove links via update
+agent-store update $ID --unlink "depends:$OTHER_ID"
+
+# Combine link mutations with metadata mutations
+agent-store update $ID --tag linked --link "ref:$TARGET" --json
+
 # Bulk: preview (no --confirm)
 agent-store update --label task --tag archived
 # Would update 5 entries. Run with --confirm to proceed.
+
+# Bulk: link all matching entries to a target
+agent-store update --label task --link "parent:$PROJECT_ID" --confirm
 
 # Bulk: dry run (see affected entries)
 agent-store update --label task --tag archived --dry-run

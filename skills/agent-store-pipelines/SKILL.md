@@ -407,11 +407,25 @@ agent-store tally --by type | awk -F'\t' '$2 > 100 {print $1}' | while read -r t
 done
 ```
 
+### Bulk link/unlink via update
+
+```bash
+# Link all tasks in a sprint to the sprint entry
+SPRINT=$(agent-store query --label sprint --attr name=Q3 --json | jq -r '.[0].id')
+agent-store update --label task --attr sprint=Q3 --link "sprint:$SPRINT" --confirm
+
+# Unlink all entries from a deprecated target
+agent-store update --label task --unlink "depends:$OLD_ID" --confirm
+
+# Combine link + tag in one atomic operation
+agent-store update $ID --link "blocks:$OTHER" --tag blocking --json
+```
+
 ## Links pipelines
 
 Directional typed edges between entries. Use `link`/`unlink` for
-post-creation, `push --link rel:id` at creation, and
-`--linked-to`/`--linked-from` for traversal.
+post-creation, `push --link rel:id` at creation, `update --link`/`--unlink`
+for batch operations, and `--linked-to`/`--linked-from` for traversal.
 
 ### Build a dependency graph
 

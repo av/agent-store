@@ -527,10 +527,6 @@ agent-store log --limit 500 --json \
 # Count changes by operation type
 agent-store log --limit 500 --json \
   | jq 'group_by(.operation)[] | {op: .[0].operation, count: length}'
-
-# Filter changelog to specific operations (no jq needed)
-agent-store log --operation tag --operation untag --json
-agent-store log --operation delete --label important --json
 ```
 
 ### Links + log — audit linked entries
