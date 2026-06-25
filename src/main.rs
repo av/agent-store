@@ -382,6 +382,45 @@ enum Command {
         #[command(subcommand)]
         action: AliasCommand,
     },
+    /// Count entries grouped by a metadata dimension (label, type, or attr:KEY)
+    Tally {
+        /// dimension to group by: label, type, or attr:<key>
+        #[arg(long)]
+        by: String,
+        /// require this label (repeatable, AND logic)
+        #[arg(long)]
+        label: Vec<String>,
+        /// exclude entries with this label (repeatable)
+        #[arg(long = "not-label")]
+        not_label: Vec<String>,
+        /// filter by entity type
+        #[arg(long = "type")]
+        entity_type: Option<String>,
+        /// exclude entries with this entity type (repeatable)
+        #[arg(long = "not-type", action = clap::ArgAction::Append)]
+        not_type: Vec<String>,
+        /// require this attribute key=value (repeatable, AND logic)
+        #[arg(long = "attr")]
+        attr: Vec<String>,
+        /// exclude entries with this attribute key=value (repeatable)
+        #[arg(long = "not-attr", action = clap::ArgAction::Append)]
+        not_attr: Vec<String>,
+        /// filter by substring match in entry data
+        #[arg(long)]
+        data: Option<String>,
+        /// full-text search (FTS5 syntax: terms, "phrases", OR, NOT, prefix*)
+        #[arg(long)]
+        search: Option<String>,
+        /// include only entries created after this timestamp (ISO 8601)
+        #[arg(long)]
+        after: Option<String>,
+        /// include only entries created before this timestamp (ISO 8601)
+        #[arg(long)]
+        before: Option<String>,
+        /// output as JSON array of {value, count} objects
+        #[arg(long)]
+        json: bool,
+    },
     /// Watch the store and print new entries as they arrive (like tail -f)
     Tail {
         /// require this label (repeatable, AND logic)
@@ -3209,6 +3248,121 @@ fn attrs_cmd(json: bool, count: bool) {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+fn tally_cmd(
+    by: &str,
+    labels: Vec<String>,
+    not_labels: Vec<String>,
+    entity_type: Option<String>,
+    not_types: Vec<String>,
+    attrs: Vec<String>,
+    not_attrs: Vec<String>,
+    data_filter: Option<String>,
+    search: Option<String>,
+    after: Option<String>,
+    before: Option<String>,
+    json: bool,
+) {
+    let filters = FilterArgs {
+        labels,
+        not_labels,
+        entity_type,
+        not_types,
+        attrs,
+        not_attrs,
+        data_filter,
+        search,
+        after,
+        before,
+        id_filter: None,
+    };
+    filters.validate();
+
+    let conn = open_db();
+    let (joins, conditions, params) = filters.build_filter_sql();
+
+    let where_clause = if conditions.is_empty() {
+        String::new()
+    } else {
+        format!(" WHERE {}", conditions.join(" AND "))
+    };
+
+    // Build the tally SQL based on the dimension
+    let sql = if by == "label" {
+        // JOIN labels, GROUP BY label
+        format!(
+            "SELECT tl.label, COUNT(DISTINCT e.id) FROM entries e{joins} JOIN labels tl ON e.id = tl.entry_id{where_clause} GROUP BY tl.label ORDER BY COUNT(DISTINCT e.id) DESC, tl.label ASC"
+        )
+    } else if by == "type" {
+        // GROUP BY entity_type, using COALESCE for entries without a type
+        format!(
+            "SELECT COALESCE(e.entity_type, '(none)'), COUNT(DISTINCT e.id) FROM entries e{joins}{where_clause} GROUP BY COALESCE(e.entity_type, '(none)') ORDER BY COUNT(DISTINCT e.id) DESC, COALESCE(e.entity_type, '(none)') ASC"
+        )
+    } else if let Some(attr_key) = by.strip_prefix("attr:") {
+        if attr_key.is_empty() {
+            eprintln!("error: attribute key cannot be empty in --by attr:<key>");
+            process::exit(1);
+        }
+        // JOIN attributes WHERE key=KEY, GROUP BY value, excluding entries without that attr
+        let next_param = params.len() as u32 + 1;
+        format!(
+            "SELECT ta.value, COUNT(DISTINCT e.id) FROM entries e{joins} JOIN attributes ta ON e.id = ta.entry_id AND ta.key = ?{next_param}{where_clause} GROUP BY ta.value ORDER BY COUNT(DISTINCT e.id) DESC, ta.value ASC"
+        )
+    } else {
+        eprintln!("error: invalid --by dimension '{by}'. Use: label, type, or attr:<key>");
+        process::exit(1);
+    };
+
+    // Prepare the statement with the right params
+    let mut final_params: Vec<Box<dyn rusqlite::types::ToSql>> = params;
+    if let Some(attr_key) = by.strip_prefix("attr:") {
+        final_params.push(Box::new(attr_key.to_string()));
+    }
+
+    let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+        final_params.iter().map(|p| p.as_ref()).collect();
+
+    let mut stmt = match conn.prepare(&sql) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("error: failed to prepare tally query: {e}");
+            process::exit(1);
+        }
+    };
+
+    let rows: Vec<(String, i64)> =
+        match stmt.query_map(param_refs.as_slice(), |row| Ok((row.get(0)?, row.get(1)?))) {
+            Ok(r) => r.filter_map(|r| r.ok()).collect(),
+            Err(e) => {
+                eprintln!("error: failed to execute tally query: {e}");
+                process::exit(1);
+            }
+        };
+
+    if json {
+        let arr: Vec<serde_json::Value> = rows
+            .iter()
+            .map(|(v, c)| {
+                serde_json::json!({
+                    "value": v,
+                    "count": c,
+                })
+            })
+            .collect();
+        match serde_json::to_string(&arr) {
+            Ok(s) => println!("{s}"),
+            Err(e) => {
+                eprintln!("error: failed to serialize JSON: {e}");
+                process::exit(1);
+            }
+        }
+    } else {
+        for (value, count) in &rows {
+            println!("{value}\t{count}");
+        }
+    }
+}
+
 fn tag(id: &str, labels: Vec<String>, json: bool) {
     for label in &labels {
         if label.trim().is_empty() {
@@ -4211,6 +4365,33 @@ fn main() {
         Command::Labels { json, count } => labels_cmd(json, count),
         Command::Types { json, count } => types_cmd(json, count),
         Command::Attrs { json, count } => attrs_cmd(json, count),
+        Command::Tally {
+            by,
+            label,
+            not_label,
+            entity_type,
+            not_type,
+            attr,
+            not_attr,
+            data,
+            search,
+            after,
+            before,
+            json,
+        } => tally_cmd(
+            &by,
+            label,
+            not_label,
+            entity_type,
+            not_type,
+            attr,
+            not_attr,
+            data,
+            search,
+            after,
+            before,
+            json,
+        ),
         Command::Tag { id, label, json } => tag(&id, label, json),
         Command::Untag { id, label, json } => untag(&id, label, json),
         Command::SetAttr {

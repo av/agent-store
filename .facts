@@ -568,3 +568,24 @@
   tags: [spec, implemented]
 - label: agent-store tail --since shows entries created after the given timestamp
   tags: [spec, implemented]
+
+## cli/tally @spec
+
+- label: tally --by label counts entries grouped by label, sorted descending by count, tab-separated
+  command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && echo a | \$AS push --label todo -q && echo b | \$AS push --label todo -q && echo c | \$AS push --label done -q && OUT=\$(\$AS tally --by label) && echo \"\$OUT\" | head -1 | grep -qP '^todo\t2$' && echo \"\$OUT\" | tail -1 | grep -qP '^done\t1$' && rm -rf \"\$TESTDIR\" && echo OK"
+  tags: [spec, implemented]
+- label: tally --by type counts entries grouped by entity type, sorted descending by count
+  command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && echo a | \$AS push --type note -q && echo b | \$AS push --type note -q && echo c | \$AS push --type task -q && OUT=\$(\$AS tally --by type) && echo \"\$OUT\" | head -1 | grep -qP '^note\t2$' && echo \"\$OUT\" | tail -1 | grep -qP '^task\t1$' && rm -rf \"\$TESTDIR\" && echo OK"
+  tags: [spec, implemented]
+- label: tally --by attr:KEY counts entries grouped by value of attribute KEY, excluding entries without that attribute
+  command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && echo a | \$AS push --attr status=open -q && echo b | \$AS push --attr status=open -q && echo c | \$AS push --attr status=done -q && echo d | \$AS push -q && OUT=\$(\$AS tally --by attr:status) && echo \"\$OUT\" | head -1 | grep -qP '^open\t2$' && echo \"\$OUT\" | tail -1 | grep -qP '^done\t1$' && test \$(echo \"\$OUT\" | wc -l) -eq 2 && rm -rf \"\$TESTDIR\" && echo OK"
+  tags: [spec, implemented]
+- label: tally --by type groups entries with no type under (none)
+  command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && echo a | \$AS push -q && echo b | \$AS push --type note -q && OUT=\$(\$AS tally --by type) && echo \"\$OUT\" | grep -qP '^\(none\)\t1$' && rm -rf \"\$TESTDIR\" && echo OK"
+  tags: [spec, implemented]
+- label: tally composes with all FilterArgs flags (--label, --type, --attr, --after, --before, --not-label, --not-type, --not-attr, --data)
+  command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && echo a | \$AS push --label x --type note -q && echo b | \$AS push --label x --type task -q && echo c | \$AS push --label y --type note -q && OUT=\$(\$AS tally --by type --label x) && test \$(echo \"\$OUT\" | wc -l) -eq 2 && rm -rf \"\$TESTDIR\" && echo OK"
+  tags: [spec, implemented]
+- label: tally --json outputs array of {value, count} objects sorted descending by count
+  command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && echo a | \$AS push --label todo -q && echo b | \$AS push --label todo -q && echo c | \$AS push --label done -q && \$AS tally --by label --json | python3 -c \"import sys,json; d=json.load(sys.stdin); assert d==[{'value':'todo','count':2},{'value':'done','count':1}]; print('OK')\" && rm -rf \"\$TESTDIR\""
+  tags: [spec, implemented]

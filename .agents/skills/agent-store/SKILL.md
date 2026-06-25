@@ -132,7 +132,7 @@ agent-store delete 7bf8d3f
 | Command | What it does |
 |---------|-------------|
 | `init` | Create `.agent-store/store.db`, install skills to `.agents/skills/`, set up project docs |
-| `push` | Read stdin (or `--file`), store as entry. Flags: `--label`, `--type`, `--attr key=value`, `--timestamp`, `--ttl <duration>`, `-f`/`--file`, `-q`/`--quiet`, `--id-only`, `--strip`, `--json`, `--update <id>`, `--upsert` |
+| `push` | Read stdin (or `--file`), store as entry. Flags: `--label`, `--type`, `--attr key=value`, `--timestamp`, `--ttl <duration>`, `-f`/`--file`, `-q`/`--quiet`, `--id-only`, `--strip`, `--json`, `--update <id>` |
 | `pull <id>` | Retrieve entry by ID, print data to stdout. Flags: `--json` (full entry as JSON object), `--raw` (omit trailing newline for binary-safe piping) |
 | `query` | List entries. Filter: `--label` (repeat), `--not-label` (repeat, exclude), `--type`, `--not-type` (repeat, exclude, NULL-safe), `--attr key=value` (repeat), `--not-attr key=value` (repeat, exclude), `--data <substring>`, `--search <query>` (FTS5 full-text search), `--after <datetime>`, `--before <datetime>`, `--json`, `--count`, `--latest`, `--first`, `--last`, `--limit N`, `--offset N`, `-r`/`--reverse` |
 | `schema` | Show entity types and label counts |
@@ -626,19 +626,6 @@ This replaces the entry's data, preserves `created_at` and existing labels,
 adds any new `--label` values, upserts `--attr` values, and updates `--type`
 if given. Supports prefix ID matching. Use this when you don't need version
 history.
-
-For atomic find-or-create, use `push --upsert`:
-
-```bash
-echo "config data" | agent-store push --upsert --label config --attr env=prod
-```
-
-This queries for entries matching ALL provided filters (`--label`, `--type`,
-`--attr`). If 0 matches: creates a new entry. If 1 match: updates that entry's
-data, merges labels, and upserts attrs. If 2+ matches: errors with the match
-count (exit 1). The entire operation runs in a single SQLite transaction.
-Use `--json` to see `{"action": "created"}` or `{"action": "updated"}` in the
-output. Cannot be combined with `--update`.
 
 For versioned updates where you want to preserve the original, use the
 supersede convention: push a new entry with `--attr supersedes=<old-id>`.

@@ -791,6 +791,63 @@ Output: `Alias '<name>' removed` on stderr.
 agent-store alias rm urgent-tasks
 ```
 
+## agent-store tally
+
+Count entries grouped by a metadata dimension.
+
+```
+agent-store tally --by <DIMENSION> [OPTIONS]
+```
+
+Arguments:
+- `--by <DIMENSION>` — Required. The dimension to group by:
+  - `label` — Group by label. Entries with multiple labels are counted once per label.
+  - `type` — Group by entity type. Entries with no type appear as `(none)`.
+  - `attr:<KEY>` — Group by the value of attribute `<KEY>`. Entries without that attribute are excluded.
+
+Options:
+- `--json` — Output as JSON array of `{"value": "...", "count": N}` objects
+- `--label <LABEL>` — Filter by label (can be repeated, AND logic)
+- `--not-label <LABEL>` — Exclude entries with this label (can be repeated)
+- `--type <TYPE>` — Filter by entity type
+- `--not-type <TYPE>` — Exclude entries with this entity type (can be repeated, NULL-safe)
+- `--attr <KEY=VALUE>` — Filter by attribute (can be repeated, AND logic)
+- `--not-attr <KEY=VALUE>` — Exclude entries with this attribute (can be repeated)
+- `--data <SUBSTRING>` — Filter by substring match in entry data
+- `--search <QUERY>` — Full-text search query (FTS5 syntax)
+- `--after <DATETIME>` — Only entries created after this timestamp (ISO 8601)
+- `--before <DATETIME>` — Only entries created before this timestamp (ISO 8601)
+
+**Default output:** tab-separated `value\tcount` pairs, sorted descending by count
+(then alphabetically by value for ties). One pair per line, stable for agent parsing.
+
+**JSON output:** array of objects, each with `value` (string) and `count` (number).
+
+```bash
+# Count entries per label
+agent-store tally --by label
+# todo	5
+# done	3
+
+# Count entries per entity type
+agent-store tally --by type
+# note	10
+# (none)	2
+
+# Count entries per attribute value
+agent-store tally --by attr:status
+# open	4
+# done	3
+
+# JSON output
+agent-store tally --by label --json
+# [{"value":"todo","count":5},{"value":"done","count":3}]
+
+# Combine with filters
+agent-store tally --by type --label urgent
+agent-store tally --by attr:priority --type task --after "2024-06-01"
+```
+
 ## agent-store tail
 
 Watch the store for new entries in real time (like `tail -f`).
