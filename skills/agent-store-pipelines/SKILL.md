@@ -74,29 +74,38 @@ done < data.txt
 ### Full store to JSON file
 
 ```bash
-agent-store query --json > backup.json
-
-# JSONL format (preferred — each line is independent, streamable)
+# JSONL format (default — each line is independent, streamable)
 agent-store export > backup.jsonl
+
+# JSON array (proper JSON, pretty-printed)
+agent-store export --format json > backup.json
+
+# CSV (headers: id,created_at,entity_type,labels,data)
+agent-store export --format csv > backup.csv
+
+# Legacy approach via query
+agent-store query --json > backup.json
 ```
 
 ### Filtered export
 
 ```bash
 # Export only tasks
-agent-store query --type task --json > tasks.json
+agent-store export --type task > tasks.jsonl
 
 # Export by label
-agent-store query --label critical --json > critical.json
+agent-store export --label critical > critical.jsonl
 
 # Export with compound filters
-agent-store query --type task --attr status=open --json > open-tasks.json
-
-# Using export command (native JSONL, with all filters)
-agent-store export --type task > tasks.jsonl
-agent-store export --label critical > critical.jsonl
 agent-store export --type task --not-label done > open-tasks.jsonl
 agent-store export --after "2024-06-01" --before "2024-07-01" > june.jsonl
+
+# Full-text search export
+agent-store export --search "database migration" > migrations.jsonl
+
+# Export in different formats
+agent-store export --type task --format json > tasks.json
+agent-store export --type task --format csv > tasks.csv
 ```
 
 ### One file per entry
@@ -186,6 +195,15 @@ agent-store query --type log | grep -i "error"
 
 # Find entries and show context
 agent-store query --type note | grep -B2 -A2 "TODO"
+```
+
+For structured search, prefer `--search` (FTS5) over grep — it
+tokenizes content, supports phrases and boolean operators, and returns
+results ranked by relevance:
+
+```bash
+agent-store query --search "database connection" --type log
+agent-store query --search "error NOT timeout" --json
 ```
 
 ### awk — structured text processing
@@ -351,47 +369,58 @@ done
 
 ## Watch and poll patterns
 
-### Poll for new entries
+### Live watch with tail
+
+The `tail` command streams new entries as they arrive — no manual
+polling loop needed.
 
 ```bash
-LAST_COUNT=0
-while true; do
-  COUNT=$(agent-store query --type event --json | jq 'length')
-  if [ "$COUNT" -gt "$LAST_COUNT" ]; then
-    echo "New events detected: $((COUNT - LAST_COUNT))"
-    # Process new entries
-    agent-store query --type event --json \
-      | jq -c ".[-$((COUNT - LAST_COUNT)):][]" \
-      | while IFS= read -r entry; do
-          echo "Processing: $(echo "$entry" | jq -r '.id')"
-        done
-    LAST_COUNT=$COUNT
-  fi
-  sleep 5
+# Watch all new entries (Ctrl+C to stop)
+agent-store tail
+
+# Watch specific entry types with JSON output
+agent-store tail --type event --json
+
+# Watch with filters
+agent-store tail --label deploy --attr env=production --json
+
+# Pipe to processing
+agent-store tail --type alert --json | jq -r '.data' | while IFS= read -r alert; do
+  echo "ALERT: $alert"
 done
+
+# Custom poll interval (default: 1 second)
+agent-store tail --interval 5 --type metric
+
+# Start from a past timestamp
+agent-store tail --since "2024-06-01 09:00:00" --json
+
+# Full-text search on live entries
+agent-store tail --search "error" --type log --json
 ```
 
 ### Trigger on specific content
 
 ```bash
-# Watch for high-priority entries
-while true; do
-  agent-store query --type alert --attr status=new --json | jq -c '.[]' | \
-    while IFS= read -r alert; do
-      ID=$(echo "$alert" | jq -r '.id')
-      echo "ALERT: $(echo "$alert" | jq -r '.data')"
-      # Mark as processed (push a new version with updated status)
-      echo "$alert" | jq -r '.data' | agent-store push --type alert --attr status=processed --attr source="$ID"
-    done
-  sleep 10
-done
+# Watch for high-priority entries and mark as processed
+agent-store tail --type alert --attr status=new --json | jq -c '.' | \
+  while IFS= read -r alert; do
+    ID=$(echo "$alert" | jq -r '.id')
+    echo "ALERT: $(echo "$alert" | jq -r '.data')"
+    # Mark as processed using set-attr (no new entry needed)
+    agent-store set-attr "$ID" status processed
+  done
 ```
 
 ### Wait for a condition
 
 ```bash
-# Block until a specific entry exists
-until agent-store query --type signal --label ready --json | jq -e 'length > 0' > /dev/null 2>&1; do
+# Block until a specific entry exists (using tail + head)
+agent-store tail --type signal --label ready | head -1
+echo "Ready signal received"
+
+# Alternative: poll with query --last
+until agent-store query --type signal --label ready --last 2>/dev/null; do
   sleep 2
 done
 echo "Ready signal received"
@@ -418,11 +447,15 @@ push_unique "config v1" config current  # no-op, already exists
 
 ### Upsert pattern (latest-wins)
 
-Since agent-store is append-only, "update" means pushing a new version and
-querying for the latest:
+Use `push --update` for true in-place replacement, or push a new entry and
+query `--latest` for append-only versioning:
 
 ```bash
-# Push new version
+# In-place update (no new entry, replaces data)
+ID=$(echo "v1 config" | agent-store push --type config --label current --id-only)
+echo "v2 config" | agent-store push --update "$ID"
+
+# Append-only versioning (preserves history)
 echo "v2 config" | agent-store push --type config --label current --attr version=2
 
 # Always get the newest entry of a type+label
@@ -491,17 +524,31 @@ done
 
 ### Prune old entries
 
-Agent-store has no built-in delete, but you can manage growth by using
-separate stores for ephemeral vs. persistent data:
-
 ```bash
-# Ephemeral data in a throwaway store
+# Delete entries by filter — preview first
+agent-store delete --type cache --before "2024-01-01" --dry-run
+agent-store delete --type cache --before "2024-01-01" --confirm
+
+# Collect expired entries (those past their --ttl)
+agent-store gc
+
+# Aggressive: delete ALL entries older than 7 days
+agent-store gc --ttl 7d
+
+# Preview gc before running
+agent-store gc --dry-run
+
+# Reclaim disk space after large deletes
+agent-store compact
+
+# Delete scratch entries from a completed task
+agent-store delete --type scratch --attr task=refactor-auth --confirm
+
+# Full-text search delete
+agent-store delete --search "deprecated" --confirm
+
+# For ephemeral data, use separate stores
 AGENT_STORE_PATH=./scratch agent-store init
 echo "temp result" | AGENT_STORE_PATH=./scratch agent-store push --type temp
-
-# When done, just remove it
-rm -rf ./scratch
-
-# Persistent data stays in the default store
-echo "important finding" | agent-store push --type finding --label permanent
+rm -rf ./scratch   # when done, just remove the store
 ```
