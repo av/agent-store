@@ -316,6 +316,9 @@
 - label: pull --raw omits trailing newline for binary-safe piping
   command: TEST_ID=$(echo -n "rawtest" | agent-store push --id-only --label raw-test) && BYTES=$(agent-store pull "$TEST_ID" --raw | wc -c) && test "$BYTES" = "7"
   tags: [spec, implemented]
+- label: pull --with-changelog includes changelog array in JSON output
+  command: bash -c "cd /tmp && rm -rf test-wc && mkdir test-wc && cd test-wc && agent-store init >/dev/null 2>&1 && ID=\$(echo data | agent-store push --label foo --id-only --strip) && agent-store tag \$ID bar && agent-store pull \$ID --json --with-changelog | jq -e \".changelog | length > 0\""
+  tags: [spec, implemented]
 
 ## attrs
 - label: agent-store attrs lists all unique attribute keys in the store, one per line, sorted alphabetically

@@ -98,6 +98,9 @@ enum Command {
         /// include outgoing and incoming links in JSON output (requires --json)
         #[arg(long = "with-links")]
         with_links: bool,
+        /// include changelog history in JSON output (requires --json)
+        #[arg(long = "with-changelog")]
+        with_changelog: bool,
     },
     /// List and filter entries
     Query {
@@ -2904,7 +2907,7 @@ fn csv_escape(field: &str) -> String {
     }
 }
 
-fn pull(id: &str, json: bool, raw: bool, with_links: bool) {
+fn pull(id: &str, json: bool, raw: bool, with_links: bool, with_changelog: bool) {
     let conn = open_db();
     let id = resolve_entry_id(&conn, id);
 
@@ -2968,62 +2971,58 @@ fn pull(id: &str, json: bool, raw: bool, with_links: bool) {
                     attributes,
                 };
 
-                if with_links {
-                    // Build JSON with links_from and links_to arrays
+                if with_links || with_changelog {
                     let mut val = serde_json::to_value(&entry).expect("failed to serialize entry");
                     let obj = val.as_object_mut().unwrap();
 
-                    // Outgoing links (from this entry)
-                    let links_from: Vec<serde_json::Value> = {
-                        let mut stmt = conn
-                            .prepare("SELECT to_id, rel, created_at FROM links WHERE from_id = ?1")
-                            .unwrap_or_else(|e| {
-                                eprintln!("error: failed to query links: {e}");
-                                process::exit(1);
-                            });
-                        stmt.query_map(rusqlite::params![eid], |r| {
-                            Ok(serde_json::json!({
-                                "to": r.get::<_, String>(0)?,
-                                "rel": r.get::<_, String>(1)?,
-                                "created_at": r.get::<_, String>(2)?
-                            }))
-                        })
-                        .unwrap_or_else(|e| {
-                            eprintln!("error: failed to query links: {e}");
-                            process::exit(1);
-                        })
-                        .filter_map(|r| r.ok())
-                        .collect()
-                    };
+                    if with_links {
+                        let links_from = fetch_links_from(&conn, &eid);
+                        let links_to = fetch_links_to(&conn, &eid);
+                        obj.insert(
+                            "links_from".to_string(),
+                            serde_json::Value::Array(links_from),
+                        );
+                        obj.insert("links_to".to_string(), serde_json::Value::Array(links_to));
+                    }
 
-                    // Incoming links (to this entry)
-                    let links_to: Vec<serde_json::Value> = {
-                        let mut stmt = conn
-                            .prepare("SELECT from_id, rel, created_at FROM links WHERE to_id = ?1")
+                    if with_changelog {
+                        let changelog: Vec<serde_json::Value> = {
+                            let mut stmt = conn
+                                .prepare("SELECT timestamp, operation, key, old_value, new_value FROM changelog WHERE entry_id = ?1 ORDER BY timestamp DESC")
+                                .unwrap_or_else(|e| {
+                                    eprintln!("error: failed to query changelog: {e}");
+                                    process::exit(1);
+                                });
+                            stmt.query_map(rusqlite::params![eid], |r| {
+                                let mut obj = serde_json::Map::new();
+                                obj.insert(
+                                    "timestamp".into(),
+                                    serde_json::Value::String(r.get::<_, String>(0)?),
+                                );
+                                obj.insert(
+                                    "operation".into(),
+                                    serde_json::Value::String(r.get::<_, String>(1)?),
+                                );
+                                if let Ok(k) = r.get::<_, String>(2) {
+                                    obj.insert("key".into(), serde_json::Value::String(k));
+                                }
+                                if let Ok(v) = r.get::<_, String>(3) {
+                                    obj.insert("old_value".into(), serde_json::Value::String(v));
+                                }
+                                if let Ok(v) = r.get::<_, String>(4) {
+                                    obj.insert("new_value".into(), serde_json::Value::String(v));
+                                }
+                                Ok(serde_json::Value::Object(obj))
+                            })
                             .unwrap_or_else(|e| {
-                                eprintln!("error: failed to query links: {e}");
+                                eprintln!("error: failed to query changelog: {e}");
                                 process::exit(1);
-                            });
-                        stmt.query_map(rusqlite::params![eid], |r| {
-                            Ok(serde_json::json!({
-                                "from": r.get::<_, String>(0)?,
-                                "rel": r.get::<_, String>(1)?,
-                                "created_at": r.get::<_, String>(2)?
-                            }))
-                        })
-                        .unwrap_or_else(|e| {
-                            eprintln!("error: failed to query links: {e}");
-                            process::exit(1);
-                        })
-                        .filter_map(|r| r.ok())
-                        .collect()
-                    };
-
-                    obj.insert(
-                        "links_from".to_string(),
-                        serde_json::Value::Array(links_from),
-                    );
-                    obj.insert("links_to".to_string(), serde_json::Value::Array(links_to));
+                            })
+                            .filter_map(|r| r.ok())
+                            .collect()
+                        };
+                        obj.insert("changelog".to_string(), serde_json::Value::Array(changelog));
+                    }
 
                     println!("{val}");
                 } else {
@@ -5924,7 +5923,8 @@ fn main() {
             json,
             raw,
             with_links,
-        } => pull(&id, json, raw, with_links),
+            with_changelog,
+        } => pull(&id, json, raw, with_links, with_changelog),
         Command::Query {
             id,
             label,

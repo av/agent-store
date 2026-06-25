@@ -77,6 +77,7 @@ Options:
 - `--json` — Output the full entry as a JSON object (same format as `query --json` entries: `id`, `data`, `entity_type`, `created_at`, `labels`, `attributes`)
 - `--raw` — Omit trailing newline for binary-safe piping. Useful for checksums: `agent-store pull <id> --raw | sha256sum`
 - `--with-links` — Include outgoing and incoming links in JSON output. Adds `links_from` (array of `{to, rel, created_at}`) and `links_to` (array of `{from, rel, created_at}`) fields. Requires `--json`
+- `--with-changelog` — Include changelog history in JSON output. Adds `changelog` array of `{timestamp, operation, key?, old_value?, new_value?}` objects (newest first). Requires `--json`
 
 ## agent-store query
 

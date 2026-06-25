@@ -133,7 +133,7 @@ agent-store delete 7bf8d3f
 |---------|-------------|
 | `init` | Create `.agent-store/store.db`, install skills to `.agents/skills/`, set up project docs |
 | `push` | Read stdin (or `--file`), store as entry. Flags: `--label`, `--type`, `--attr key=value`, `--timestamp`, `--ttl <duration>`, `-f`/`--file`, `-q`/`--quiet`, `--id-only`, `--strip`, `--json`, `--update <id>`, `--upsert`, `--link rel:id` (repeat, create links at push time) |
-| `pull <id>` | Retrieve entry by ID, print data to stdout. Flags: `--json` (full entry as JSON object), `--raw` (omit trailing newline for binary-safe piping), `--with-links` (include `links_from`/`links_to` arrays in JSON) |
+| `pull <id>` | Retrieve entry by ID, print data to stdout. Flags: `--json` (full entry as JSON object), `--raw` (omit trailing newline for binary-safe piping), `--with-links` (include `links_from`/`links_to` arrays in JSON), `--with-changelog` (include `changelog` array in JSON) |
 | `query` | List entries. Filter: `--label` (repeat), `--not-label` (repeat, exclude), `--type`, `--not-type` (repeat, exclude, NULL-safe), `--attr key=value` (repeat), `--not-attr key=value` (repeat, exclude), `--data <substring>`, `--search <query>` (FTS5 full-text search), `--after <datetime>`, `--before <datetime>`, `--linked-to <id>` (entries linking to this id), `--linked-from <id>` (entries this id links to), `--link-rel <rel>` (filter by relationship type), `--has-links` (only entries with outgoing links), `--no-links` (only entries with no outgoing links), `--json`, `--count`, `--latest`, `--first`, `--last`, `--limit N`, `--offset N`, `-r`/`--reverse` |
 | `schema` | Show entity types and label counts |
 | `stats` | Show entry count and store size. Flags: `--json` |
