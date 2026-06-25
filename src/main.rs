@@ -67,6 +67,9 @@ enum Command {
         /// Strip trailing whitespace (including newlines) from data before storing
         #[arg(long)]
         strip: bool,
+        /// Set time-to-live for the entry (e.g. 30m, 24h, 7d, 3600s)
+        #[arg(long)]
+        ttl: Option<String>,
     },
     /// Pull an entry by ID and print to stdout
     Pull {
@@ -299,6 +302,12 @@ enum Command {
         /// Filter by substring match in entry data
         #[arg(long)]
         data: Option<String>,
+    },
+    /// Collect expired entries (those with elapsed --ttl)
+    Gc {
+        /// Show what would be collected without deleting
+        #[arg(long)]
+        dry_run: bool,
     },
 }
 
@@ -861,6 +870,28 @@ fn init() {
     println!("  hint   run `agent-store skills get agent-store` to get started");
 }
 
+fn parse_ttl(s: &str) -> Result<u64, String> {
+    let s = s.trim();
+    if s.is_empty() {
+        return Err("TTL cannot be empty".to_string());
+    }
+    let (num_str, unit) = if s.ends_with('d') {
+        (&s[..s.len() - 1], 86400u64)
+    } else if s.ends_with('h') {
+        (&s[..s.len() - 1], 3600u64)
+    } else if s.ends_with('m') {
+        (&s[..s.len() - 1], 60u64)
+    } else if s.ends_with('s') {
+        (&s[..s.len() - 1], 1u64)
+    } else {
+        return Err(format!("invalid TTL unit in '{s}', use s/m/h/d"));
+    };
+    let num: u64 = num_str
+        .parse()
+        .map_err(|_| format!("invalid TTL number in '{s}'"))?;
+    Ok(num * unit)
+}
+
 fn parse_attr(attr: &str) -> (&str, &str) {
     match attr.split_once('=') {
         Some((k, v)) => (k, v),
@@ -881,6 +912,7 @@ fn push(
     timestamp: Option<String>,
     file: Option<String>,
     strip: bool,
+    ttl: Option<String>,
 ) {
     // Validate empty strings before any DB work
     for label in &labels {
@@ -895,6 +927,38 @@ fn push(
         eprintln!("error: type cannot be empty");
         process::exit(1);
     }
+    // Handle TTL: parse duration and inject _expires_at attribute
+    let mut attrs = attrs;
+    if let Some(ref ttl_str) = ttl {
+        let ttl_secs = match parse_ttl(ttl_str) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("error: {e}");
+                process::exit(1);
+            }
+        };
+        // Determine base timestamp (from --timestamp or current time)
+        let base_ts = if let Some(ref ts) = timestamp {
+            match chrono::NaiveDateTime::parse_from_str(ts, "%Y-%m-%d %H:%M:%S") {
+                Ok(dt) => dt,
+                Err(_) => match chrono::NaiveDate::parse_from_str(ts, "%Y-%m-%d") {
+                    Ok(d) => d
+                        .and_hms_opt(0, 0, 0)
+                        .expect("midnight should always be valid"),
+                    Err(_) => {
+                        eprintln!("error: invalid timestamp format for TTL calculation");
+                        process::exit(1);
+                    }
+                },
+            }
+        } else {
+            chrono::Utc::now().naive_utc()
+        };
+        let expires_at = base_ts + chrono::Duration::seconds(ttl_secs as i64);
+        let expires_str = expires_at.format("%Y-%m-%d %H:%M:%S").to_string();
+        attrs.push(format!("_expires_at={expires_str}"));
+    }
+
     let parsed_attrs: Vec<(&str, &str)> = attrs.iter().map(|a| parse_attr(a)).collect();
     for (key, _) in &parsed_attrs {
         if key.trim().is_empty() {
@@ -2823,6 +2887,74 @@ fn history(label: &str, json: bool, limit: Option<u64>, data_filter: Option<Stri
     }
 }
 
+fn gc(dry_run: bool) {
+    let conn = open_db();
+
+    // Find all entries with _expires_at attribute where the value is before current time
+    let sql = "SELECT DISTINCT e.id FROM entries e \
+               JOIN attributes a ON e.id = a.entry_id \
+               WHERE a.key = '_expires_at' AND a.value < datetime('now')";
+
+    let mut stmt = match conn.prepare(sql) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("error: failed to prepare gc query: {e}");
+            process::exit(1);
+        }
+    };
+
+    let ids: Vec<String> = match stmt.query_map([], |row| row.get::<_, String>(0)) {
+        Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
+        Err(e) => {
+            eprintln!("error: failed to query expired entries: {e}");
+            process::exit(1);
+        }
+    };
+
+    let count = ids.len();
+
+    if dry_run {
+        let word = if count == 1 { "entry" } else { "entries" };
+        println!("Dry run: {count} {word} would be collected");
+        return;
+    }
+
+    // Delete in FK-safe order for each expired entry
+    for entry_id in &ids {
+        if let Err(e) = conn.execute(
+            "DELETE FROM entries_fts WHERE id = ?1",
+            rusqlite::params![entry_id],
+        ) {
+            eprintln!("error: failed to delete FTS entry: {e}");
+            process::exit(1);
+        }
+        if let Err(e) = conn.execute(
+            "DELETE FROM attributes WHERE entry_id = ?1",
+            rusqlite::params![entry_id],
+        ) {
+            eprintln!("error: failed to delete attributes: {e}");
+            process::exit(1);
+        }
+        if let Err(e) = conn.execute(
+            "DELETE FROM labels WHERE entry_id = ?1",
+            rusqlite::params![entry_id],
+        ) {
+            eprintln!("error: failed to delete labels: {e}");
+            process::exit(1);
+        }
+        if let Err(e) = conn.execute(
+            "DELETE FROM entries WHERE id = ?1",
+            rusqlite::params![entry_id],
+        ) {
+            eprintln!("error: failed to delete entry: {e}");
+            process::exit(1);
+        }
+    }
+
+    let word = if count == 1 { "entry" } else { "entries" };
+    println!("Collected {count} expired {word}");
+}
+
 fn main() {
     // Reset SIGPIPE to default so piping to head/tail/etc. exits cleanly
     // instead of panicking with "Broken pipe".
@@ -2844,6 +2976,7 @@ fn main() {
             timestamp,
             file,
             strip,
+            ttl,
         } => push(
             label,
             entity_type,
@@ -2853,6 +2986,7 @@ fn main() {
             timestamp,
             file,
             strip,
+            ttl,
         ),
         Command::Pull { id, json, raw } => pull(&id, json, raw),
         Command::Query {
@@ -2966,6 +3100,7 @@ fn main() {
             limit,
             data,
         } => history(&label, json, limit, data),
+        Command::Gc { dry_run } => gc(dry_run),
         Command::Completions { shell } => {
             let mut cmd = Cli::command();
             clap_complete::generate(shell, &mut cmd, "agent-store", &mut std::io::stdout());
