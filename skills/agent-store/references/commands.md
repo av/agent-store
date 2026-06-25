@@ -17,26 +17,31 @@ agent-store init
 
 ## agent-store push
 
-Store data from stdin.
+Store data from stdin or a file.
 
 ```
 echo "data" | agent-store push [OPTIONS]
+agent-store push --file data.txt [OPTIONS]
 ```
 
 Options:
 - `--label <LABEL>` — Tag the entry (repeatable for multiple labels)
 - `--type <TYPE>` — Set entity type classification
 - `--attr <KEY=VALUE>` — Set attribute key-value pair (repeatable, AND logic on query)
+- `-f`, `--file <PATH>` — Read data from a file instead of stdin
 - `-q`, `--quiet` — Suppress all output (for scripting when no feedback is needed)
 - `--id-only` — Output only the raw UUID (no "stored entry" prefix). Conflicts with `--quiet`
 - `--timestamp <DATETIME>` — Override created_at timestamp (ISO 8601: `"2024-01-15 10:30:00"` or `"2024-01-15"`). Default: current time
 
-Data is read from stdin until EOF. Empty stdin is an error. Labels, type,
-and attribute keys cannot be empty strings.
+Data is read from stdin until EOF (or from `--file` if provided). Empty
+input is an error. When `--file` is set, it takes precedence over stdin.
+File not found prints a clear error and exits 1. Labels, type, and
+attribute keys cannot be empty strings.
 
 Scripting example:
 ```bash
 ID=$(echo "data" | agent-store push --label tag --id-only)
+agent-store push --label config --file config.json
 ```
 
 ## agent-store pull \<ID\>
@@ -233,6 +238,34 @@ Deletes from `attributes`, `labels`, and `entries` tables in FK-safe order.
 Prints `Purged N entries` on success.
 
 Useful for testing and resetting stores.
+
+## agent-store info
+
+Show store configuration, paths, and environment details.
+
+```
+agent-store info [--json]
+```
+
+Options:
+- `--json` — Output as a JSON object
+
+Human-readable output shows:
+- Store path (`.agent-store/` directory)
+- Database file path
+- Database file size
+- `AGENT_STORE_PATH` env var status
+- Project root directory
+- CLI version
+
+JSON output fields: `store_path`, `db_path`, `db_size_bytes` (null if DB
+doesn't exist), `agent_store_path_env` (null if not set), `project_root`
+(null if not in a git repo), `version`.
+
+```bash
+agent-store info
+agent-store info --json | jq .version
+```
 
 ## agent-store completions
 

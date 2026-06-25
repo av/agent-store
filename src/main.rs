@@ -41,7 +41,7 @@ struct Cli {
 enum Command {
     /// Initialize store, install agent skills, and set up project docs
     Init,
-    /// Push data from stdin into the store
+    /// Push data from stdin (or --file) into the store
     Push {
         /// Tag entry with a label (can be repeated)
         #[arg(long)]
@@ -61,6 +61,9 @@ enum Command {
         /// Override created_at timestamp (ISO 8601: "2024-01-15 10:30:00" or "2024-01-15")
         #[arg(long)]
         timestamp: Option<String>,
+        /// Read data from a file instead of stdin
+        #[arg(long, short = 'f')]
+        file: Option<String>,
     },
     /// Pull an entry by ID and print to stdout
     Pull {
@@ -174,6 +177,12 @@ enum Command {
     Completions {
         /// Shell to generate completions for
         shell: clap_complete::Shell,
+    },
+    /// Show store configuration and environment info
+    Info {
+        /// Output as JSON object
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -708,7 +717,7 @@ fn parse_attr(attr: &str) -> (&str, &str) {
     }
 }
 
-fn push(labels: Vec<String>, entity_type: Option<String>, quiet: bool, id_only: bool, attrs: Vec<String>, timestamp: Option<String>) {
+fn push(labels: Vec<String>, entity_type: Option<String>, quiet: bool, id_only: bool, attrs: Vec<String>, timestamp: Option<String>, file: Option<String>) {
     // Validate empty strings before any DB work
     for label in &labels {
         if label.trim().is_empty() {
@@ -740,14 +749,26 @@ fn push(labels: Vec<String>, entity_type: Option<String>, quiet: bool, id_only: 
         }
     }
 
-    let mut data = String::new();
-    if let Err(e) = io::stdin().read_to_string(&mut data) {
-        eprintln!("error: failed to read stdin: {e}");
-        process::exit(1);
-    }
+    let data = if let Some(ref path) = file {
+        match fs::read_to_string(path) {
+            Ok(contents) => contents,
+            Err(e) => {
+                eprintln!("error: failed to read file '{path}': {e}");
+                process::exit(1);
+            }
+        }
+    } else {
+        let mut buf = String::new();
+        if let Err(e) = io::stdin().read_to_string(&mut buf) {
+            eprintln!("error: failed to read stdin: {e}");
+            process::exit(1);
+        }
+        buf
+    };
 
     if data.is_empty() {
-        eprintln!("error: no data provided on stdin");
+        let source = if file.is_some() { "file" } else { "stdin" };
+        eprintln!("error: no data provided on {source}");
         process::exit(1);
     }
 
@@ -1827,6 +1848,72 @@ fn purge(confirm: bool) {
     println!("Purged {count} {word}");
 }
 
+fn info(json: bool) {
+    let store_path = store_dir();
+    let db_path = store_db();
+    let version = env!("CARGO_PKG_VERSION");
+
+    let db_size: Option<u64> = fs::metadata(&db_path).ok().map(|m| m.len());
+
+    let agent_store_path_env = std::env::var("AGENT_STORE_PATH").ok();
+
+    let project_root = find_project_root().map(|p| p.display().to_string());
+
+    if json {
+        #[derive(Serialize)]
+        struct InfoJson {
+            store_path: String,
+            db_path: String,
+            db_size_bytes: Option<u64>,
+            agent_store_path_env: Option<String>,
+            project_root: Option<String>,
+            version: String,
+        }
+
+        let info = InfoJson {
+            store_path: store_path.display().to_string(),
+            db_path: db_path.display().to_string(),
+            db_size_bytes: db_size,
+            agent_store_path_env,
+            project_root,
+            version: version.to_string(),
+        };
+
+        match serde_json::to_string(&info) {
+            Ok(json_str) => println!("{json_str}"),
+            Err(e) => {
+                eprintln!("error: failed to serialize info JSON: {e}");
+                process::exit(1);
+            }
+        }
+    } else {
+        println!("Store path: {}", store_path.display());
+        println!("Database: {}", db_path.display());
+        match db_size {
+            Some(size) => {
+                let formatted = if size < 1024 {
+                    format!("{} B", size)
+                } else if size < 1024 * 1024 {
+                    format!("{:.1} KB", size as f64 / 1024.0)
+                } else {
+                    format!("{:.1} MB", size as f64 / (1024.0 * 1024.0))
+                };
+                println!("Database size: {formatted}");
+            }
+            None => println!("Database size: (not initialized)"),
+        }
+        match &agent_store_path_env {
+            Some(p) => println!("AGENT_STORE_PATH: {p}"),
+            None => println!("AGENT_STORE_PATH: (not set)"),
+        }
+        match &project_root {
+            Some(p) => println!("Project root: {p}"),
+            None => println!("Project root: (not found)"),
+        }
+        println!("Version: {version}");
+    }
+}
+
 fn main() {
     // Reset SIGPIPE to default so piping to head/tail/etc. exits cleanly
     // instead of panicking with "Broken pipe".
@@ -1846,7 +1933,8 @@ fn main() {
             id_only,
             attr,
             timestamp,
-        } => push(label, entity_type, quiet, id_only, attr, timestamp),
+            file,
+        } => push(label, entity_type, quiet, id_only, attr, timestamp, file),
         Command::Pull { id, json, raw } => pull(&id, json, raw),
         Command::Query {
             id,
@@ -1884,6 +1972,7 @@ fn main() {
             SkillsAction::Get { name, full } => skills_get(&name, full),
             SkillsAction::Path { name } => skills_path(&name),
         },
+        Command::Info { json } => info(json),
         Command::Completions { shell } => {
             let mut cmd = Cli::command();
             clap_complete::generate(shell, &mut cmd, "agent-store", &mut std::io::stdout());

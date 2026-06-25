@@ -288,3 +288,16 @@
 - label: query --id filters entries by exact ID match, returning the entry in query format with --json support
   command: ID=$(echo "id-test-data" | agent-store push --label id-test --id-only) && agent-store query --id "$ID" --json | jq -e ".[0].id == \"$ID\""
   tags: [spec, implemented]
+
+# cli > info
+- label: agent-store info shows store path, database path, database size, AGENT_STORE_PATH status, project root, and version
+  command: agent-store info 2>&1 | grep -q "Store path:" && agent-store info 2>&1 | grep -q "Version:" && echo "OK"
+  tags: [spec, implemented]
+- label: agent-store info --json outputs valid JSON with store_path, db_path, db_size_bytes, agent_store_path_env, project_root, and version fields
+  command: agent-store info --json | python3 -c "import sys,json; d=json.load(sys.stdin); assert \"store_path\" in d and \"version\" in d and \"db_size_bytes\" in d; print(\"OK\")"
+  tags: [spec, implemented]
+
+# cli > push
+- label: push --file reads data from a file instead of stdin; file not found prints clear error and exits 1
+  command: echo "file-push-content" > /tmp/as-test-file-push.txt && agent-store push --label file-test --file /tmp/as-test-file-push.txt 2>&1 | grep -q "stored entry" && agent-store query --label file-test | grep -q "file-push-content" && agent-store push --file /tmp/nonexistent-file-xxx --label x 2>&1; test $? -ne 0 && echo "OK"
+  tags: [spec, implemented]
