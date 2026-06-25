@@ -43,11 +43,14 @@ ID=$(echo "data" | agent-store push --label tag --id-only)
 Retrieve an entry by ID.
 
 ```
-agent-store pull <ID>
+agent-store pull <ID> [--json]
 ```
 
 Prints the entry's data to stdout (raw payload, no metadata). Exit code 1
 if the entry is not found.
+
+Options:
+- `--json` — Output the full entry as a JSON object (same format as `query --json` entries: `id`, `data`, `entity_type`, `created_at`, `labels`, `attributes`)
 
 ## agent-store query
 
@@ -59,6 +62,7 @@ agent-store query [OPTIONS]
 
 Options:
 - `--label <LABEL>` — Filter by label (can be repeated, AND logic — all must match)
+- `--not-label <LABEL>` — Exclude entries with this label (can be repeated — entries with ANY specified label are excluded)
 - `--type <TYPE>` — Filter by entity type (exact match)
 - `--attr <KEY=VALUE>` — Filter by attribute (can be repeated, AND logic — all must match)
 - `--data <SUBSTRING>` — Filter by substring match in entry data

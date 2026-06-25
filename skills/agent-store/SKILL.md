@@ -67,10 +67,17 @@ ID=$(echo "important data" | agent-store push | awk '{print $3}')
 # Retrieve by ID
 agent-store pull $ID
 
+# Retrieve full entry as JSON (with labels, attributes, timestamps)
+agent-store pull $ID --json | jq .labels
+
 # Find entries by label, type, or attributes
 agent-store query --label urgent
 agent-store query --type task
 agent-store query --attr priority=high
+
+# Exclude entries with a label
+agent-store query --label todo --not-label done       # open todos
+agent-store query --not-label done --not-label archived  # exclude multiple
 
 # Combine filters (AND logic)
 agent-store query --label urgent --type task --attr priority=high
@@ -92,8 +99,8 @@ agent-store stats     # entry count and store size
 |---------|-------------|
 | `init` | Create `.agent-store/store.db`, install skills to `.agents/skills/`, set up project docs |
 | `push` | Read stdin, store as entry. Flags: `--label`, `--type`, `--attr key=value`, `-q`/`--quiet`, `--id-only` |
-| `pull <id>` | Retrieve entry by ID, print data to stdout |
-| `query` | List entries. Filter: `--label` (repeat), `--type`, `--attr key=value` (repeat), `--data <substring>`, `--json`, `--count`, `--latest`, `--limit N`, `--offset N`, `-r`/`--reverse` |
+| `pull <id>` | Retrieve entry by ID, print data to stdout. Flags: `--json` (full entry as JSON object) |
+| `query` | List entries. Filter: `--label` (repeat), `--not-label` (repeat, exclude), `--type`, `--attr key=value` (repeat), `--data <substring>`, `--json`, `--count`, `--latest`, `--limit N`, `--offset N`, `-r`/`--reverse` |
 | `schema` | Show entity types and label counts |
 | `stats` | Show entry count and store size. Flags: `--json` |
 | `skills` | List and read built-in usage guides |
@@ -171,6 +178,11 @@ agent-store query --label log --latest --reverse
 # Search by data content (substring match)
 agent-store query --data "error"              # entries containing "error"
 agent-store query --data "error" --label logs # combine with other filters
+
+# Exclude entries by label (repeatable, AND semantics)
+agent-store query --label todo --not-label done         # open todos
+agent-store query --not-label done --not-label archived # exclude multiple labels
+agent-store query --label todo --not-label done --json  # combine with --json
 
 # Pagination
 agent-store query --limit 10                  # first 10 entries

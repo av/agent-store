@@ -178,6 +178,9 @@
 - label: query --data works with all existing filters including --label, --json, --count, --latest, --reverse, --limit, --offset
   command: export AGENT_STORE_PATH=$(mktemp -d) && agent-store init >/dev/null 2>&1 && echo "error in logs" | agent-store push --label logs --quiet && echo "error in notes" | agent-store push --label notes --quiet && test "$(agent-store query --data error --label logs --count)" = "1"
   tags: [spec, implemented]
+- label: query --not-label excludes entries with the given label; repeatable with AND semantics (all specified labels excluded)
+  command: cd /tmp && rm -rf as-test-8kb && mkdir as-test-8kb && cd as-test-8kb && git init -q && agent-store init 2>/dev/null && echo "a" | agent-store push --label todo -q && echo "b" | agent-store push --label todo --label done -q && echo "c" | agent-store push --label todo --label archived -q && test "$(agent-store query --label todo --not-label done --count)" = "2" && test "$(agent-store query --not-label done --not-label archived --count)" = "1" && rm -rf /tmp/as-test-8kb
+  tags: [spec, implemented]
 
 ## push
 - label: push -q/--quiet suppresses all output including the entry ID
@@ -220,6 +223,11 @@
   tags: [spec, implemented]
 - label: agent-store purge --confirm deletes all entries and prints count of purged entries
   command: export AGENT_STORE_PATH=$(mktemp -d) && agent-store init >/dev/null 2>&1 && echo "test1" | agent-store push --label x --quiet && echo "test2" | agent-store push --label y --quiet && agent-store purge --confirm 2>&1 | grep -q "Purged 2 entries"
+  tags: [spec, implemented]
+
+## pull
+- label: pull --json outputs full entry as JSON object matching query --json format (id, entity_type, labels, data, created_at, attributes)
+  command: cd /tmp && rm -rf as-test-r1q && mkdir as-test-r1q && cd as-test-r1q && git init -q && agent-store init 2>/dev/null && ID=$(echo "test data" | agent-store push --label tag1 --type note --attr k=v --id-only) && OUT=$(agent-store pull "$ID" --json) && echo "$OUT" | jq -e ".id and .data and .labels and .created_at and .attributes and (.entity_type == \"note\")" > /dev/null && rm -rf /tmp/as-test-r1q
   tags: [spec, implemented]
 
 # resilience

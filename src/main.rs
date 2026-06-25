@@ -63,12 +63,18 @@ enum Command {
     Pull {
         /// Entry ID to retrieve
         id: String,
+        /// Output the full entry as a JSON object (same format as query --json)
+        #[arg(long)]
+        json: bool,
     },
     /// List and filter entries
     Query {
         /// Filter by label (can be repeated, AND logic)
         #[arg(long)]
         label: Vec<String>,
+        /// Exclude entries with this label (can be repeated, excludes all specified)
+        #[arg(long = "not-label")]
+        not_label: Vec<String>,
         /// Filter by entity type
         #[arg(long = "type")]
         entity_type: Option<String>,
@@ -777,6 +783,7 @@ struct EntryJson {
 #[allow(clippy::too_many_arguments)]
 fn query(
     labels: Vec<String>,
+    not_labels: Vec<String>,
     entity_type: Option<String>,
     attrs: Vec<String>,
     json: bool,
@@ -861,6 +868,15 @@ fn query(
     if let Some(ref substr) = data_filter {
         conditions.push(format!("e.data LIKE '%' || ?{param_idx} || '%'"));
         params.push(Box::new(substr.clone()));
+        param_idx += 1;
+    }
+
+    // Not-label exclusion conditions (one subquery per excluded label)
+    for nl in &not_labels {
+        conditions.push(format!(
+            "e.id NOT IN (SELECT entry_id FROM labels WHERE label = ?{param_idx})"
+        ));
+        params.push(Box::new(nl.clone()));
         param_idx += 1;
     }
     let _ = param_idx; // suppress unused assignment warning
@@ -1189,24 +1205,100 @@ fn export(labels: Vec<String>, entity_type: Option<String>, attrs: Vec<String>) 
     }
 }
 
-fn pull(id: &str) {
+fn pull(id: &str, json: bool) {
     let conn = open_db();
 
-    let result: Result<String, _> = conn.query_row(
-        "SELECT data FROM entries WHERE id = ?1",
-        rusqlite::params![id],
-        |row| row.get(0),
-    );
+    if json {
+        // Fetch full entry for JSON output
+        let result: Result<(String, String, Option<String>, String), _> = conn.query_row(
+            "SELECT id, data, entity_type, created_at FROM entries WHERE id = ?1",
+            rusqlite::params![id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        );
 
-    match result {
-        Ok(data) => print!("{data}"),
-        Err(rusqlite::Error::QueryReturnedNoRows) => {
-            eprintln!("error: entry not found: {id}");
-            process::exit(1);
+        match result {
+            Ok((eid, data, etype, created_at)) => {
+                // Fetch labels
+                let labels: Vec<String> = {
+                    let mut lstmt = match conn.prepare("SELECT label FROM labels WHERE entry_id = ?1") {
+                        Ok(s) => s,
+                        Err(e) => {
+                            eprintln!("error: failed to query labels: {e}");
+                            process::exit(1);
+                        }
+                    };
+                    match lstmt.query_map(rusqlite::params![eid], |r| r.get::<_, String>(0)) {
+                        Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
+                        Err(e) => {
+                            eprintln!("error: failed to query labels: {e}");
+                            process::exit(1);
+                        }
+                    }
+                };
+
+                // Fetch attributes
+                let attributes: HashMap<String, String> = {
+                    let mut astmt = match conn.prepare("SELECT key, value FROM attributes WHERE entry_id = ?1") {
+                        Ok(s) => s,
+                        Err(e) => {
+                            eprintln!("error: failed to query attributes: {e}");
+                            process::exit(1);
+                        }
+                    };
+                    match astmt.query_map(rusqlite::params![eid], |r| {
+                        Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+                    }) {
+                        Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
+                        Err(e) => {
+                            eprintln!("error: failed to query attributes: {e}");
+                            process::exit(1);
+                        }
+                    }
+                };
+
+                let entry = EntryJson {
+                    id: eid,
+                    data,
+                    entity_type: etype,
+                    created_at,
+                    labels,
+                    attributes,
+                };
+
+                match serde_json::to_string(&entry) {
+                    Ok(json_str) => println!("{json_str}"),
+                    Err(e) => {
+                        eprintln!("error: failed to serialize JSON: {e}");
+                        process::exit(1);
+                    }
+                }
+            }
+            Err(rusqlite::Error::QueryReturnedNoRows) => {
+                eprintln!("error: entry not found: {id}");
+                process::exit(1);
+            }
+            Err(e) => {
+                eprintln!("error: failed to query entry: {e}");
+                process::exit(1);
+            }
         }
-        Err(e) => {
-            eprintln!("error: failed to query entry: {e}");
-            process::exit(1);
+    } else {
+        let result: Result<String, _> = conn.query_row(
+            "SELECT data FROM entries WHERE id = ?1",
+            rusqlite::params![id],
+            |row| row.get(0),
+        );
+
+        match result {
+            Ok(data) => print!("{data}"),
+            Err(rusqlite::Error::QueryReturnedNoRows) => {
+                eprintln!("error: entry not found: {id}");
+                process::exit(1);
+            }
+            Err(e) => {
+                eprintln!("error: failed to query entry: {e}");
+                process::exit(1);
+            }
         }
     }
 }
@@ -1583,9 +1675,10 @@ fn main() {
             id_only,
             attr,
         } => push(label, entity_type, quiet, id_only, attr),
-        Command::Pull { id } => pull(&id),
+        Command::Pull { id, json } => pull(&id, json),
         Command::Query {
             label,
+            not_label,
             entity_type,
             attr,
             json,
@@ -1595,7 +1688,7 @@ fn main() {
             offset,
             reverse,
             data,
-        } => query(label, entity_type, attr, json, count, latest, limit, offset, reverse, data),
+        } => query(label, not_label, entity_type, attr, json, count, latest, limit, offset, reverse, data),
 
         Command::Export {
             label,
