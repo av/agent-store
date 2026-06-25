@@ -57,12 +57,19 @@ Options:
 - `--attr <KEY=VALUE>` — Filter by attribute (can be repeated, AND logic — all must match)
 - `--json` — Output as JSON array of full entry objects
 - `--count` — Output only the number of matching entries (just a number, for scripting)
+- `--latest` — Return only the single most recent matching entry (conflicts with `--limit`)
 - `--limit <N>` — Return at most N entries
 - `--offset <N>` — Skip first N entries (requires `--limit`)
+- `-r`, `--reverse` — Reverse sort order to oldest-first (default is newest-first)
 
 Without any filter flags, returns all entries.
 
+`--latest` is the most common agent pattern: "give me the latest entry with this label."
+It conflicts with `--limit` (use one or the other). Combine with `--reverse` to get the
+oldest single entry instead.
+
 `--count` ignores `--limit`/`--offset` and always reports the total matching count.
+When combined with `--latest`, `--count` returns 0 or 1.
 
 **Default output:** raw entry data (payloads only) concatenated with no
 separator. Entries appear on separate lines only if their data contains

@@ -78,12 +78,18 @@ enum Command {
         /// Output only the count of matching entries
         #[arg(long)]
         count: bool,
+        /// Return only the single most recent matching entry
+        #[arg(long, conflicts_with = "limit")]
+        latest: bool,
         /// Return at most N entries
         #[arg(long)]
         limit: Option<u64>,
         /// Skip first N entries (requires --limit)
         #[arg(long, requires = "limit")]
         offset: Option<u64>,
+        /// Reverse sort order to oldest-first
+        #[arg(long, short = 'r')]
+        reverse: bool,
     },
     /// Show entity types and label counts
     Schema,
@@ -744,8 +750,10 @@ fn query(
     attrs: Vec<String>,
     json: bool,
     count: bool,
+    latest: bool,
     limit: Option<u64>,
     offset: Option<u64>,
+    reverse: bool,
 ) {
     // Validate empty strings before any DB work
     for label in &labels {
@@ -773,7 +781,10 @@ fn query(
     let conn = open_db();
 
     // Build query dynamically
-    let select_cols = if count {
+    // When --count + --latest, use a subquery with LIMIT 1 then count the rows
+    let select_cols = if count && latest {
+        "DISTINCT e.id"
+    } else if count {
         "COUNT(DISTINCT e.id)"
     } else if json {
         "e.id, e.data, e.entity_type, e.created_at"
@@ -820,14 +831,27 @@ fn query(
         sql.push_str(&conditions.join(" AND "));
     }
 
-    // Add LIMIT/OFFSET (not applied when --count)
-    if !count {
+    // Add ORDER BY (not applied when --count without --latest)
+    if !count || latest {
+        let direction = if reverse { "ASC" } else { "DESC" };
+        sql.push_str(&format!(" ORDER BY e.created_at {direction}, e.rowid {direction}"));
+    }
+
+    // Add LIMIT/OFFSET
+    if latest {
+        sql.push_str(" LIMIT 1");
+    } else if !count {
         if let Some(lim) = limit {
             sql.push_str(&format!(" LIMIT {lim}"));
             if let Some(off) = offset {
                 sql.push_str(&format!(" OFFSET {off}"));
             }
         }
+    }
+
+    // Wrap in COUNT subquery when both --count and --latest are set
+    if count && latest {
+        sql = format!("SELECT COUNT(*) FROM ({sql})");
     }
 
     if count {
@@ -1187,9 +1211,11 @@ fn main() {
             attr,
             json,
             count,
+            latest,
             limit,
             offset,
-        } => query(label, entity_type, attr, json, count, limit, offset),
+            reverse,
+        } => query(label, entity_type, attr, json, count, latest, limit, offset, reverse),
 
         Command::Schema => schema(),
         Command::Stats { json } => stats(json),

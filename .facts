@@ -163,6 +163,15 @@
 - label: query --offset N skips the first N entries (requires --limit)
   command: echo "offset-test-1" | agent-store push --label offset-test-xx --quiet > /dev/null && echo "offset-test-2" | agent-store push --label offset-test-xx --quiet > /dev/null && all=$(agent-store query --label offset-test-xx --json | jq length) && offset_result=$(agent-store query --label offset-test-xx --json --limit 100 --offset 1 | jq length) && test "$offset_result" -lt "$all" && echo "PASS: offset skipped entries"
   tags: [spec, implemented]
+- label: query --latest returns only the single most recent matching entry (LIMIT 1)
+  command: echo "latest-test-a" | agent-store push --label latest-test-fact && echo "latest-test-b" | agent-store push --label latest-test-fact && count=$(agent-store query --label latest-test-fact --latest --json | jq length) && test "$count" -eq 1
+  tags: [spec, implemented]
+- label: query --latest conflicts with --limit (mutually exclusive via clap)
+  command: agent-store query --latest --limit 5 2>&1; test $? -ne 0
+  tags: [spec, implemented]
+- label: query --reverse/-r reverses sort order to oldest-first (ORDER BY created_at ASC)
+  command: echo "rev-old" | agent-store push --label reverse-test-fact && sleep 1 && echo "rev-new" | agent-store push --label reverse-test-fact && first=$(agent-store query --label reverse-test-fact --reverse --json | jq -r ".[0].data") && test "$first" = "rev-old"
+  tags: [spec, implemented]
 
 ## push
 - label: push -q/--quiet suppresses all output including the entry ID
