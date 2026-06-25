@@ -109,7 +109,7 @@ agent-store stats     # entry count and store size
 | Command | What it does |
 |---------|-------------|
 | `init` | Create `.agent-store/store.db`, install skills to `.agents/skills/`, set up project docs |
-| `push` | Read stdin (or `--file`), store as entry. Flags: `--label`, `--type`, `--attr key=value`, `--timestamp`, `-f`/`--file`, `-q`/`--quiet`, `--id-only`, `--strip` |
+| `push` | Read stdin (or `--file`), store as entry. Flags: `--label`, `--type`, `--attr key=value`, `--timestamp`, `--ttl <duration>`, `-f`/`--file`, `-q`/`--quiet`, `--id-only`, `--strip` |
 | `pull <id>` | Retrieve entry by ID, print data to stdout. Flags: `--json` (full entry as JSON object), `--raw` (omit trailing newline for binary-safe piping) |
 | `query` | List entries. Filter: `--label` (repeat), `--not-label` (repeat, exclude), `--type`, `--not-type` (repeat, exclude, NULL-safe), `--attr key=value` (repeat), `--not-attr key=value` (repeat, exclude), `--data <substring>`, `--search <query>` (FTS5 full-text search), `--after <datetime>`, `--before <datetime>`, `--json`, `--count`, `--latest`, `--limit N`, `--offset N`, `-r`/`--reverse` |
 | `schema` | Show entity types and label counts |
@@ -125,6 +125,7 @@ agent-store stats     # entry count and store size
 | `info` | Show store configuration and environment. Flags: `--json` |
 | `tag <id> <label>...` | Add labels to an existing entry. Idempotent (duplicate labels are ignored). |
 | `untag <id> <label>...` | Remove labels from an existing entry. Idempotent (missing labels are ignored). |
+| `gc` | Collect expired entries (those past their TTL). Flags: `--dry-run` |
 | `history <label>` | Show chronological history of entries with a given label (oldest first). Flags: `--json`, `--limit N`, `--data <substring>` |
 | `completions <shell>` | Generate shell completions (bash, zsh, fish, elvish, powershell) |
 
@@ -172,6 +173,26 @@ agent-store history config --limit 5
 # Search within history
 agent-store history config --data "database"
 ```
+
+## TTL and garbage collection
+
+Set a time-to-live on entries so they expire automatically. Expired entries
+are cleaned up by the `gc` command.
+
+```bash
+# Push with a TTL
+echo "cache result" | agent-store push --type cache --ttl 24h
+echo "temp note" | agent-store push --ttl 30m
+
+# Preview what gc would collect
+agent-store gc --dry-run
+
+# Collect expired entries
+agent-store gc
+```
+
+Supported duration units: `s` (seconds), `m` (minutes), `h` (hours), `d` (days).
+TTL is stored as a `_expires_at` attribute — entries without TTL never expire.
 
 ## Pushing data
 

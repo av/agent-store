@@ -32,6 +32,7 @@ Options:
 - `-q`, `--quiet` — Suppress all output (for scripting when no feedback is needed)
 - `--id-only` — Output only the raw UUID (no "stored entry" prefix). Conflicts with `--quiet`
 - `--timestamp <DATETIME>` — Override created_at timestamp (ISO 8601: `"2024-01-15 10:30:00"` or `"2024-01-15"`). Default: current time
+- `--ttl <DURATION>` — Set a time-to-live. Duration format: `<number><unit>` where unit is `s` (seconds), `m` (minutes), `h` (hours), or `d` (days). Examples: `30m`, `24h`, `7d`, `3600s`. Stores the computed expiry as a `_expires_at` attribute. Expired entries are collected by `gc`
 - `--strip` — Strip trailing whitespace (including newlines) from data before storing. Useful with `echo` which adds a trailing newline
 
 Data is read from stdin until EOF (or from `--file` if provided). Empty
@@ -504,6 +505,33 @@ agent-store history config --limit 3
 
 # Search within history
 agent-store history config --data "database"
+```
+
+## agent-store gc
+
+Collect expired entries — those whose `_expires_at` attribute is in the past.
+
+```
+agent-store gc [--dry-run]
+```
+
+Options:
+- `--dry-run` — Show how many entries would be collected without deleting them
+
+Entries get an `_expires_at` attribute when pushed with `--ttl`. The `gc`
+command scans for entries where `_expires_at` is earlier than the current
+time and deletes them (along with their labels and attributes).
+
+Entries without `_expires_at` are never collected — they live forever.
+
+```bash
+# Collect all expired entries
+agent-store gc
+# Collected 3 entries
+
+# Preview without deleting
+agent-store gc --dry-run
+# 3 expired entries would be collected
 ```
 
 ## agent-store completions
