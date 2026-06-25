@@ -228,6 +228,9 @@ enum Command {
         /// Only entries created before this timestamp (ISO 8601)
         #[arg(long)]
         before: Option<String>,
+        /// Output result as JSON
+        #[arg(long)]
+        json: bool,
     },
     /// Delete ALL entries from the store (destructive, requires --confirm)
     Purge {
@@ -280,6 +283,9 @@ enum Command {
         /// Labels to add (at least one required)
         #[arg(required = true)]
         label: Vec<String>,
+        /// Output result as JSON
+        #[arg(long)]
+        json: bool,
     },
     /// Remove labels from an existing entry
     Untag {
@@ -288,6 +294,9 @@ enum Command {
         /// Labels to remove (at least one required)
         #[arg(required = true)]
         label: Vec<String>,
+        /// Output result as JSON
+        #[arg(long)]
+        json: bool,
     },
     /// Show chronological history of entries with a given label
     History {
@@ -308,6 +317,9 @@ enum Command {
         /// Show what would be collected without deleting
         #[arg(long)]
         dry_run: bool,
+        /// Output result as JSON
+        #[arg(long)]
+        json: bool,
     },
     /// Save, run, list, and remove named query aliases
     Alias {
@@ -2345,16 +2357,23 @@ fn delete(
     search: Option<String>,
     after: Option<String>,
     before: Option<String>,
+    json: bool,
 ) {
     let conn = open_db();
 
     if let Some(ref entry_id) = id {
-        // Single-entry delete by ID — no --confirm needed
         let resolved = resolve_entry_id(&conn, entry_id);
         delete_entry(&conn, &resolved);
 
-        let short_id = &resolved[..7.min(resolved.len())];
-        eprintln!("Deleted {short_id}");
+        if json {
+            println!(
+                "{}",
+                serde_json::json!({"deleted": 1, "ids": [resolved]})
+            );
+        } else {
+            let short_id = &resolved[..7.min(resolved.len())];
+            eprintln!("Deleted {short_id}");
+        }
     } else {
         // Filter-based delete
         let has_filters = !labels.is_empty()
@@ -2412,8 +2431,12 @@ fn delete(
         };
 
         if !confirm {
-            let word = if count == 1 { "entry" } else { "entries" };
-            eprintln!("Would delete {count} {word}. Run with --confirm to proceed.");
+            if json {
+                println!("{}", serde_json::json!({"dry_run": true, "count": count}));
+            } else {
+                let word = if count == 1 { "entry" } else { "entries" };
+                eprintln!("Would delete {count} {word}. Run with --confirm to proceed.");
+            }
             process::exit(1);
         }
 
@@ -2449,8 +2472,12 @@ fn delete(
         delete_entries(&conn, &ids);
 
         let deleted = ids.len() as i64;
-        let word = if deleted == 1 { "entry" } else { "entries" };
-        eprintln!("Deleted {deleted} {word}");
+        if json {
+            println!("{}", serde_json::json!({"deleted": deleted, "ids": ids}));
+        } else {
+            let word = if deleted == 1 { "entry" } else { "entries" };
+            eprintln!("Deleted {deleted} {word}");
+        }
     }
 }
 
@@ -2748,8 +2775,7 @@ fn attrs_cmd(json: bool, count: bool) {
     }
 }
 
-fn tag(id: &str, labels: Vec<String>) {
-    // Validate labels
+fn tag(id: &str, labels: Vec<String>, json: bool) {
     for label in &labels {
         if label.trim().is_empty() {
             eprintln!("error: label cannot be empty");
@@ -2760,24 +2786,34 @@ fn tag(id: &str, labels: Vec<String>) {
     let conn = open_db();
     let id = resolve_entry_id(&conn, id);
 
+    let mut added = Vec::new();
     for label in &labels {
-        // INSERT OR IGNORE for idempotency — duplicate (entry_id, label) is a no-op
-        if let Err(e) = conn.execute(
+        match conn.execute(
             "INSERT OR IGNORE INTO labels (entry_id, label) VALUES (?1, ?2)",
             rusqlite::params![id, label],
         ) {
-            eprintln!("error: failed to add label: {e}");
-            process::exit(1);
+            Ok(n) if n > 0 => added.push(label.clone()),
+            Ok(_) => {}
+            Err(e) => {
+                eprintln!("error: failed to add label: {e}");
+                process::exit(1);
+            }
         }
     }
 
-    let short_id = &id[..7.min(id.len())];
-    let label_list = labels.join(", ");
-    eprintln!("Tagged {short_id} with: {label_list}");
+    if json {
+        println!(
+            "{}",
+            serde_json::json!({"id": id, "labels_added": added})
+        );
+    } else {
+        let short_id = &id[..7.min(id.len())];
+        let label_list = labels.join(", ");
+        eprintln!("Tagged {short_id} with: {label_list}");
+    }
 }
 
-fn untag(id: &str, labels: Vec<String>) {
-    // Validate labels
+fn untag(id: &str, labels: Vec<String>, json: bool) {
     for label in &labels {
         if label.trim().is_empty() {
             eprintln!("error: label cannot be empty");
@@ -2788,19 +2824,31 @@ fn untag(id: &str, labels: Vec<String>) {
     let conn = open_db();
     let id = resolve_entry_id(&conn, id);
 
+    let mut removed = Vec::new();
     for label in &labels {
-        if let Err(e) = conn.execute(
+        match conn.execute(
             "DELETE FROM labels WHERE entry_id = ?1 AND label = ?2",
             rusqlite::params![id, label],
         ) {
-            eprintln!("error: failed to remove label: {e}");
-            process::exit(1);
+            Ok(n) if n > 0 => removed.push(label.clone()),
+            Ok(_) => {}
+            Err(e) => {
+                eprintln!("error: failed to remove label: {e}");
+                process::exit(1);
+            }
         }
     }
 
-    let short_id = &id[..7.min(id.len())];
-    let label_list = labels.join(", ");
-    eprintln!("Untagged {short_id}: {label_list}");
+    if json {
+        println!(
+            "{}",
+            serde_json::json!({"id": id, "labels_removed": removed})
+        );
+    } else {
+        let short_id = &id[..7.min(id.len())];
+        let label_list = labels.join(", ");
+        eprintln!("Untagged {short_id}: {label_list}");
+    }
 }
 
 fn history(label: &str, json: bool, limit: Option<u64>, data_filter: Option<String>) {
@@ -2960,7 +3008,7 @@ fn history(label: &str, json: bool, limit: Option<u64>, data_filter: Option<Stri
     }
 }
 
-fn gc(dry_run: bool) {
+fn gc(dry_run: bool, json: bool) {
     let conn = open_db();
 
     let sql = "SELECT DISTINCT e.id FROM entries e \
@@ -2986,15 +3034,26 @@ fn gc(dry_run: bool) {
     let count = ids.len();
 
     if dry_run {
-        let word = if count == 1 { "entry" } else { "entries" };
-        println!("Dry run: {count} {word} would be collected");
+        if json {
+            println!("{}", serde_json::json!({"dry_run": true, "count": count}));
+        } else {
+            let word = if count == 1 { "entry" } else { "entries" };
+            println!("Dry run: {count} {word} would be collected");
+        }
         return;
     }
 
     delete_entries(&conn, &ids);
 
-    let word = if count == 1 { "entry" } else { "entries" };
-    println!("Collected {count} expired {word}");
+    if json {
+        println!(
+            "{}",
+            serde_json::json!({"collected": count, "ids": ids})
+        );
+    } else {
+        let word = if count == 1 { "entry" } else { "entries" };
+        println!("Collected {count} expired {word}");
+    }
 }
 
 fn alias_set(name: &str, args: Vec<String>) {
@@ -3262,19 +3321,10 @@ fn main() {
             search,
             after,
             before,
+            json,
         } => delete(
-            id,
-            confirm,
-            label,
-            not_label,
-            entity_type,
-            not_type,
-            attr,
-            not_attr,
-            data,
-            search,
-            after,
-            before,
+            id, confirm, label, not_label, entity_type, not_type, attr, not_attr, data, search,
+            after, before, json,
         ),
         Command::Purge { confirm } => purge(confirm),
         Command::Schema => schema(),
@@ -3288,15 +3338,15 @@ fn main() {
         Command::Labels { json, count } => labels_cmd(json, count),
         Command::Types { json, count } => types_cmd(json, count),
         Command::Attrs { json, count } => attrs_cmd(json, count),
-        Command::Tag { id, label } => tag(&id, label),
-        Command::Untag { id, label } => untag(&id, label),
+        Command::Tag { id, label, json } => tag(&id, label, json),
+        Command::Untag { id, label, json } => untag(&id, label, json),
         Command::History {
             label,
             json,
             limit,
             data,
         } => history(&label, json, limit, data),
-        Command::Gc { dry_run } => gc(dry_run),
+        Command::Gc { dry_run, json } => gc(dry_run, json),
         Command::Completions { shell } => {
             let mut cmd = Cli::command();
             clap_complete::generate(shell, &mut cmd, "agent-store", &mut std::io::stdout());
