@@ -107,6 +107,18 @@ enum Command {
         #[command(subcommand)]
         action: SkillsAction,
     },
+    /// Export entries as JSONL (one JSON object per line) for backup and migration
+    Export {
+        /// Filter by label (can be repeated, AND logic)
+        #[arg(long)]
+        label: Vec<String>,
+        /// Filter by entity type
+        #[arg(long = "type")]
+        entity_type: Option<String>,
+        /// Filter by attribute key=value pair (can be repeated, AND logic)
+        #[arg(long = "attr")]
+        attr: Vec<String>,
+    },
     /// Generate shell completions for bash, zsh, fish, elvish, or powershell
     Completions {
         /// Shell to generate completions for
@@ -1003,6 +1015,165 @@ fn query(
     }
 }
 
+fn export(labels: Vec<String>, entity_type: Option<String>, attrs: Vec<String>) {
+    // Validate empty strings before any DB work
+    for label in &labels {
+        if label.trim().is_empty() {
+            eprintln!("error: label cannot be empty");
+            process::exit(1);
+        }
+    }
+    if let Some(ref t) = entity_type {
+        if t.trim().is_empty() {
+            eprintln!("error: type cannot be empty");
+            process::exit(1);
+        }
+    }
+
+    let parsed_attrs: Vec<(&str, &str)> = attrs.iter().map(|a| parse_attr(a)).collect();
+    for (key, _) in &parsed_attrs {
+        if key.trim().is_empty() {
+            eprintln!("error: attribute key cannot be empty");
+            process::exit(1);
+        }
+    }
+
+    let conn = open_db();
+
+    // Build query — same pattern as query() but always fetches full entry data
+    let mut sql = String::from("SELECT e.id, e.data, e.entity_type, e.created_at FROM entries e");
+    let mut conditions: Vec<String> = Vec::new();
+    let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+    let mut param_idx = 1u32;
+
+    for (i, l) in labels.iter().enumerate() {
+        let alias = format!("l{i}");
+        sql.push_str(&format!(" JOIN labels {alias} ON e.id = {alias}.entry_id"));
+        conditions.push(format!("{alias}.label = ?{param_idx}"));
+        params.push(Box::new(l.clone()));
+        param_idx += 1;
+    }
+
+    if let Some(ref t) = entity_type {
+        conditions.push(format!("e.entity_type = ?{param_idx}"));
+        params.push(Box::new(t.clone()));
+        param_idx += 1;
+    }
+
+    for (i, (key, value)) in parsed_attrs.iter().enumerate() {
+        let alias = format!("a{i}");
+        sql.push_str(&format!(
+            " JOIN attributes {alias} ON e.id = {alias}.entry_id"
+        ));
+        conditions.push(format!("{alias}.key = ?{param_idx}"));
+        params.push(Box::new(key.to_string()));
+        param_idx += 1;
+        conditions.push(format!("{alias}.value = ?{param_idx}"));
+        params.push(Box::new(value.to_string()));
+        param_idx += 1;
+    }
+
+    if !conditions.is_empty() {
+        sql.push_str(" WHERE ");
+        sql.push_str(&conditions.join(" AND "));
+    }
+
+    sql.push_str(" ORDER BY e.created_at DESC, e.rowid DESC");
+
+    let mut stmt = match conn.prepare(&sql) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("error: failed to prepare query: {e}");
+            process::exit(1);
+        }
+    };
+
+    let params_refs: Vec<&dyn rusqlite::types::ToSql> =
+        params.iter().map(|p| p.as_ref()).collect();
+    let rows = match stmt.query_map(params_refs.as_slice(), |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, Option<String>>(2)?,
+            row.get::<_, String>(3)?,
+        ))
+    }) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("error: failed to execute query: {e}");
+            process::exit(1);
+        }
+    };
+
+    for row in rows {
+        match row {
+            Ok((id, data, etype, created_at)) => {
+                // Fetch labels for this entry
+                let labels = {
+                    let mut lstmt =
+                        match conn.prepare("SELECT label FROM labels WHERE entry_id = ?1") {
+                            Ok(s) => s,
+                            Err(e) => {
+                                eprintln!("error: failed to query labels: {e}");
+                                process::exit(1);
+                            }
+                        };
+                    match lstmt.query_map(rusqlite::params![id], |r| r.get::<_, String>(0)) {
+                        Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
+                        Err(e) => {
+                            eprintln!("error: failed to query labels: {e}");
+                            process::exit(1);
+                        }
+                    }
+                };
+
+                // Fetch attributes for this entry
+                let attributes = {
+                    let mut astmt = match conn
+                        .prepare("SELECT key, value FROM attributes WHERE entry_id = ?1")
+                    {
+                        Ok(s) => s,
+                        Err(e) => {
+                            eprintln!("error: failed to query attributes: {e}");
+                            process::exit(1);
+                        }
+                    };
+                    match astmt.query_map(rusqlite::params![id], |r| {
+                        Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+                    }) {
+                        Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
+                        Err(e) => {
+                            eprintln!("error: failed to query attributes: {e}");
+                            process::exit(1);
+                        }
+                    }
+                };
+
+                let entry = EntryJson {
+                    id,
+                    data,
+                    entity_type: etype,
+                    created_at,
+                    labels,
+                    attributes,
+                };
+
+                match serde_json::to_string(&entry) {
+                    Ok(json_str) => println!("{json_str}"),
+                    Err(e) => {
+                        eprintln!("error: failed to serialize entry: {e}");
+                        process::exit(1);
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("error: failed to read row: {e}");
+                process::exit(1);
+            }
+        }
+    }
+}
+
 fn pull(id: &str) {
     let conn = open_db();
 
@@ -1228,6 +1399,11 @@ fn main() {
             reverse,
         } => query(label, entity_type, attr, json, count, latest, limit, offset, reverse),
 
+        Command::Export {
+            label,
+            entity_type,
+            attr,
+        } => export(label, entity_type, attr),
         Command::Schema => schema(),
         Command::Stats { json } => stats(json),
         Command::Skills { action } => match action {

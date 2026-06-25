@@ -97,6 +97,7 @@ agent-store stats     # entry count and store size
 | `schema` | Show entity types and label counts |
 | `stats` | Show entry count and store size. Flags: `--json` |
 | `skills` | List and read built-in usage guides |
+| `export` | Export entries as JSONL (one JSON object per line). Filter: `--label` (repeat), `--type`, `--attr key=value` (repeat) |
 | `completions <shell>` | Generate shell completions (bash, zsh, fish, elvish, powershell) |
 
 ## Pushing data
@@ -206,6 +207,28 @@ agent-store skills get agent-store-patterns    # Workflow recipes
 agent-store skills get agent-store-pipelines   # Shell composition
 agent-store skills path agent-store            # Print skill data directory
 ```
+
+## Export
+
+Dump entries as JSONL (one JSON object per line) for backup and migration:
+
+```bash
+# Export all entries
+agent-store export > backup.jsonl
+
+# Export filtered entries
+agent-store export --label important > important.jsonl
+agent-store export --type note --label active > notes.jsonl
+
+# Count exported entries
+agent-store export | wc -l
+
+# Pipe to jq for processing
+agent-store export | jq -r '.id'
+```
+
+Each line is a complete JSON object with the same fields as `query --json`:
+`id`, `data`, `entity_type`, `created_at`, `labels`, `attributes`.
 
 ## Shell completions
 

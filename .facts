@@ -189,6 +189,14 @@
   command: agent-store completions bash 2>&1 | head -3 | grep -q "complete\|_agent" && echo PASS || echo FAIL
   tags: [spec, implemented]
 
+## export
+- label: agent-store export outputs all entries as JSONL (one JSON object per line) to stdout for backup and migration
+  command: agent-store export | head -1 | jq -e ".id" > /dev/null 2>&1 && echo PASS || echo FAIL
+  tags: [spec, implemented]
+- label: agent-store export --label X exports only entries matching the specified label filter
+  command: echo "test-export-filter" | agent-store push --label unique-export-test-label -q && COUNT=$(agent-store export --label unique-export-test-label | wc -l) && test "$COUNT" -ge 1 && echo PASS || echo FAIL
+  tags: [spec, implemented]
+
 # resilience
 - PRAGMA foreign_keys = ON is set on every database connection so ON DELETE CASCADE is enforced @spec @implemented
 - label: PRAGMA busy_timeout = 5000 is set on every database connection so concurrent writes retry instead of failing with database locked

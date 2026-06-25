@@ -132,6 +132,31 @@ Available skills:
 - `agent-store-patterns` — Workflow recipes for common agent tasks
 - `agent-store-pipelines` — Shell composition and batch operations
 
+## agent-store export
+
+Export entries as JSONL (one JSON object per line) for backup and migration.
+
+```
+agent-store export [OPTIONS]
+```
+
+**Options:**
+
+| Flag | Description |
+|------|-------------|
+| `--label <LABEL>` | Filter by label (can be repeated, AND logic) |
+| `--type <TYPE>` | Filter by entity type |
+| `--attr <KEY=VALUE>` | Filter by attribute (can be repeated, AND logic) |
+
+Output goes to stdout. Each line is a self-contained JSON object with
+fields: `id`, `data`, `entity_type`, `created_at`, `labels`, `attributes`.
+
+```bash
+agent-store export > backup.jsonl
+agent-store export --label important > important.jsonl
+agent-store export | jq -r '.id'
+```
+
 ## agent-store completions
 
 Generate shell completion scripts.
