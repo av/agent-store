@@ -248,6 +248,7 @@ Arguments:
 Options:
 - `--confirm` — Required for filter-based deletes. Without it, prints how many
   entries would be deleted and exits 1.
+- `--json` — Output as JSON object: `{"deleted":1,"ids":["..."]}` (confirmed) or `{"dry_run":true,"count":1}` (without `--confirm`)
 - `--label <LABEL>` — Filter by label (can be repeated, AND logic)
 - `--not-label <LABEL>` — Exclude entries with this label (can be repeated)
 - `--type <TYPE>` — Filter by entity type
@@ -417,18 +418,21 @@ agent-store attrs --count --json       # {"color":3,"size":1,"weight":2}
 Add labels to an existing entry.
 
 ```
-agent-store tag <ID> <LABEL>...
+agent-store tag <ID> <LABEL>... [--json]
 ```
 
 Arguments:
 - `<ID>` — Entry ID (or unambiguous prefix) to tag.
 - `<LABEL>...` — One or more labels to add. At least one required.
 
+Options:
+- `--json` — Output as JSON object: `{"id":"...","labels_added":["label1"]}`
+
 Idempotent: adding a label that already exists on the entry is a no-op (uses
 `INSERT OR IGNORE` on the `(entry_id, label)` primary key). Empty labels are
 rejected with an error. Unknown entry IDs print "not found" and exit 1.
 
-Output: `Tagged <short-id> with: <labels>` on stderr.
+Output: `Tagged <short-id> with: <labels>` on stderr (or JSON to stdout with `--json`).
 
 ```bash
 # Tag a single label
@@ -446,18 +450,21 @@ agent-store tag $ID urgent urgent    # no error, no duplicate
 Remove labels from an existing entry.
 
 ```
-agent-store untag <ID> <LABEL>...
+agent-store untag <ID> <LABEL>... [--json]
 ```
 
 Arguments:
 - `<ID>` — Entry ID (or unambiguous prefix) to untag.
 - `<LABEL>...` — One or more labels to remove. At least one required.
 
+Options:
+- `--json` — Output as JSON object: `{"id":"...","labels_removed":["label1"]}`
+
 Idempotent: removing a label that doesn't exist on the entry is a no-op
 (the `DELETE` simply affects zero rows). Unknown entry IDs print "not found"
 and exit 1.
 
-Output: `Untagged <short-id>: <labels>` on stderr.
+Output: `Untagged <short-id>: <labels>` on stderr (or JSON to stdout with `--json`).
 
 ```bash
 # Remove a label
@@ -514,11 +521,12 @@ agent-store history config --data "database"
 Collect expired entries — those whose `_expires_at` attribute is in the past.
 
 ```
-agent-store gc [--dry-run]
+agent-store gc [--dry-run] [--json]
 ```
 
 Options:
 - `--dry-run` — Show how many entries would be collected without deleting them
+- `--json` — Output as JSON object: `{"collected":1,"ids":["..."]}` or `{"dry_run":true,"count":0}` (with `--dry-run`)
 
 Entries get an `_expires_at` attribute when pushed with `--ttl`. The `gc`
 command scans for entries where `_expires_at` is earlier than the current
