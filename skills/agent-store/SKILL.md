@@ -104,6 +104,29 @@ agent-store schema    # entity types and label counts
 agent-store stats     # entry count and store size
 ```
 
+## ID prefix matching
+
+All commands that accept an entry ID (pull, tag, untag, delete, query --id,
+export --id) support prefix matching. Instead of the full UUID, pass just the
+first few characters (e.g., the 7-char short ID shown in query output).
+
+- **1 match** — resolved to the full ID automatically
+- **0 matches** — `error: entry not found: <prefix>`
+- **2+ matches** — `error: ambiguous ID prefix '<prefix>' matches N entries`
+
+```bash
+# Push and get the full ID
+ID=$(echo "data" | agent-store push --id-only)
+# e.g. 7bf8d3fb-6357-4e45-b4d7-c67f4ad23632
+
+# Pull with a prefix instead of the full UUID
+agent-store pull 7bf8d3f
+
+# Works with tag, untag, delete too
+agent-store tag 7bf8d3f reviewed
+agent-store delete 7bf8d3f
+```
+
 ## Commands
 
 | Command | What it does |

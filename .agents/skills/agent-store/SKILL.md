@@ -104,20 +104,43 @@ agent-store schema    # entity types and label counts
 agent-store stats     # entry count and store size
 ```
 
+## ID prefix matching
+
+All commands that accept an entry ID (pull, tag, untag, delete, query --id,
+export --id) support prefix matching. Instead of the full UUID, pass just the
+first few characters (e.g., the 7-char short ID shown in query output).
+
+- **1 match** — resolved to the full ID automatically
+- **0 matches** — `error: entry not found: <prefix>`
+- **2+ matches** — `error: ambiguous ID prefix '<prefix>' matches N entries`
+
+```bash
+# Push and get the full ID
+ID=$(echo "data" | agent-store push --id-only)
+# e.g. 7bf8d3fb-6357-4e45-b4d7-c67f4ad23632
+
+# Pull with a prefix instead of the full UUID
+agent-store pull 7bf8d3f
+
+# Works with tag, untag, delete too
+agent-store tag 7bf8d3f reviewed
+agent-store delete 7bf8d3f
+```
+
 ## Commands
 
 | Command | What it does |
 |---------|-------------|
 | `init` | Create `.agent-store/store.db`, install skills to `.agents/skills/`, set up project docs |
-| `push` | Read stdin (or `--file`), store as entry. Flags: `--label`, `--type`, `--attr key=value`, `--timestamp`, `-f`/`--file`, `-q`/`--quiet`, `--id-only`, `--strip` |
+| `push` | Read stdin (or `--file`), store as entry. Flags: `--label`, `--type`, `--attr key=value`, `--timestamp`, `--ttl <duration>`, `-f`/`--file`, `-q`/`--quiet`, `--id-only`, `--strip` |
 | `pull <id>` | Retrieve entry by ID, print data to stdout. Flags: `--json` (full entry as JSON object), `--raw` (omit trailing newline for binary-safe piping) |
-| `query` | List entries. Filter: `--label` (repeat), `--not-label` (repeat, exclude), `--type`, `--not-type` (repeat, exclude, NULL-safe), `--attr key=value` (repeat), `--not-attr key=value` (repeat, exclude), `--data <substring>`, `--after <datetime>`, `--before <datetime>`, `--json`, `--count`, `--latest`, `--limit N`, `--offset N`, `-r`/`--reverse` |
+| `query` | List entries. Filter: `--label` (repeat), `--not-label` (repeat, exclude), `--type`, `--not-type` (repeat, exclude, NULL-safe), `--attr key=value` (repeat), `--not-attr key=value` (repeat, exclude), `--data <substring>`, `--search <query>` (FTS5 full-text search), `--after <datetime>`, `--before <datetime>`, `--json`, `--count`, `--latest`, `--limit N`, `--offset N`, `-r`/`--reverse` |
 | `schema` | Show entity types and label counts |
 | `stats` | Show entry count and store size. Flags: `--json` |
 | `skills` | List and read built-in usage guides |
-| `export` | Export entries as JSONL (one JSON object per line). Filter: `--id`, `--label` (repeat), `--not-label` (repeat), `--type`, `--not-type` (repeat, exclude), `--attr key=value` (repeat), `--not-attr key=value` (repeat, exclude), `--data`, `--after`, `--before` |
+| `export` | Export entries as JSONL (one JSON object per line). Filter: `--id`, `--label` (repeat), `--not-label` (repeat), `--type`, `--not-type` (repeat, exclude), `--attr key=value` (repeat), `--not-attr key=value` (repeat, exclude), `--data`, `--search <query>` (FTS5), `--after`, `--before` |
 | `import` | Import entries from JSONL on stdin (complement of export). Generates fresh IDs, preserves timestamps. Flags: `--dry-run` |
-| `delete [id]` | Delete entries by ID or by filters. Filters: `--label`, `--not-label`, `--type`, `--not-type`, `--attr`, `--not-attr`, `--data`, `--after`, `--before`. Single-ID delete needs no confirmation; filter-based delete requires `--confirm` |
+| `delete [id]` | Delete entries by ID or by filters. Filters: `--label`, `--not-label`, `--type`, `--not-type`, `--attr`, `--not-attr`, `--data`, `--search` (FTS5), `--after`, `--before`. Single-ID delete needs no confirmation; filter-based delete requires `--confirm` |
 | `purge` | Delete ALL entries (destructive). Requires `--confirm` flag. |
 | `labels` | List all unique labels in the store, sorted. Flags: `--json` (JSON array), `--count` (with counts) |
 | `types` | List all unique entity types in the store, sorted. Flags: `--json` (JSON array), `--count` (with counts) |
@@ -125,7 +148,9 @@ agent-store stats     # entry count and store size
 | `info` | Show store configuration and environment. Flags: `--json` |
 | `tag <id> <label>...` | Add labels to an existing entry. Idempotent (duplicate labels are ignored). |
 | `untag <id> <label>...` | Remove labels from an existing entry. Idempotent (missing labels are ignored). |
+| `gc` | Collect expired entries (those past their TTL). Flags: `--dry-run` |
 | `history <label>` | Show chronological history of entries with a given label (oldest first). Flags: `--json`, `--limit N`, `--data <substring>` |
+| `alias` | Named queries. Subcommands: `set <name> -- [query flags]` (save), `run <name>` (execute), `list` (show all), `rm <name>` (delete) |
 | `completions <shell>` | Generate shell completions (bash, zsh, fish, elvish, powershell) |
 
 ## Tagging
@@ -172,6 +197,26 @@ agent-store history config --limit 5
 # Search within history
 agent-store history config --data "database"
 ```
+
+## TTL and garbage collection
+
+Set a time-to-live on entries so they expire automatically. Expired entries
+are cleaned up by the `gc` command.
+
+```bash
+# Push with a TTL
+echo "cache result" | agent-store push --type cache --ttl 24h
+echo "temp note" | agent-store push --ttl 30m
+
+# Preview what gc would collect
+agent-store gc --dry-run
+
+# Collect expired entries
+agent-store gc
+```
+
+Supported duration units: `s` (seconds), `m` (minutes), `h` (hours), `d` (days).
+TTL is stored as a `_expires_at` attribute — entries without TTL never expire.
 
 ## Pushing data
 
@@ -285,6 +330,47 @@ newlines. For structured or predictable output, use `--json`.
 
 **JSON output** (`--json`) returns the full entry objects including metadata,
 useful when you need IDs, timestamps, labels, or attributes.
+
+## Full-text search
+
+Use `--search` for relevance-ranked full-text search powered by SQLite FTS5.
+Unlike `--data` (substring match), `--search` tokenizes content and supports
+rich query syntax. Results are ordered by relevance when `--search` is active.
+
+```bash
+# Basic term search
+agent-store query --search "error"
+
+# Phrase search (exact sequence of words)
+agent-store query --search '"database connection"'
+
+# OR — match either term
+agent-store query --search "error OR warning"
+
+# NOT — exclude entries containing a term
+agent-store query --search "error NOT timeout"
+
+# Prefix — match words starting with a prefix
+agent-store query --search "config*"
+
+# Combine with filters (AND logic with all other flags)
+agent-store query --search "error" --label logs --type event
+agent-store query --search "migration" --after "2024-06-01" --json
+
+# Count search results
+agent-store query --search "error" --count
+
+# Export search results as JSONL
+agent-store export --search "database"
+
+# Delete matching entries
+agent-store delete --search "deprecated" --confirm
+```
+
+`--search` is available on `query`, `export`, and `delete`. It combines with
+all existing filters (`--label`, `--type`, `--attr`, `--data`, `--after`,
+`--before`, and their exclusion variants). Stores created before FTS was added
+are migrated automatically on first use.
 
 ## Configuration
 
@@ -416,6 +502,15 @@ With `--confirm`, it deletes and prints `Deleted N entries` on stderr.
 Calling `delete` with no ID and no filters prints an error (prevents
 accidental delete-all — use `purge` for that).
 
+## Supersede convention
+
+There is no "update" command — agent-store is append-only by design. To replace
+an entry, push a new one with `--attr supersedes=<old-id>`. Queries return
+newest-first, so `--latest` always gives the current version. After confirming
+the replacement, clean up with `agent-store delete <old-id>`. See
+`agent-store skills get agent-store-patterns` for full examples including
+version chain traversal and iterative draft workflows.
+
 ## Purge
 
 Delete all entries from the store. This is a destructive operation that requires
@@ -484,6 +579,32 @@ agent-store attrs --json
 agent-store attrs --count
 agent-store attrs --count --json
 ```
+
+## Named queries (aliases)
+
+Save frequently used query flag combinations as named aliases and replay
+them without remembering the full flag set. Aliases are stored in the
+SQLite database alongside entries.
+
+```bash
+# Save a query as an alias
+agent-store alias set urgent-tasks -- --label urgent --type task --attr status=pending
+
+# Run the saved query (equivalent to: agent-store query --label urgent --type task --attr status=pending)
+agent-store alias run urgent-tasks
+
+# List all saved aliases (name\targs per line)
+agent-store alias list
+
+# Overwrite an existing alias (upsert — INSERT OR REPLACE)
+agent-store alias set urgent-tasks -- --label urgent --type task
+
+# Remove an alias (exits 1 if not found)
+agent-store alias rm urgent-tasks
+```
+
+Aliases store the raw query flags as a JSON array. The `--` separator
+before the flags is required by the CLI parser.
 
 ## Shell completions
 

@@ -49,14 +49,16 @@ echo "data" | agent-store push --label x --strip    # stores "data", not "data\n
 
 ## agent-store pull \<ID\>
 
-Retrieve an entry by ID.
+Retrieve an entry by ID (or unambiguous ID prefix).
 
 ```
 agent-store pull <ID> [--json] [--raw]
 ```
 
-Prints the entry's data to stdout (raw payload, no metadata). Exit code 1
-if the entry is not found.
+Prints the entry's data to stdout (raw payload, no metadata). The ID
+argument supports prefix matching — pass just the first few characters
+instead of the full UUID. Exit code 1 if the entry is not found or the
+prefix is ambiguous.
 
 Options:
 - `--json` — Output the full entry as a JSON object (same format as `query --json` entries: `id`, `data`, `entity_type`, `created_at`, `labels`, `attributes`)
@@ -240,8 +242,8 @@ agent-store delete [ID] [OPTIONS]
 ```
 
 Arguments:
-- `[ID]` — Entry ID to delete. When provided, deletes a single entry without
-  requiring `--confirm`.
+- `[ID]` — Entry ID (or unambiguous prefix) to delete. When provided, deletes
+  a single entry without requiring `--confirm`.
 
 Options:
 - `--confirm` — Required for filter-based deletes. Without it, prints how many

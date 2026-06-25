@@ -370,12 +370,21 @@
 - label: alias set overwrites an existing alias with the same name (upsert)
   command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=/home/everlier/code/agent-store/target/debug/agent-store && \$AS init >/dev/null 2>&1 && \$AS alias set myq -- --label old && \$AS alias set myq -- --label new && \$AS alias list | grep -q 'new' && rm -rf \"\$TESTDIR\""
 
+## cli/prefix-id @spec
+
+- label: pull with an unambiguous ID prefix resolves to the full entry
+  command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && ID=\$(echo test-prefix | \$AS push --id-only --strip) && PREFIX=\"\${ID:0:7}\" && RESULT=\$(\$AS pull \"\$PREFIX\") && rm -rf \"\$TESTDIR\" && test \"\$RESULT\" = 'test-prefix'"
+- label: ambiguous ID prefix prints error with match count and exits 1
+  command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && for i in \$(seq 1 30); do echo d\$i | \$AS push -q; done && CHAR=\$(\$AS query --json | python3 -c \"import sys,json,collections; ids=[e['id'] for e in json.load(sys.stdin)]; c=collections.Counter(i[0] for i in ids); print(c.most_common(1)[0][0])\") && \$AS pull \"\$CHAR\" 2>&1 | grep -q 'ambiguous ID prefix' && rm -rf \"\$TESTDIR\""
+- label: non-existent ID prefix prints not-found error and exits 1
+  command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && echo d | \$AS push -q && \$AS pull zzzzzzz 2>&1 | grep -q 'entry not found' && rm -rf \"\$TESTDIR\""
+
 ## conventions/supersede @implemented
 
 - label: supersede convention is documented in the agent-store-patterns skill with examples for versioned config, chain traversal, cleanup, and iterative draft
-  check: manual
+  command: agent-store skills get agent-store-patterns 2>&1 | grep -q "supersede" && echo "OK"
 - label: supersede convention is mentioned in the core agent-store skill with a pointer to the patterns skill for details
-  check: manual
+  command: agent-store skills get agent-store 2>&1 | grep -q "supersede" && echo "OK"
 
 ## history
 - label: agent-store history <LABEL> shows all entries with the given label in chronological order (oldest first) with timestamp and ID headers
