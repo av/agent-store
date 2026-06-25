@@ -734,7 +734,6 @@ fn open_db() -> Connection {
 /// Create the FTS5 virtual table if it doesn't exist (migration for pre-FTS stores)
 /// and populate it from existing entries.
 fn ensure_fts_table(conn: &Connection) {
-    // Check if entries_fts already exists
     let exists: bool = conn
         .query_row(
             "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='entries_fts'",
@@ -755,7 +754,6 @@ fn ensure_fts_table(conn: &Connection) {
         process::exit(1);
     }
 
-    // Populate from existing entries
     if let Err(e) =
         conn.execute_batch("INSERT INTO entries_fts(id, data) SELECT id, data FROM entries")
     {
@@ -800,6 +798,48 @@ fn delete_entry(conn: &Connection, entry_id: &str) {
 fn delete_entries(conn: &Connection, ids: &[String]) {
     for entry_id in ids {
         delete_entry(conn, entry_id);
+    }
+}
+
+/// Resolve an entry ID that may be a prefix.
+fn resolve_entry_id(conn: &Connection, id_input: &str) -> String {
+    let exact: Result<String, _> = conn.query_row(
+        "SELECT id FROM entries WHERE id = ?1",
+        rusqlite::params![id_input],
+        |row| row.get(0),
+    );
+    if let Ok(full_id) = exact {
+        return full_id;
+    }
+
+    let mut stmt = match conn.prepare("SELECT id FROM entries WHERE id LIKE ?1 || '%'") {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("error: failed to query entries: {e}");
+            process::exit(1);
+        }
+    };
+
+    let matches: Vec<String> = match stmt.query_map(rusqlite::params![id_input], |row| {
+        row.get::<_, String>(0)
+    }) {
+        Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
+        Err(e) => {
+            eprintln!("error: failed to query entries: {e}");
+            process::exit(1);
+        }
+    };
+
+    match matches.len() {
+        0 => {
+            eprintln!("error: entry not found: {id_input}");
+            process::exit(1);
+        }
+        1 => matches.into_iter().next().unwrap(),
+        n => {
+            eprintln!("error: ambiguous ID prefix '{id_input}' matches {n} entries");
+            process::exit(1);
+        }
     }
 }
 
@@ -1231,9 +1271,9 @@ impl FilterArgs {
 
         let parsed_attrs: Vec<(&str, &str)> = self.attrs.iter().map(|a| parse_attr(a)).collect();
 
-        // ID filter
+        // ID filter (supports prefix matching)
         if let Some(ref id) = self.id_filter {
-            conditions.push(format!("e.id = ?{param_idx}"));
+            conditions.push(format!("e.id LIKE ?{param_idx} || '%'"));
             params.push(Box::new(id.clone()));
             param_idx += 1;
         }
@@ -1704,12 +1744,13 @@ fn export(
 
 fn pull(id: &str, json: bool, raw: bool) {
     let conn = open_db();
+    let id = resolve_entry_id(&conn, id);
 
     if json {
         // Fetch full entry for JSON output
         let result: Result<(String, String, Option<String>, String), _> = conn.query_row(
             "SELECT id, data, entity_type, created_at FROM entries WHERE id = ?1",
-            rusqlite::params![id],
+            rusqlite::params![&id],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
         );
 
@@ -1785,7 +1826,7 @@ fn pull(id: &str, json: bool, raw: bool) {
     } else {
         let result: Result<String, _> = conn.query_row(
             "SELECT data FROM entries WHERE id = ?1",
-            rusqlite::params![id],
+            rusqlite::params![&id],
             |row| row.get(0),
         );
 
@@ -2679,23 +2720,6 @@ fn attrs_cmd(json: bool, count: bool) {
             }
         }
     }
-}
-
-fn resolve_entry_id(conn: &Connection, id: &str) -> String {
-    let exists: bool = conn
-        .query_row(
-            "SELECT COUNT(*) FROM entries WHERE id = ?1",
-            rusqlite::params![id],
-            |row| row.get::<_, i64>(0),
-        )
-        .map(|c| c > 0)
-        .unwrap_or(false);
-
-    if !exists {
-        eprintln!("error: entry not found: {id}");
-        process::exit(1);
-    }
-    id.to_string()
 }
 
 fn tag(id: &str, labels: Vec<String>) {
