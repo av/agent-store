@@ -93,7 +93,7 @@ agent-store stats     # entry count and store size
 | `init` | Create `.agent-store/store.db`, install skills to `.agents/skills/`, set up project docs |
 | `push` | Read stdin, store as entry. Flags: `--label`, `--type`, `--attr key=value`, `--quiet` |
 | `pull <id>` | Retrieve entry by ID, print data to stdout |
-| `query` | List entries. Filter: `--label`, `--type`, `--attr key=value`, `--json` |
+| `query` | List entries. Filter: `--label` (repeat), `--type`, `--attr key=value` (repeat), `--json` |
 | `schema` | Show entity types and label counts |
 | `stats` | Show entry count and store size |
 | `skills` | List and read built-in usage guides |
@@ -133,6 +133,9 @@ agent-store query
 
 # Filter by label
 agent-store query --label important
+
+# Filter by multiple labels (AND logic — entry must have all)
+agent-store query --label urgent --label backend
 
 # Filter by entity type
 agent-store query --type task

@@ -52,9 +52,9 @@ agent-store query [OPTIONS]
 ```
 
 Options:
-- `--label <LABEL>` — Filter by label (exact match)
+- `--label <LABEL>` — Filter by label (can be repeated, AND logic — all must match)
 - `--type <TYPE>` — Filter by entity type (exact match)
-- `--attr <KEY=VALUE>` — Filter by attribute (repeatable, AND logic — all must match)
+- `--attr <KEY=VALUE>` — Filter by attribute (can be repeated, AND logic — all must match)
 - `--json` — Output as JSON array of full entry objects
 
 Without any filter flags, returns all entries.
