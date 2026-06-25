@@ -132,7 +132,7 @@ agent-store delete 7bf8d3f
 | Command | What it does |
 |---------|-------------|
 | `init` | Create `.agent-store/store.db`, install skills to `.agents/skills/`, set up project docs |
-| `push` | Read stdin (or `--file`), store as entry. Flags: `--label`, `--type`, `--attr key=value`, `--timestamp`, `--ttl <duration>`, `-f`/`--file`, `-q`/`--quiet`, `--id-only`, `--strip` |
+| `push` | Read stdin (or `--file`), store as entry. Flags: `--label`, `--type`, `--attr key=value`, `--timestamp`, `--ttl <duration>`, `-f`/`--file`, `-q`/`--quiet`, `--id-only`, `--strip`, `--json`, `--update <id>` |
 | `pull <id>` | Retrieve entry by ID, print data to stdout. Flags: `--json` (full entry as JSON object), `--raw` (omit trailing newline for binary-safe piping) |
 | `query` | List entries. Filter: `--label` (repeat), `--not-label` (repeat, exclude), `--type`, `--not-type` (repeat, exclude, NULL-safe), `--attr key=value` (repeat), `--not-attr key=value` (repeat, exclude), `--data <substring>`, `--search <query>` (FTS5 full-text search), `--after <datetime>`, `--before <datetime>`, `--json`, `--count`, `--latest`, `--limit N`, `--offset N`, `-r`/`--reverse` |
 | `schema` | Show entity types and label counts |
@@ -150,7 +150,7 @@ agent-store delete 7bf8d3f
 | `untag <id> <label>...` | Remove labels from an existing entry. Idempotent (missing labels are ignored). Flags: `--json` |
 | `gc` | Collect expired entries (those past their TTL). Flags: `--dry-run`, `--json` |
 | `history <label>` | Show chronological history of entries with a given label (oldest first). Flags: `--json`, `--limit N`, `--data <substring>` |
-| `alias` | Named queries. Subcommands: `set <name> -- [query flags]` (save), `run <name>` (execute), `list` (show all), `rm <name>` (delete) |
+| `alias` | Named queries. Subcommands: `set <name> -- [query flags]` (save), `run <name> [--mode query\|export\|delete] [--confirm]` (execute), `list` (show all), `rm <name>` (delete) |
 | `completions <shell>` | Generate shell completions (bash, zsh, fish, elvish, powershell) |
 
 ## Tagging
@@ -260,6 +260,15 @@ echo "historical data" | agent-store push --type note --timestamp "2020-01-15 10
 # Strip trailing whitespace/newlines from data before storing
 echo "data" | agent-store push --label x --strip    # stores "data", not "data\n"
 agent-store push --file output.txt --strip           # strip works with --file too
+
+# JSON output — get structured JSON instead of human-readable message
+echo "data" | agent-store push --label tag --type note --json
+# {"attributes":null,"id":"<uuid>","labels":["tag"],"type":"note"}
+
+# Update an existing entry's data in-place (preserves created_at and existing labels)
+ID=$(echo "v1" | agent-store push --id-only --strip)
+echo "v2" | agent-store push --update $ID              # data is now "v2"
+echo "v3" | agent-store push --update $ID --label new  # adds label, data is now "v3"
 ```
 
 ## Querying data
@@ -507,13 +516,25 @@ accidental delete-all — use `purge` for that).
 
 Use `--json` for structured output: `{"deleted":1,"ids":["..."]}` (confirmed) or `{"dry_run":true,"count":1}` (preview).
 
-## Supersede convention
+## Updating entries
 
-There is no "update" command — agent-store is append-only by design. To replace
-an entry, push a new one with `--attr supersedes=<old-id>`. Queries return
-newest-first, so `--latest` always gives the current version. After confirming
-the replacement, clean up with `agent-store delete <old-id>`. See
-`agent-store skills get agent-store-patterns` for full examples including
+For simple in-place replacement, use `push --update <id>`:
+
+```bash
+ID=$(echo "v1 config" | agent-store push --type config --label app --id-only)
+echo "v2 config" | agent-store push --update $ID
+```
+
+This replaces the entry's data, preserves `created_at` and existing labels,
+adds any new `--label` values, upserts `--attr` values, and updates `--type`
+if given. Supports prefix ID matching. Use this when you don't need version
+history.
+
+For versioned updates where you want to preserve the original, use the
+supersede convention: push a new entry with `--attr supersedes=<old-id>`.
+Queries return newest-first, so `--latest` always gives the current version.
+After confirming the replacement, clean up with `agent-store delete <old-id>`.
+See `agent-store skills get agent-store-patterns` for full examples including
 version chain traversal and iterative draft workflows.
 
 ## Purge
@@ -598,6 +619,15 @@ agent-store alias set urgent-tasks -- --label urgent --type task --attr status=p
 # Run the saved query (equivalent to: agent-store query --label urgent --type task --attr status=pending)
 agent-store alias run urgent-tasks
 
+# Run as export (JSONL output instead of query format)
+agent-store alias run urgent-tasks --mode export
+
+# Run as delete (preview — prints count, exits 1)
+agent-store alias run urgent-tasks --mode delete
+
+# Run as delete (execute — requires --confirm)
+agent-store alias run urgent-tasks --mode delete --confirm
+
 # List all saved aliases (name\targs per line)
 agent-store alias list
 
@@ -610,6 +640,11 @@ agent-store alias rm urgent-tasks
 
 Aliases store the raw query flags as a JSON array. The `--` separator
 before the flags is required by the CLI parser.
+
+`alias run` supports `--mode` to change the execution mode:
+- `--mode query` (default) — run as a `query` command
+- `--mode export` — run as an `export` command (JSONL output)
+- `--mode delete` — run as a `delete` command (requires `--confirm` to execute)
 
 ## Shell completions
 

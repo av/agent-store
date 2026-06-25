@@ -34,6 +34,8 @@ Options:
 - `--timestamp <DATETIME>` — Override created_at timestamp (ISO 8601: `"2024-01-15 10:30:00"` or `"2024-01-15"`). Default: current time
 - `--ttl <DURATION>` — Set a time-to-live. Duration format: `<number><unit>` where unit is `s` (seconds), `m` (minutes), `h` (hours), or `d` (days). Examples: `30m`, `24h`, `7d`, `3600s`. Stores the computed expiry as a `_expires_at` attribute. Expired entries are collected by `gc`
 - `--strip` — Strip trailing whitespace (including newlines) from data before storing. Useful with `echo` which adds a trailing newline
+- `--json` — Output the stored/updated entry as structured JSON to stdout. Fields: `id`, `labels`, `type`, `attributes` (only non-null fields included). Useful for scripting when you need metadata beyond just the ID
+- `--update <ID>` — Update an existing entry's data in-place (by ID or unambiguous prefix). Replaces the entry's data with new stdin/file content. Preserves `created_at` and existing labels. Adds new labels via `--label` (idempotent). Upserts attributes via `--attr`. Updates entity type if `--type` is given
 
 Data is read from stdin until EOF (or from `--file` if provided). Empty
 input is an error. When `--file` is set, it takes precedence over stdin.
@@ -45,6 +47,15 @@ Scripting example:
 ID=$(echo "data" | agent-store push --label tag --id-only)
 agent-store push --label config --file config.json
 echo "data" | agent-store push --label x --strip    # stores "data", not "data\n"
+
+# JSON output for structured metadata
+echo "data" | agent-store push --label tag --type note --json
+# {"id":"<uuid>","labels":["tag"],"type":"note"}
+
+# Update an existing entry in-place
+ID=$(echo "v1" | agent-store push --id-only --strip)
+echo "v2" | agent-store push --update $ID                # data replaced, labels preserved
+echo "v3" | agent-store push --update $ID --label extra  # adds label, updates data
 ```
 
 ## agent-store pull \<ID\>
