@@ -478,6 +478,15 @@ With `--confirm`, it deletes and prints `Deleted N entries` on stderr.
 Calling `delete` with no ID and no filters prints an error (prevents
 accidental delete-all — use `purge` for that).
 
+## Supersede convention
+
+There is no "update" command — agent-store is append-only by design. To replace
+an entry, push a new one with `--attr supersedes=<old-id>`. Queries return
+newest-first, so `--latest` always gives the current version. After confirming
+the replacement, clean up with `agent-store delete <old-id>`. See
+`agent-store skills get agent-store-patterns` for full examples including
+version chain traversal and iterative draft workflows.
+
 ## Purge
 
 Delete all entries from the store. This is a destructive operation that requires

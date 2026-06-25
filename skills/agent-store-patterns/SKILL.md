@@ -372,6 +372,101 @@ many entries would be deleted and exits 1 — use this as a dry-run
 preview before committing. For selective cleanup, prefer `delete` with
 filters over `purge` (which removes everything).
 
+## Supersede / versioning
+
+**When:** You need to "update" an entry but want to preserve the original.
+agent-store is append-only — there is no update command. The convention
+is to push a new entry and link it to the one it replaces with
+`--attr supersedes=<old-id>`.
+
+```bash
+# Push the original entry
+ID=$(echo "v1 config" | agent-store push --type config --label app-config --id-only)
+
+# Later, push a replacement that links back to the original
+echo "v2 config" | agent-store push --type config --label app-config \
+  --attr supersedes=$ID
+
+# The latest version is always the most recent entry with that label
+agent-store query --type config --label app-config --latest
+```
+
+### Query pattern — get the current version
+
+Queries return newest-first by default. Use `--latest` (or `head -1`
+on raw output) to get the current version:
+
+```bash
+# Single latest entry
+agent-store query --type config --label app-config --latest
+
+# Or with head for raw output
+agent-store query --type config --label app-config | head -1
+```
+
+### Chain pattern — trace version history
+
+Follow the `supersedes` attribute to walk the full revision chain:
+
+```bash
+# Get the latest entry as JSON
+LATEST=$(agent-store query --type config --label app-config --latest --json)
+echo "$LATEST" | jq -r '.[0].data'
+
+# Walk the chain backwards
+PREV_ID=$(echo "$LATEST" | jq -r '.[0].attributes.supersedes // empty')
+while [ -n "$PREV_ID" ]; do
+  ENTRY=$(agent-store pull "$PREV_ID" --json)
+  echo "Previous version: $(echo "$ENTRY" | jq -r .data)"
+  PREV_ID=$(echo "$ENTRY" | jq -r '.attributes.supersedes // empty')
+done
+```
+
+### Cleanup pattern — remove old versions
+
+After confirming the new version works, delete the old one:
+
+```bash
+# Get the ID of the latest entry
+LATEST_ID=$(agent-store query --type config --label app-config --latest --json | jq -r '.[0].id')
+
+# Get the ID it superseded
+OLD_ID=$(agent-store query --type config --label app-config --latest --json | jq -r '.[0].attributes.supersedes // empty')
+
+# Delete the old version
+if [ -n "$OLD_ID" ]; then
+  agent-store delete "$OLD_ID"
+fi
+```
+
+### Example: iterative draft
+
+The supersede pattern works well for iterative content like drafts,
+where each revision replaces the last:
+
+```bash
+# First draft
+DRAFT_ID=$(echo "Initial proposal text" | agent-store push \
+  --type draft --label proposal --attr version=1 --id-only)
+
+# Second draft supersedes the first
+DRAFT_ID=$(echo "Revised proposal with feedback" | agent-store push \
+  --type draft --label proposal --attr version=2 \
+  --attr supersedes=$DRAFT_ID --id-only)
+
+# Current draft is always the latest
+agent-store query --type draft --label proposal --latest
+
+# Full history via the history command
+agent-store history proposal
+```
+
+**Gotcha:** The supersede attribute is a convention, not enforced by the
+store. It relies on agents consistently setting `--attr supersedes=<id>`
+when pushing replacements. If you skip the attribute, the entries are
+still queryable by recency — you just lose the explicit link between
+versions.
+
 ## Putting it together
 
 A typical agent workflow combines several patterns:
