@@ -118,8 +118,14 @@ enum Command {
         #[arg(long)]
         count: bool,
         /// Return only the single most recent matching entry
-        #[arg(long, conflicts_with = "limit")]
+        #[arg(long, conflicts_with_all = ["limit", "first", "last"])]
         latest: bool,
+        /// Return only the single oldest matching entry
+        #[arg(long, conflicts_with_all = ["limit", "latest", "last"])]
+        first: bool,
+        /// Return only the single newest matching entry (alias for --latest)
+        #[arg(long, conflicts_with_all = ["limit", "latest", "first"])]
+        last: bool,
         /// Return at most N entries
         #[arg(long)]
         limit: Option<u64>,
@@ -1532,6 +1538,7 @@ fn query(
     json: bool,
     count: bool,
     latest: bool,
+    first: bool,
     limit: Option<u64>,
     offset: Option<u64>,
     reverse: bool,
@@ -1561,8 +1568,8 @@ fn query(
     // Build query dynamically
     let (joins, conditions, params) = filters.build_filter_sql();
 
-    // When --count + (--latest or --limit/--offset), select rows first then wrap in COUNT subquery
-    let needs_count_subquery = count && (latest || limit.is_some());
+    // When --count + (--latest/--first or --limit/--offset), select rows first then wrap in COUNT subquery
+    let needs_count_subquery = count && (latest || first || limit.is_some());
     let select_cols = if needs_count_subquery {
         "DISTINCT e.id"
     } else if count {
@@ -1579,13 +1586,14 @@ fn query(
         sql.push_str(&conditions.join(" AND "));
     }
 
-    // Add ORDER BY (not applied when --count without --latest or --limit)
+    // Add ORDER BY (not applied when --count without --latest/--first or --limit)
     if !count || needs_count_subquery {
-        if filters.has_search() && !reverse {
+        if filters.has_search() && !reverse && !first {
             // When searching, order by relevance (FTS5 rank) by default
             sql.push_str(" ORDER BY entries_fts.rank");
         } else {
-            let direction = if reverse { "ASC" } else { "DESC" };
+            // --first forces ASC (oldest first), --reverse also forces ASC, default is DESC (newest first)
+            let direction = if reverse || first { "ASC" } else { "DESC" };
             sql.push_str(&format!(
                 " ORDER BY e.created_at {direction}, e.rowid {direction}"
             ));
@@ -1593,7 +1601,7 @@ fn query(
     }
 
     // Add LIMIT/OFFSET
-    if latest {
+    if latest || first {
         sql.push_str(" LIMIT 1");
     } else if let Some(lim) = limit {
         sql.push_str(&format!(" LIMIT {lim}"));
@@ -3250,6 +3258,8 @@ fn alias_run(name: &str, mode: &str, confirm: bool) {
             json,
             count,
             latest,
+            first,
+            last,
             limit,
             offset,
             reverse,
@@ -3266,7 +3276,8 @@ fn alias_run(name: &str, mode: &str, confirm: bool) {
             not_attr,
             json,
             count,
-            latest,
+            latest || last,
+            first,
             limit,
             offset,
             reverse,
@@ -3440,6 +3451,8 @@ fn main() {
             json,
             count,
             latest,
+            first,
+            last,
             limit,
             offset,
             reverse,
@@ -3456,7 +3469,8 @@ fn main() {
             not_attr,
             json,
             count,
-            latest,
+            latest || last,
+            first,
             limit,
             offset,
             reverse,

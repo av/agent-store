@@ -394,6 +394,15 @@
   command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && echo d | \$AS push -q && \$AS pull zzzzzzz 2>&1 | grep -q 'entry not found' && rm -rf \"\$TESTDIR\""
   tags: [implemented]
 
+## cli/query-shortcuts @spec
+
+- label: query --first returns the single oldest matching entry
+  command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && echo oldest | \$AS push --label qs-test --strip --timestamp '2024-01-01 10:00:00' -q && echo newest | \$AS push --label qs-test --strip --timestamp '2024-01-02 10:00:00' -q && RESULT=\$(\$AS query --label qs-test --first) && rm -rf \"\$TESTDIR\" && test \"\$RESULT\" = 'oldest'"
+- label: query --last returns the single newest matching entry
+  command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && echo oldest | \$AS push --label qs-test2 --strip --timestamp '2024-01-01 10:00:00' -q && echo newest | \$AS push --label qs-test2 --strip --timestamp '2024-01-02 10:00:00' -q && RESULT=\$(\$AS query --label qs-test2 --last) && rm -rf \"\$TESTDIR\" && test \"\$RESULT\" = 'newest'"
+- label: query --first and --last conflict with --limit and each other
+  command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && echo d | \$AS push -q && \$AS query --first --last 2>&1 | grep -qi 'cannot be used' && \$AS query --first --limit 5 2>&1 | grep -qi 'cannot be used' && \$AS query --last --limit 5 2>&1 | grep -qi 'cannot be used' && rm -rf \"\$TESTDIR\""
+
 ## conventions/supersede @implemented
 
 - label: supersede convention is documented in the agent-store-patterns skill with examples for versioned config, chain traversal, cleanup, and iterative draft
