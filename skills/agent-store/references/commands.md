@@ -791,6 +791,55 @@ Output: `Alias '<name>' removed` on stderr.
 agent-store alias rm urgent-tasks
 ```
 
+## agent-store tail
+
+Watch the store for new entries in real time (like `tail -f`).
+
+```
+agent-store tail [OPTIONS]
+```
+
+Options:
+- `--interval <N>` — Poll frequency in seconds (default: 1)
+- `--since <DATETIME>` — Start from entries created after this timestamp (ISO 8601: `"2024-01-15"` or `"2024-01-15 10:30:00"`). Without this flag, only entries created after tail starts are shown
+- `--json` — Output each entry as a JSON object (one per line, same fields as `query --json` entries: `id`, `data`, `entity_type`, `created_at`, `labels`, `attributes`)
+- `--label <LABEL>` — Filter by label (can be repeated, AND logic)
+- `--not-label <LABEL>` — Exclude entries with this label (can be repeated)
+- `--type <TYPE>` — Filter by entity type
+- `--not-type <TYPE>` — Exclude entries with this entity type (can be repeated, NULL-safe)
+- `--attr <KEY=VALUE>` — Filter by attribute (can be repeated, AND logic)
+- `--not-attr <KEY=VALUE>` — Exclude entries with this attribute (can be repeated)
+- `--data <SUBSTRING>` — Filter by substring match in entry data
+- `--search <QUERY>` — Full-text search query (FTS5 syntax)
+
+Polls the store every `--interval` seconds. On each poll, fetches entries
+with `created_at` after the last-seen timestamp, prints them (raw data or
+JSON), and advances the cursor. Pre-existing entries are skipped unless
+`--since` is provided.
+
+Exits cleanly on Ctrl+C (SIGINT), SIGTERM, or broken pipe (e.g., when piped
+to `head`).
+
+```bash
+# Watch all new entries
+agent-store tail
+
+# Watch with a label filter and JSON output
+agent-store tail --label deploy --json
+
+# Slower polling (every 5 seconds)
+agent-store tail --interval 5
+
+# Start from a past time (catches up on missed entries first)
+agent-store tail --since "2024-06-01 09:00:00"
+
+# Combine with other filters
+agent-store tail --type event --attr severity=high --json
+
+# Pipe to jq for live structured output
+agent-store tail --json | jq '.data'
+```
+
 ## agent-store completions
 
 Generate shell completion scripts.

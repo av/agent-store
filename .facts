@@ -538,13 +538,12 @@
 
 - label: agent-store tail polls for new entries and prints them as they arrive
   command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && echo before | \$AS push --label pre >/dev/null 2>&1 && \$AS tail --interval 1 > \"\$TESTDIR/out\" & TAIL_PID=\$! && sleep 1 && echo 'new-entry' | \$AS push --label watched >/dev/null 2>&1 && sleep 2 && kill \$TAIL_PID 2>/dev/null; wait \$TAIL_PID 2>/dev/null; grep -q 'new-entry' \"\$TESTDIR/out\" && rm -rf \"\$TESTDIR\" && echo OK"
-  tags: [spec]
+  tags: [spec, implemented]
 - label: agent-store tail --label filters output to matching entries only
   command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && \$AS tail --label wanted --interval 1 > \"\$TESTDIR/out\" & TAIL_PID=\$! && sleep 1 && echo 'skip-me' | \$AS push --label other >/dev/null 2>&1 && echo 'want-me' | \$AS push --label wanted >/dev/null 2>&1 && sleep 2 && kill \$TAIL_PID 2>/dev/null; wait \$TAIL_PID 2>/dev/null; ! grep -q 'skip-me' \"\$TESTDIR/out\" && grep -q 'want-me' \"\$TESTDIR/out\" && rm -rf \"\$TESTDIR\" && echo OK"
-  tags: [spec]
+  tags: [spec, implemented]
 - label: agent-store tail --json outputs entries as JSON objects one per line
   command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && \$AS tail --json --interval 1 > \"\$TESTDIR/out\" & TAIL_PID=\$! && sleep 1 && echo 'json-test' | \$AS push --label jtest >/dev/null 2>&1 && sleep 2 && kill \$TAIL_PID 2>/dev/null; wait \$TAIL_PID 2>/dev/null; python3 -c \"import json,sys; d=json.loads(open(sys.argv[1]).read().strip()); assert d['data']=='json-test\n'\" \"\$TESTDIR/out\" && rm -rf \"\$TESTDIR\" && echo OK"
-  tags: [spec]
+  tags: [spec, implemented]
 - label: agent-store tail --since shows entries created after the given timestamp
-  ? manual check — start tail with --since set to a past time, verify pre-existing entries after that time are printed
-  tags: [spec]
+  tags: [spec, implemented]
