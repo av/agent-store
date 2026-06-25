@@ -106,8 +106,8 @@ agent-store stats     # entry count and store size
 
 ## ID prefix matching
 
-All commands that accept an entry ID (pull, tag, untag, delete, query --id,
-export --id) support prefix matching. Instead of the full UUID, pass just the
+All commands that accept an entry ID (pull, tag, untag, update, delete,
+query --id, export --id) support prefix matching. Instead of the full UUID, pass just the
 first few characters (e.g., the 7-char short ID shown in query output).
 
 - **1 match** — resolved to the full ID automatically
@@ -132,7 +132,7 @@ agent-store delete 7bf8d3f
 | Command | What it does |
 |---------|-------------|
 | `init` | Create `.agent-store/store.db`, install skills to `.agents/skills/`, set up project docs |
-| `push` | Read stdin (or `--file`), store as entry. Flags: `--label`, `--type`, `--attr key=value`, `--timestamp`, `--ttl <duration>`, `-f`/`--file`, `-q`/`--quiet`, `--id-only`, `--strip`, `--json`, `--update <id>` |
+| `push` | Read stdin (or `--file`), store as entry. Flags: `--label`, `--type`, `--attr key=value`, `--timestamp`, `--ttl <duration>`, `-f`/`--file`, `-q`/`--quiet`, `--id-only`, `--strip`, `--json`, `--update <id>`, `--upsert` |
 | `pull <id>` | Retrieve entry by ID, print data to stdout. Flags: `--json` (full entry as JSON object), `--raw` (omit trailing newline for binary-safe piping) |
 | `query` | List entries. Filter: `--label` (repeat), `--not-label` (repeat, exclude), `--type`, `--not-type` (repeat, exclude, NULL-safe), `--attr key=value` (repeat), `--not-attr key=value` (repeat, exclude), `--data <substring>`, `--search <query>` (FTS5 full-text search), `--after <datetime>`, `--before <datetime>`, `--json`, `--count`, `--latest`, `--first`, `--last`, `--limit N`, `--offset N`, `-r`/`--reverse` |
 | `schema` | Show entity types and label counts |
@@ -154,6 +154,8 @@ agent-store delete 7bf8d3f
 | `compact` | Optimize store by running SQLite VACUUM and PRAGMA optimize. Reports before/after sizes. Flags: `--json` |
 | `history <label>` | Show chronological history of entries with a given label (oldest first). Flags: `--json`, `--limit N`, `--data <substring>` |
 | `alias` | Named queries. Subcommands: `set <name> -- [query flags]` (save), `run <name> [--mode query\|export\|delete] [--confirm]` (execute), `list` (show all), `rm <name>` (delete) |
+| `tally` | Count entries grouped by a dimension. `--by label\|type\|attr:<key>`. Supports all filter flags. Output: tab-separated `value\tcount` (descending by count). Flags: `--json` (array of `{value, count}`) |
+| `update [id]` | Compound metadata mutations in one transaction. Mutation flags: `--tag` (add label, repeat), `--untag` (remove label, repeat), `--set key=value` (set attr, repeat), `--unset key` (remove attr, repeat). Single-ID mode: no `--confirm` needed. Bulk mode (filters): requires `--confirm`. Flags: `--dry-run`, `--json`. Supports all filter flags. |
 | `tail` | Watch the store for new entries (like `tail -f`). Flags: `--interval <N>` (poll seconds, default 1), `--since <datetime>`, `--json`. Supports all filter flags: `--label`, `--not-label`, `--type`, `--not-type`, `--attr`, `--not-attr`, `--data`, `--search` |
 | `completions <shell>` | Generate shell completions (bash, zsh, fish, elvish, powershell) |
 
@@ -627,12 +629,73 @@ adds any new `--label` values, upserts `--attr` values, and updates `--type`
 if given. Supports prefix ID matching. Use this when you don't need version
 history.
 
+For atomic find-or-create, use `push --upsert`:
+
+```bash
+echo "config data" | agent-store push --upsert --label config --attr env=prod
+```
+
+This queries for entries matching ALL provided filters (`--label`, `--type`,
+`--attr`). If 0 matches: creates a new entry. If 1 match: updates that entry's
+data, merges labels, and upserts attrs. If 2+ matches: errors with the match
+count (exit 1). The entire operation runs in a single SQLite transaction.
+Use `--json` to see `{"action": "created"}` or `{"action": "updated"}` in the
+output. Cannot be combined with `--update`.
+
 For versioned updates where you want to preserve the original, use the
 supersede convention: push a new entry with `--attr supersedes=<old-id>`.
 Queries return newest-first, so `--latest` always gives the current version.
 After confirming the replacement, clean up with `agent-store delete <old-id>`.
 See `agent-store skills get agent-store-patterns` for full examples including
 version chain traversal and iterative draft workflows.
+
+## Batch update (compound mutations)
+
+Apply multiple metadata mutations (tag, untag, set attribute, unset attribute)
+atomically in a single transaction. Use `update` when you need to change several
+things at once without multiple round-trips.
+
+```bash
+# Single entry: tag + untag + set attr + unset attr in one operation
+agent-store update $ID --tag done --untag pending --set status=closed --unset priority
+
+# Single entry JSON output
+agent-store update $ID --tag archived --json
+# {"id":"...","tags_added":1,"tags_removed":0,"attrs_set":0,"attrs_unset":0}
+
+# Bulk: update all entries matching filters (requires --confirm)
+agent-store update --label task --attr status=stale --set status=archived --tag archived --confirm
+
+# Preview bulk update (prints count, exits 1)
+agent-store update --label task --tag archived
+# Would update 5 entries. Run with --confirm to proceed.
+
+# Dry run: list entries that would be affected
+agent-store update --label task --tag archived --dry-run
+
+# Dry run with JSON output (full entry objects to stdout)
+agent-store update --label task --tag archived --dry-run --json
+
+# Bulk JSON output (with --confirm)
+agent-store update --label old --untag old --tag migrated --confirm --json
+# {"updated":3,"ids":[...],"tags_added":3,"tags_removed":3,"attrs_set":0,"attrs_unset":0}
+```
+
+**Mutation flags** (all repeatable):
+- `--tag <label>` — add a label (INSERT OR IGNORE, idempotent)
+- `--untag <label>` — remove a label (DELETE, idempotent)
+- `--set <key>=<value>` — set an attribute (INSERT OR REPLACE, overwrites)
+- `--unset <key>` — remove an attribute (DELETE, idempotent)
+
+At least one mutation flag is required (error if none provided).
+
+**Single-ID mode** (`update <id> ...`): resolves ID via prefix matching, applies
+mutations, no `--confirm` needed (explicit ID = intentional).
+
+**Bulk mode** (`update --label ... --tag ...`): uses the same filter flags as
+`query`/`export`/`delete`. Without `--confirm`, prints count and exits 1. With
+`--dry-run`, lists affected entries without modifying them. With `--confirm`,
+applies mutations to all matching entries atomically.
 
 ## Purge
 
@@ -742,6 +805,49 @@ before the flags is required by the CLI parser.
 - `--mode query` (default) — run as a `query` command
 - `--mode export` — run as an `export` command (JSONL output)
 - `--mode delete` — run as a `delete` command (requires `--confirm` to execute)
+
+## Tally (aggregation)
+
+Count entries grouped by a metadata dimension. Useful for dashboards, status
+summaries, and understanding what's in the store without reading every entry.
+
+```bash
+# Count entries per label (descending by count, tab-separated)
+agent-store tally --by label
+# todo	5
+# done	3
+# blocked	1
+
+# Count entries per entity type
+agent-store tally --by type
+# note	10
+# task	7
+# (none)	2
+
+# Count entries per attribute value
+agent-store tally --by attr:status
+# open	4
+# done	3
+
+# JSON output: array of {value, count} objects
+agent-store tally --by label --json
+# [{"value":"todo","count":5},{"value":"done","count":3}]
+
+# Combine with filters (same flags as query)
+agent-store tally --by type --label urgent        # only urgent entries
+agent-store tally --by label --after "2024-06-01" # recent entries only
+agent-store tally --by attr:priority --type task   # task priorities
+```
+
+**Dimensions:**
+- `--by label` — groups by label. Entries with multiple labels are counted once per label.
+- `--by type` — groups by entity type. Entries with no type appear as `(none)`.
+- `--by attr:<key>` — groups by the value of attribute `<key>`. Entries without that attribute are excluded.
+
+Output is tab-separated (`value\tcount`) for stable agent parsing. Use `--json`
+for structured output. Results are sorted descending by count, then alphabetically
+by value for ties. All filter flags (`--label`, `--not-label`, `--type`, `--not-type`,
+`--attr`, `--not-attr`, `--data`, `--search`, `--after`, `--before`) are supported.
 
 ## Tail (live watch)
 

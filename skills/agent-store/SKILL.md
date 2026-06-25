@@ -106,8 +106,8 @@ agent-store stats     # entry count and store size
 
 ## ID prefix matching
 
-All commands that accept an entry ID (pull, tag, untag, delete, query --id,
-export --id) support prefix matching. Instead of the full UUID, pass just the
+All commands that accept an entry ID (pull, tag, untag, update, delete,
+query --id, export --id) support prefix matching. Instead of the full UUID, pass just the
 first few characters (e.g., the 7-char short ID shown in query output).
 
 - **1 match** — resolved to the full ID automatically
@@ -155,6 +155,7 @@ agent-store delete 7bf8d3f
 | `history <label>` | Show chronological history of entries with a given label (oldest first). Flags: `--json`, `--limit N`, `--data <substring>` |
 | `alias` | Named queries. Subcommands: `set <name> -- [query flags]` (save), `run <name> [--mode query\|export\|delete] [--confirm]` (execute), `list` (show all), `rm <name>` (delete) |
 | `tally` | Count entries grouped by a dimension. `--by label\|type\|attr:<key>`. Supports all filter flags. Output: tab-separated `value\tcount` (descending by count). Flags: `--json` (array of `{value, count}`) |
+| `update [id]` | Compound metadata mutations in one transaction. Mutation flags: `--tag` (add label, repeat), `--untag` (remove label, repeat), `--set key=value` (set attr, repeat), `--unset key` (remove attr, repeat). Single-ID mode: no `--confirm` needed. Bulk mode (filters): requires `--confirm`. Flags: `--dry-run`, `--json`. Supports all filter flags. |
 | `tail` | Watch the store for new entries (like `tail -f`). Flags: `--interval <N>` (poll seconds, default 1), `--since <datetime>`, `--json`. Supports all filter flags: `--label`, `--not-label`, `--type`, `--not-type`, `--attr`, `--not-attr`, `--data`, `--search` |
 | `completions <shell>` | Generate shell completions (bash, zsh, fish, elvish, powershell) |
 
@@ -647,6 +648,54 @@ Queries return newest-first, so `--latest` always gives the current version.
 After confirming the replacement, clean up with `agent-store delete <old-id>`.
 See `agent-store skills get agent-store-patterns` for full examples including
 version chain traversal and iterative draft workflows.
+
+## Batch update (compound mutations)
+
+Apply multiple metadata mutations (tag, untag, set attribute, unset attribute)
+atomically in a single transaction. Use `update` when you need to change several
+things at once without multiple round-trips.
+
+```bash
+# Single entry: tag + untag + set attr + unset attr in one operation
+agent-store update $ID --tag done --untag pending --set status=closed --unset priority
+
+# Single entry JSON output
+agent-store update $ID --tag archived --json
+# {"id":"...","tags_added":1,"tags_removed":0,"attrs_set":0,"attrs_unset":0}
+
+# Bulk: update all entries matching filters (requires --confirm)
+agent-store update --label task --attr status=stale --set status=archived --tag archived --confirm
+
+# Preview bulk update (prints count, exits 1)
+agent-store update --label task --tag archived
+# Would update 5 entries. Run with --confirm to proceed.
+
+# Dry run: list entries that would be affected
+agent-store update --label task --tag archived --dry-run
+
+# Dry run with JSON output (full entry objects to stdout)
+agent-store update --label task --tag archived --dry-run --json
+
+# Bulk JSON output (with --confirm)
+agent-store update --label old --untag old --tag migrated --confirm --json
+# {"updated":3,"ids":[...],"tags_added":3,"tags_removed":3,"attrs_set":0,"attrs_unset":0}
+```
+
+**Mutation flags** (all repeatable):
+- `--tag <label>` — add a label (INSERT OR IGNORE, idempotent)
+- `--untag <label>` — remove a label (DELETE, idempotent)
+- `--set <key>=<value>` — set an attribute (INSERT OR REPLACE, overwrites)
+- `--unset <key>` — remove an attribute (DELETE, idempotent)
+
+At least one mutation flag is required (error if none provided).
+
+**Single-ID mode** (`update <id> ...`): resolves ID via prefix matching, applies
+mutations, no `--confirm` needed (explicit ID = intentional).
+
+**Bulk mode** (`update --label ... --tag ...`): uses the same filter flags as
+`query`/`export`/`delete`. Without `--confirm`, prints count and exits 1. With
+`--dry-run`, lists affected entries without modifying them. With `--confirm`,
+applies mutations to all matching entries atomically.
 
 ## Purge
 

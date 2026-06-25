@@ -421,6 +421,62 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Apply compound metadata mutations (tag/untag/set/unset) atomically
+    Update {
+        /// entry ID or prefix (single-ID mode, skips --confirm)
+        id: Option<String>,
+        /// add a label (repeatable)
+        #[arg(long)]
+        tag: Vec<String>,
+        /// remove a label (repeatable)
+        #[arg(long)]
+        untag: Vec<String>,
+        /// set an attribute as key=value (repeatable)
+        #[arg(long)]
+        set: Vec<String>,
+        /// remove an attribute by key (repeatable)
+        #[arg(long)]
+        unset: Vec<String>,
+        /// confirm bulk update (required for filter-based mode)
+        #[arg(long, conflicts_with = "dry_run")]
+        confirm: bool,
+        /// preview matching entries without applying mutations
+        #[arg(long, conflicts_with = "confirm")]
+        dry_run: bool,
+        /// require this label (repeatable, AND logic) — bulk filter
+        #[arg(long)]
+        label: Vec<String>,
+        /// exclude entries with this label (repeatable)
+        #[arg(long = "not-label")]
+        not_label: Vec<String>,
+        /// filter by entity type
+        #[arg(long = "type")]
+        entity_type: Option<String>,
+        /// exclude entries with this entity type (repeatable)
+        #[arg(long = "not-type", action = clap::ArgAction::Append)]
+        not_type: Vec<String>,
+        /// require this attribute key=value (repeatable, AND logic) — bulk filter
+        #[arg(long = "attr")]
+        attr: Vec<String>,
+        /// exclude entries with this attribute key=value (repeatable)
+        #[arg(long = "not-attr", action = clap::ArgAction::Append)]
+        not_attr: Vec<String>,
+        /// filter by substring match in entry data
+        #[arg(long)]
+        data: Option<String>,
+        /// full-text search (FTS5 syntax)
+        #[arg(long)]
+        search: Option<String>,
+        /// include only entries created after this timestamp (ISO 8601)
+        #[arg(long)]
+        after: Option<String>,
+        /// include only entries created before this timestamp (ISO 8601)
+        #[arg(long)]
+        before: Option<String>,
+        /// output as JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// Watch the store and print new entries as they arrive (like tail -f)
     Tail {
         /// require this label (repeatable, AND logic)
@@ -3502,6 +3558,330 @@ fn unset_attr(id: &str, key: &str, json: bool) {
     }
 }
 
+/// Apply tag/untag/set/unset mutations to a single entry within a transaction.
+/// Returns (tags_added, tags_removed, attrs_set, attrs_unset).
+fn apply_mutations(
+    conn: &Connection,
+    entry_id: &str,
+    tags: &[String],
+    untags: &[String],
+    sets: &[(String, String)],
+    unsets: &[String],
+) -> (i64, i64, i64, i64) {
+    let mut tags_added: i64 = 0;
+    let mut tags_removed: i64 = 0;
+    let mut attrs_set: i64 = 0;
+    let mut attrs_unset: i64 = 0;
+
+    for label in tags {
+        match conn.execute(
+            "INSERT OR IGNORE INTO labels (entry_id, label) VALUES (?1, ?2)",
+            rusqlite::params![entry_id, label],
+        ) {
+            Ok(n) if n > 0 => tags_added += 1,
+            Ok(_) => {}
+            Err(e) => {
+                eprintln!("error: failed to add label: {e}");
+                process::exit(1);
+            }
+        }
+    }
+
+    for label in untags {
+        match conn.execute(
+            "DELETE FROM labels WHERE entry_id = ?1 AND label = ?2",
+            rusqlite::params![entry_id, label],
+        ) {
+            Ok(n) if n > 0 => tags_removed += 1,
+            Ok(_) => {}
+            Err(e) => {
+                eprintln!("error: failed to remove label: {e}");
+                process::exit(1);
+            }
+        }
+    }
+
+    for (key, value) in sets {
+        match conn.execute(
+            "INSERT OR REPLACE INTO attributes (entry_id, key, value) VALUES (?1, ?2, ?3)",
+            rusqlite::params![entry_id, key, value],
+        ) {
+            Ok(_) => attrs_set += 1,
+            Err(e) => {
+                eprintln!("error: failed to set attribute: {e}");
+                process::exit(1);
+            }
+        }
+    }
+
+    for key in unsets {
+        match conn.execute(
+            "DELETE FROM attributes WHERE entry_id = ?1 AND key = ?2",
+            rusqlite::params![entry_id, key],
+        ) {
+            Ok(n) if n > 0 => attrs_unset += 1,
+            Ok(_) => {}
+            Err(e) => {
+                eprintln!("error: failed to remove attribute: {e}");
+                process::exit(1);
+            }
+        }
+    }
+
+    (tags_added, tags_removed, attrs_set, attrs_unset)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn update_cmd(
+    id: Option<String>,
+    tags: Vec<String>,
+    untags: Vec<String>,
+    sets: Vec<String>,
+    unsets: Vec<String>,
+    confirm: bool,
+    dry_run: bool,
+    labels: Vec<String>,
+    not_labels: Vec<String>,
+    entity_type: Option<String>,
+    not_types: Vec<String>,
+    attrs: Vec<String>,
+    not_attrs: Vec<String>,
+    data_filter: Option<String>,
+    search: Option<String>,
+    after: Option<String>,
+    before: Option<String>,
+    json: bool,
+) {
+    // Validate: at least one mutation flag required
+    if tags.is_empty() && untags.is_empty() && sets.is_empty() && unsets.is_empty() {
+        eprintln!("error: at least one mutation flag required (--tag, --untag, --set, --unset)");
+        process::exit(1);
+    }
+
+    // Validate tag/untag labels
+    for label in &tags {
+        if label.trim().is_empty() {
+            eprintln!("error: label cannot be empty");
+            process::exit(1);
+        }
+    }
+    for label in &untags {
+        if label.trim().is_empty() {
+            eprintln!("error: label cannot be empty");
+            process::exit(1);
+        }
+    }
+
+    // Parse --set key=value pairs
+    let parsed_sets: Vec<(String, String)> = sets
+        .iter()
+        .map(|s| {
+            let (k, v) = parse_attr(s);
+            if k.trim().is_empty() {
+                eprintln!("error: attribute key cannot be empty");
+                process::exit(1);
+            }
+            (k.to_string(), v.to_string())
+        })
+        .collect();
+
+    // Validate --unset keys
+    for key in &unsets {
+        if key.trim().is_empty() {
+            eprintln!("error: attribute key cannot be empty");
+            process::exit(1);
+        }
+    }
+
+    let conn = open_db();
+
+    if let Some(ref entry_id) = id {
+        // Single-ID mode — no --confirm needed
+        let resolved = resolve_entry_id(&conn, entry_id);
+
+        conn.execute_batch("BEGIN").unwrap_or_else(|e| {
+            eprintln!("error: failed to begin transaction: {e}");
+            process::exit(1);
+        });
+
+        let (tags_added, tags_removed, attrs_set, attrs_unset) =
+            apply_mutations(&conn, &resolved, &tags, &untags, &parsed_sets, &unsets);
+
+        conn.execute_batch("COMMIT").unwrap_or_else(|e| {
+            eprintln!("error: failed to commit transaction: {e}");
+            process::exit(1);
+        });
+
+        if json {
+            println!(
+                "{}",
+                serde_json::json!({
+                    "id": resolved,
+                    "tags_added": tags_added,
+                    "tags_removed": tags_removed,
+                    "attrs_set": attrs_set,
+                    "attrs_unset": attrs_unset,
+                })
+            );
+        } else {
+            let short_id = &resolved[..7.min(resolved.len())];
+            eprintln!("Updated {short_id}");
+        }
+    } else {
+        // Bulk mode — use filters
+        let has_filters = !labels.is_empty()
+            || !not_labels.is_empty()
+            || entity_type.is_some()
+            || !not_types.is_empty()
+            || !attrs.is_empty()
+            || !not_attrs.is_empty()
+            || data_filter.is_some()
+            || search.is_some()
+            || after.is_some()
+            || before.is_some();
+
+        if !has_filters {
+            eprintln!("error: specify an ID or at least one filter");
+            process::exit(1);
+        }
+
+        let filters = FilterArgs {
+            labels,
+            not_labels,
+            entity_type,
+            not_types,
+            attrs,
+            not_attrs,
+            data_filter,
+            search,
+            after,
+            before,
+            id_filter: None,
+        };
+        filters.validate();
+
+        let (joins, conditions, params) = filters.build_filter_sql();
+
+        let ids_sql = if conditions.is_empty() {
+            format!("SELECT DISTINCT e.id FROM entries e{joins}")
+        } else {
+            format!(
+                "SELECT DISTINCT e.id FROM entries e{joins} WHERE {}",
+                conditions.join(" AND ")
+            )
+        };
+
+        let mut stmt = match conn.prepare(&ids_sql) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("error: failed to prepare query: {e}");
+                process::exit(1);
+            }
+        };
+
+        let params_refs: Vec<&dyn rusqlite::types::ToSql> =
+            params.iter().map(|p| p.as_ref()).collect();
+        let ids: Vec<String> =
+            match stmt.query_map(params_refs.as_slice(), |row| row.get::<_, String>(0)) {
+                Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
+                Err(e) => {
+                    eprintln!("error: failed to query matching entries: {e}");
+                    process::exit(1);
+                }
+            };
+
+        if dry_run {
+            let entries = fetch_entry_details(&conn, &ids);
+            if json {
+                match serde_json::to_string(&entries) {
+                    Ok(json_str) => println!("{json_str}"),
+                    Err(e) => {
+                        eprintln!("error: failed to serialize JSON: {e}");
+                        process::exit(1);
+                    }
+                }
+            } else {
+                let count = entries.len();
+                let word = if count == 1 { "entry" } else { "entries" };
+                eprintln!("Would update {count} {word}:");
+                eprintln!();
+                for entry in &entries {
+                    let short_id = &entry.id[..7.min(entry.id.len())];
+                    let entry_labels = if entry.labels.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" [{}]", entry.labels.join(", "))
+                    };
+                    let etype = entry
+                        .entity_type
+                        .as_deref()
+                        .map(|t| format!(" type={t}"))
+                        .unwrap_or_default();
+                    eprintln!(
+                        "  {short_id}  {}{}{}",
+                        entry.created_at, etype, entry_labels
+                    );
+                }
+            }
+            return;
+        }
+
+        if !confirm {
+            let count = ids.len() as i64;
+            if json {
+                println!("{}", serde_json::json!({"dry_run": true, "count": count}));
+            } else {
+                let word = if count == 1 { "entry" } else { "entries" };
+                eprintln!("Would update {count} {word}. Run with --confirm to proceed.");
+            }
+            process::exit(1);
+        }
+
+        // Apply mutations to all matching entries in one transaction
+        conn.execute_batch("BEGIN").unwrap_or_else(|e| {
+            eprintln!("error: failed to begin transaction: {e}");
+            process::exit(1);
+        });
+
+        let mut total_tags_added: i64 = 0;
+        let mut total_tags_removed: i64 = 0;
+        let mut total_attrs_set: i64 = 0;
+        let mut total_attrs_unset: i64 = 0;
+
+        for entry_id in &ids {
+            let (ta, tr, as_, au) =
+                apply_mutations(&conn, entry_id, &tags, &untags, &parsed_sets, &unsets);
+            total_tags_added += ta;
+            total_tags_removed += tr;
+            total_attrs_set += as_;
+            total_attrs_unset += au;
+        }
+
+        conn.execute_batch("COMMIT").unwrap_or_else(|e| {
+            eprintln!("error: failed to commit transaction: {e}");
+            process::exit(1);
+        });
+
+        let updated = ids.len() as i64;
+        if json {
+            println!(
+                "{}",
+                serde_json::json!({
+                    "updated": updated,
+                    "ids": ids,
+                    "tags_added": total_tags_added,
+                    "tags_removed": total_tags_removed,
+                    "attrs_set": total_attrs_set,
+                    "attrs_unset": total_attrs_unset,
+                })
+            );
+        } else {
+            let word = if updated == 1 { "entry" } else { "entries" };
+            eprintln!("Updated {updated} {word}");
+        }
+    }
+}
+
 fn history(label: &str, json: bool, limit: Option<u64>, data_filter: Option<String>) {
     let conn = open_db();
 
@@ -4447,6 +4827,45 @@ fn main() {
             json,
             interval,
             since,
+        ),
+        Command::Update {
+            id,
+            tag,
+            untag,
+            set,
+            unset,
+            confirm,
+            dry_run,
+            label,
+            not_label,
+            entity_type,
+            not_type,
+            attr,
+            not_attr,
+            data,
+            search,
+            after,
+            before,
+            json,
+        } => update_cmd(
+            id,
+            tag,
+            untag,
+            set,
+            unset,
+            confirm,
+            dry_run,
+            label,
+            not_label,
+            entity_type,
+            not_type,
+            attr,
+            not_attr,
+            data,
+            search,
+            after,
+            before,
+            json,
         ),
     }
 }

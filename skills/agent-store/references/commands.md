@@ -599,6 +599,77 @@ agent-store unset-attr $ID priority --json
 # {"id":"<uuid>","key":"priority","removed":true}
 ```
 
+## agent-store update
+
+Apply compound metadata mutations (tag/untag/set/unset) atomically in a single
+transaction. Supports single-ID mode and bulk mode with query filters.
+
+```
+agent-store update [ID] [OPTIONS]
+```
+
+Arguments:
+- `[ID]` — Entry ID (or unambiguous prefix). When provided, applies mutations
+  to a single entry without requiring `--confirm`.
+
+**Mutation flags** (at least one required):
+- `--tag <LABEL>` — Add a label (repeatable, INSERT OR IGNORE, idempotent)
+- `--untag <LABEL>` — Remove a label (repeatable, DELETE, idempotent)
+- `--set <KEY=VALUE>` — Set an attribute (repeatable, INSERT OR REPLACE, overwrites)
+- `--unset <KEY>` — Remove an attribute by key (repeatable, DELETE, idempotent)
+
+**Control flags:**
+- `--confirm` — Required for bulk (filter-based) updates. Without it, prints count and exits 1. Conflicts with `--dry-run`
+- `--dry-run` — List matching entries without applying mutations. Human-readable to stderr; with `--json`, full entry objects to stdout. Conflicts with `--confirm`
+- `--json` — Output as JSON
+
+**Filter flags** (same as query/export/delete):
+- `--label <LABEL>` — Filter by label (can be repeated, AND logic)
+- `--not-label <LABEL>` — Exclude entries with this label (can be repeated)
+- `--type <TYPE>` — Filter by entity type
+- `--not-type <TYPE>` — Exclude entries with this entity type (can be repeated, NULL-safe)
+- `--attr <KEY=VALUE>` — Filter by attribute (can be repeated, AND logic)
+- `--not-attr <KEY=VALUE>` — Exclude entries with this attribute (can be repeated)
+- `--data <SUBSTRING>` — Filter by substring match in entry data
+- `--search <QUERY>` — Full-text search query (FTS5 syntax)
+- `--after <DATETIME>` — Only entries created after this timestamp (ISO 8601)
+- `--before <DATETIME>` — Only entries created before this timestamp (ISO 8601)
+
+**Single-ID mode:**
+- Resolves ID via prefix matching
+- No `--confirm` required (explicit ID = intentional)
+- Output: `Updated <short-id>` on stderr
+- JSON: `{"id":"...","tags_added":N,"tags_removed":N,"attrs_set":N,"attrs_unset":N}`
+
+**Bulk mode (no ID, uses filters):**
+- Without `--confirm`: `Would update N entries. Run with --confirm to proceed.` on stderr, exits 1
+- With `--confirm`: applies mutations, `Updated N entries` on stderr
+- JSON (confirmed): `{"updated":N,"ids":[...],"tags_added":N,"tags_removed":N,"attrs_set":N,"attrs_unset":N}`
+- JSON (no confirm): `{"dry_run":true,"count":N}`
+- `--dry-run`: lists affected entries without modifying; with `--json`, outputs entry objects
+- No ID and no filters: `error: specify an ID or at least one filter`, exits 1
+
+```bash
+# Single entry: compound mutation
+agent-store update $ID --tag done --untag pending --set status=closed --unset priority
+
+# Single entry with JSON
+agent-store update $ID --tag archived --json
+
+# Bulk: preview (no --confirm)
+agent-store update --label task --tag archived
+# Would update 5 entries. Run with --confirm to proceed.
+
+# Bulk: dry run (see affected entries)
+agent-store update --label task --tag archived --dry-run
+
+# Bulk: execute
+agent-store update --label task --set status=archived --tag archived --confirm
+
+# Bulk: JSON output
+agent-store update --label old --untag old --tag migrated --confirm --json
+```
+
 ## agent-store history
 
 Show chronological history of entries with a given label. Since agent-store is append-only, pushing multiple entries with the same label tracks changes over time. The `history` subcommand makes this explicit with human-readable output.
