@@ -338,10 +338,16 @@ enum AliasCommand {
         #[arg(last = true)]
         args: Vec<String>,
     },
-    /// Execute a saved query alias
+    /// Execute a saved alias as query, export, or delete
     Run {
         /// Alias name to execute
         name: String,
+        /// Command mode: query (default), export, or delete
+        #[arg(long, default_value = "query")]
+        mode: String,
+        /// Confirm deletion (only used with --mode delete)
+        #[arg(long)]
+        confirm: bool,
     },
     /// List all saved aliases
     List,
@@ -3072,7 +3078,15 @@ fn alias_set(name: &str, args: Vec<String>) {
     eprintln!("Alias '{}' saved", name);
 }
 
-fn alias_run(name: &str) {
+fn alias_run(name: &str, mode: &str, confirm: bool) {
+    let cmd = match mode {
+        "query" | "export" | "delete" => mode,
+        _ => {
+            eprintln!("error: unknown mode '{mode}', expected query, export, or delete");
+            process::exit(1);
+        }
+    };
+
     let conn = open_db();
     let args_json: String = match conn.query_row(
         "SELECT args FROM aliases WHERE name = ?1",
@@ -3099,14 +3113,16 @@ fn alias_run(name: &str) {
         }
     };
 
-    let full_args = std::iter::once("agent-store".to_string())
-        .chain(std::iter::once("query".to_string()))
-        .chain(stored_args.into_iter());
+    let mut full_args = vec!["agent-store".to_string(), cmd.to_string()];
+    full_args.extend(stored_args);
+    if confirm && mode == "delete" {
+        full_args.push("--confirm".to_string());
+    }
 
-    let cli = match Cli::try_parse_from(full_args) {
+    let cli = match Cli::try_parse_from(&full_args) {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("error: invalid stored query args: {e}");
+            eprintln!("error: invalid stored args for {cmd}: {e}");
             process::exit(1);
         }
     };
@@ -3131,26 +3147,45 @@ fn alias_run(name: &str) {
             after,
             before,
         } => query(
+            label, not_label, entity_type, not_type, attr, not_attr, json, count, latest, limit,
+            offset, reverse, data, search, after, before, id,
+        ),
+        Command::Export {
+            id,
             label,
             not_label,
             entity_type,
             not_type,
             attr,
             not_attr,
-            json,
-            count,
-            latest,
-            limit,
-            offset,
-            reverse,
             data,
             search,
             after,
             before,
+        } => export(
+            label, not_label, entity_type, not_type, attr, not_attr, data, search, after, before,
             id,
         ),
+        Command::Delete {
+            id,
+            confirm,
+            label,
+            not_label,
+            entity_type,
+            not_type,
+            attr,
+            not_attr,
+            data,
+            search,
+            after,
+            before,
+            json,
+        } => delete(
+            id, confirm, label, not_label, entity_type, not_type, attr, not_attr, data, search,
+            after, before, json,
+        ),
         _ => {
-            eprintln!("error: stored alias did not parse as a query command");
+            eprintln!("error: stored alias did not parse as a {cmd} command");
             process::exit(1);
         }
     }
@@ -3353,7 +3388,11 @@ fn main() {
         }
         Command::Alias { action } => match action {
             AliasCommand::Set { name, args } => alias_set(&name, args),
-            AliasCommand::Run { name } => alias_run(&name),
+            AliasCommand::Run {
+                name,
+                mode,
+                confirm,
+            } => alias_run(&name, &mode, confirm),
             AliasCommand::List => alias_list(),
             AliasCommand::Rm { name } => alias_rm(&name),
         },
