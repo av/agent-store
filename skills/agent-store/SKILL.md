@@ -61,8 +61,8 @@ echo '{"task": "review PR #42", "status": "pending"}' | agent-store push --type 
 # Store with attributes for structured filtering
 echo "fix auth bug" | agent-store push --type task --label urgent --attr priority=high --attr assignee=agent
 
-# Get the ID for later retrieval (quiet mode)
-ID=$(echo "important data" | agent-store push --quiet)
+# Get the ID for later retrieval
+ID=$(echo "important data" | agent-store push | awk '{print $3}')
 
 # Retrieve by ID
 agent-store pull $ID
@@ -91,11 +91,11 @@ agent-store stats     # entry count and store size
 | Command | What it does |
 |---------|-------------|
 | `init` | Create `.agent-store/store.db`, install skills to `.agents/skills/`, set up project docs |
-| `push` | Read stdin, store as entry. Flags: `--label`, `--type`, `--attr key=value`, `--quiet` |
+| `push` | Read stdin, store as entry. Flags: `--label`, `--type`, `--attr key=value`, `-q`/`--quiet` |
 | `pull <id>` | Retrieve entry by ID, print data to stdout |
 | `query` | List entries. Filter: `--label` (repeat), `--type`, `--attr key=value` (repeat), `--json`, `--count`, `--limit N`, `--offset N` |
 | `schema` | Show entity types and label counts |
-| `stats` | Show entry count and store size |
+| `stats` | Show entry count and store size. Flags: `--json` |
 | `skills` | List and read built-in usage guides |
 
 ## Pushing data
@@ -113,8 +113,11 @@ echo "data" | agent-store push --label urgent --label review
 # Multiple attributes
 echo "data" | agent-store push --attr key1=value1 --attr key2=value2
 
-# Quiet mode — only prints the entry ID (for scripting)
-ID=$(echo "data" | agent-store push --quiet)
+# Quiet mode — suppresses all output (for scripts that don't need feedback)
+echo "data" | agent-store push --quiet
+
+# Get the ID for later retrieval
+ID=$(echo "data" | agent-store push | awk '{print $3}')
 
 # Multi-line data (heredoc)
 agent-store push --type note --label meeting <<'EOF'

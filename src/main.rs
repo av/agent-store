@@ -27,7 +27,10 @@ Start here (for AI agents):
   skills get agent-store --full            Core reference + command docs
   skills get agent-store-patterns          Workflow recipes (scratchpad, tasks, caching)
   skills get agent-store-pipelines         Shell composition (import, export, chaining)
-  skills path [name]                       Print skill directory path"
+  skills path [name]                       Print skill directory path",
+    after_long_help = "\
+agent-store is append-only by design. There are no update or delete commands. \
+To supersede an entry, push a new one with the same labels."
 )]
 struct Cli {
     #[command(subcommand)]
@@ -47,7 +50,7 @@ enum Command {
         #[arg(long = "type")]
         entity_type: Option<String>,
         /// Only print the entry ID (for scripting/piping)
-        #[arg(long)]
+        #[arg(long, short = 'q')]
         quiet: bool,
         /// Set attribute key=value pair (can be repeated)
         #[arg(long = "attr")]
@@ -85,7 +88,11 @@ enum Command {
     /// Show entity types and label counts
     Schema,
     /// Show entry count and store size
-    Stats,
+    Stats {
+        /// Output stats as a JSON object
+        #[arg(long)]
+        json: bool,
+    },
     /// Manage built-in usage guides for AI agents
     Skills {
         #[command(subcommand)]
@@ -369,7 +376,9 @@ fn install_agent_docs(root: &Path) -> bool {
             let end_marker = match content[start..].find(SECTION_END) {
                 Some(pos) => pos,
                 None => {
-                    eprintln!("  error  malformed agent-store section in {name} (missing end marker)");
+                    eprintln!(
+                        "  error  malformed agent-store section in {name} (missing end marker)"
+                    );
                     had_errors = true;
                     continue;
                 }
@@ -714,9 +723,7 @@ fn push(labels: Vec<String>, entity_type: Option<String>, quiet: bool, attrs: Ve
         process::exit(1);
     }
 
-    if quiet {
-        println!("{id}");
-    } else {
+    if !quiet {
         println!("stored entry {id}");
     }
 }
@@ -731,7 +738,15 @@ struct EntryJson {
     attributes: HashMap<String, String>,
 }
 
-fn query(labels: Vec<String>, entity_type: Option<String>, attrs: Vec<String>, json: bool, count: bool, limit: Option<u64>, offset: Option<u64>) {
+fn query(
+    labels: Vec<String>,
+    entity_type: Option<String>,
+    attrs: Vec<String>,
+    json: bool,
+    count: bool,
+    limit: Option<u64>,
+    offset: Option<u64>,
+) {
     // Validate empty strings before any DB work
     for label in &labels {
         if label.trim().is_empty() {
@@ -773,9 +788,7 @@ fn query(labels: Vec<String>, entity_type: Option<String>, attrs: Vec<String>, j
     // Label joins + conditions (one join per label filter, AND logic)
     for (i, l) in labels.iter().enumerate() {
         let alias = format!("l{i}");
-        sql.push_str(&format!(
-            " JOIN labels {alias} ON e.id = {alias}.entry_id"
-        ));
+        sql.push_str(&format!(" JOIN labels {alias} ON e.id = {alias}.entry_id"));
         conditions.push(format!("{alias}.label = ?{param_idx}"));
         params.push(Box::new(l.clone()));
         param_idx += 1;
@@ -1042,7 +1055,7 @@ fn schema() {
     }
 }
 
-fn stats() {
+fn stats(json: bool) {
     let conn = open_db();
 
     // Total entry count
@@ -1054,51 +1067,99 @@ fn stats() {
         }
     };
 
-    let word = if count == 1 { "entry" } else { "entries" };
-    println!("{count} {word}");
-
-    // Store file size
-    let db_path = store_db();
-    if let Ok(meta) = fs::metadata(&db_path) {
-        let size = meta.len();
-        let formatted = if size < 1024 {
-            format!("{} B", size)
-        } else if size < 1024 * 1024 {
-            format!("{:.1} KB", size as f64 / 1024.0)
-        } else {
-            format!("{:.1} MB", size as f64 / (1024.0 * 1024.0))
-        };
-        println!("store size: {formatted}");
-    }
-
-    // Entity type count
-    let type_count: i64 = match conn.query_row(
-        "SELECT COUNT(DISTINCT entity_type) FROM entries WHERE entity_type IS NOT NULL",
-        [],
-        |row| row.get(0),
-    ) {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("error: failed to count entity types: {e}");
-            process::exit(1);
-        }
-    };
-    let type_word = if type_count == 1 { "entity type" } else { "entity types" };
-    println!("{type_count} {type_word}");
-
-    // Label count
-    let label_count: i64 =
-        match conn.query_row("SELECT COUNT(DISTINCT label) FROM labels", [], |row| {
-            row.get(0)
-        }) {
-            Ok(c) => c,
+    // Entity types list
+    let entity_types: Vec<String> = {
+        let mut stmt = match conn.prepare(
+            "SELECT DISTINCT entity_type FROM entries WHERE entity_type IS NOT NULL ORDER BY entity_type",
+        ) {
+            Ok(s) => s,
             Err(e) => {
-                eprintln!("error: failed to count labels: {e}");
+                eprintln!("error: failed to query entity types: {e}");
                 process::exit(1);
             }
         };
-    let label_word = if label_count == 1 { "label" } else { "labels" };
-    println!("{label_count} {label_word}");
+        match stmt.query_map([], |row| row.get::<_, String>(0)) {
+            Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
+            Err(e) => {
+                eprintln!("error: failed to query entity types: {e}");
+                process::exit(1);
+            }
+        }
+    };
+
+    // Labels list
+    let labels: Vec<String> = {
+        let mut stmt = match conn.prepare("SELECT DISTINCT label FROM labels ORDER BY label") {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("error: failed to query labels: {e}");
+                process::exit(1);
+            }
+        };
+        match stmt.query_map([], |row| row.get::<_, String>(0)) {
+            Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
+            Err(e) => {
+                eprintln!("error: failed to query labels: {e}");
+                process::exit(1);
+            }
+        }
+    };
+
+    if json {
+        #[derive(Serialize)]
+        struct StatsJson {
+            entries: i64,
+            entity_types: Vec<String>,
+            labels: Vec<String>,
+            entity_type_count: usize,
+            label_count: usize,
+        }
+
+        let stats = StatsJson {
+            entries: count,
+            entity_type_count: entity_types.len(),
+            label_count: labels.len(),
+            entity_types,
+            labels,
+        };
+
+        match serde_json::to_string(&stats) {
+            Ok(json_str) => println!("{json_str}"),
+            Err(e) => {
+                eprintln!("error: failed to serialize stats JSON: {e}");
+                process::exit(1);
+            }
+        }
+    } else {
+        let word = if count == 1 { "entry" } else { "entries" };
+        println!("{count} {word}");
+
+        // Store file size
+        let db_path = store_db();
+        if let Ok(meta) = fs::metadata(&db_path) {
+            let size = meta.len();
+            let formatted = if size < 1024 {
+                format!("{} B", size)
+            } else if size < 1024 * 1024 {
+                format!("{:.1} KB", size as f64 / 1024.0)
+            } else {
+                format!("{:.1} MB", size as f64 / (1024.0 * 1024.0))
+            };
+            println!("store size: {formatted}");
+        }
+
+        let type_count = entity_types.len();
+        let type_word = if type_count == 1 {
+            "entity type"
+        } else {
+            "entity types"
+        };
+        println!("{type_count} {type_word}");
+
+        let label_count = labels.len();
+        let label_word = if label_count == 1 { "label" } else { "labels" };
+        println!("{label_count} {label_word}");
+    }
 }
 
 fn main() {
@@ -1131,7 +1192,7 @@ fn main() {
         } => query(label, entity_type, attr, json, count, limit, offset),
 
         Command::Schema => schema(),
-        Command::Stats => stats(),
+        Command::Stats { json } => stats(json),
         Command::Skills { action } => match action {
             SkillsAction::List => skills_list(),
             SkillsAction::Get { name, full } => skills_get(&name, full),

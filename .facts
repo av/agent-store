@@ -37,9 +37,9 @@
 ## cli/pull @implemented
 
 - label: agent-store pull retrieves entry by ID
-  command: cd /tmp/as-test-pull && rm -rf .agent-store && agent-store init && ID=$(echo "payload" | agent-store push --quiet) && agent-store pull "$ID" | grep -q "payload" && echo "OK"
+  command: cd /tmp/as-test-pull && rm -rf .agent-store && agent-store init && ID=$(echo "payload" | agent-store push 2>&1 | awk '{print $3}') && agent-store pull "$ID" | grep -q "payload" && echo "OK"
 - label: agent-store pull outputs entry data to stdout for piping
-  command: cd /tmp/as-test-pull && ID=$(echo "pipe-test" | agent-store push --quiet) && agent-store pull "$ID" | cat | grep -q "pipe-test" && echo "OK"
+  command: cd /tmp/as-test-pull && ID=$(echo "pipe-test" | agent-store push 2>&1 | awk '{print $3}') && agent-store pull "$ID" | cat | grep -q "pipe-test" && echo "OK"
 
 ## cli/query @implemented
 
@@ -119,6 +119,9 @@
 - label: agent-store --help shows Start here section directing agents to skills
   command: agent-store --help 2>&1 | grep -q "Start here" && echo "OK"
   tags: [spec, implemented]
+- label: long help explains that agent-store is append-only by design with no update or delete commands
+  command: agent-store help 2>&1 | grep -q "append-only" && echo "OK"
+  tags: [spec, implemented]
 
 ## skills
 - label: agent-store skills get agent-store-patterns prints workflow recipes
@@ -140,6 +143,9 @@
 - label: stats uses correct singular/plural for entity type and label counts
   command: dir=/tmp/test-m6-$$ && mkdir -p "$dir" && cd "$dir" && git init -q && AGENT_STORE_PATH=.agent-store /home/everlier/code/agent-store/target/release/agent-store init 2>/dev/null 1>/dev/null && echo "d" | AGENT_STORE_PATH=.agent-store /home/everlier/code/agent-store/target/release/agent-store push --type t --label l --quiet 2>/dev/null 1>/dev/null && stats=$(AGENT_STORE_PATH=.agent-store /home/everlier/code/agent-store/target/release/agent-store stats 2>&1) && cd / && rm -rf "$dir" && echo "$stats" | grep -q "1 entity type" && echo "$stats" | grep -q "1 label$" && echo "PASS"
   tags: [spec, implemented]
+- label: stats --json outputs a JSON object with entries count, entity_types list, labels list, and their counts
+  command: cd /tmp/as-test-stats-json && rm -rf .agent-store && mkdir -p .git && agent-store init > /dev/null && echo "d1" | agent-store push --type note --label todo --quiet > /dev/null && echo "d2" | agent-store push --type task --label done --quiet > /dev/null && agent-store stats --json | jq -e ".entries == 2 and (.entity_types | length) == 2 and (.labels | length) == 2" > /dev/null && echo "OK"
+  tags: [spec, implemented]
 
 ## query
 - label: query --label accepts multiple values with AND semantics, matching push repeatable --label
@@ -156,6 +162,11 @@
   tags: [spec, implemented]
 - label: query --offset N skips the first N entries (requires --limit)
   command: echo "offset-test-1" | agent-store push --label offset-test-xx --quiet > /dev/null && echo "offset-test-2" | agent-store push --label offset-test-xx --quiet > /dev/null && all=$(agent-store query --label offset-test-xx --json | jq length) && offset_result=$(agent-store query --label offset-test-xx --json --limit 100 --offset 1 | jq length) && test "$offset_result" -lt "$all" && echo "PASS: offset skipped entries"
+  tags: [spec, implemented]
+
+## push
+- label: push -q/--quiet suppresses all output including the entry ID
+  command: cd /tmp/as-test-push-quiet && rm -rf .agent-store && mkdir -p .git && agent-store init > /dev/null && output=$(echo "quiet-test" | agent-store push --label qt -q 2>&1) && test -z "$output" && echo "OK"
   tags: [spec, implemented]
 
 # resilience

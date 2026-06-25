@@ -27,7 +27,7 @@ Options:
 - `--label <LABEL>` — Tag the entry (repeatable for multiple labels)
 - `--type <TYPE>` — Set entity type classification
 - `--attr <KEY=VALUE>` — Set attribute key-value pair (repeatable, AND logic on query)
-- `--quiet` — Only print the entry UUID (for scripting and piping)
+- `-q`, `--quiet` — Suppress all output (for scripting when no feedback is needed)
 
 Data is read from stdin until EOF. Empty stdin is an error. Labels, type,
 and attribute keys cannot be empty strings.
@@ -91,9 +91,13 @@ Show store statistics.
 
 ```
 agent-store stats
+agent-store stats --json
 ```
 
-Reports:
+Options:
+- `--json` — Output stats as a JSON object with fields: `entries`, `entity_types`, `labels`, `entity_type_count`, `label_count`
+
+Reports (human-readable mode):
 - Total entry count
 - Store file size on disk
 - Number of distinct entity types
