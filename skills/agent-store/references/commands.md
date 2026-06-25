@@ -614,6 +614,33 @@ agent-store gc --ttl 24h --dry-run
 agent-store gc --ttl 30m --json
 ```
 
+## agent-store compact
+
+Optimize the store by running SQLite VACUUM and PRAGMA optimize.
+
+```
+agent-store compact [--json]
+```
+
+Options:
+- `--json` — Output as a JSON object with fields: `size_before`, `size_after`, `freed` (all in bytes)
+
+VACUUM reclaims unused space left behind by deleted entries, and PRAGMA
+optimize updates SQLite's query planner statistics. Reports before and
+after database sizes in human-readable format.
+
+```bash
+# Compact the store
+agent-store compact
+# 340.0 KB → 232.0 KB (freed 108.0 KB)
+
+# JSON output for scripting
+agent-store compact --json
+# {"size_before":348160,"size_after":237568,"freed":110592}
+```
+
+Run after large deletes, purges, or gc runs to reclaim disk space.
+
 ## agent-store alias set
 
 Save a query as a named alias.

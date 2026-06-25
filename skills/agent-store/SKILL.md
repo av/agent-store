@@ -149,6 +149,7 @@ agent-store delete 7bf8d3f
 | `tag <id> <label>...` | Add labels to an existing entry. Idempotent (duplicate labels are ignored). Flags: `--json` |
 | `untag <id> <label>...` | Remove labels from an existing entry. Idempotent (missing labels are ignored). Flags: `--json` |
 | `gc` | Collect expired entries (those past their TTL). Flags: `--ttl <duration>`, `--dry-run`, `--json` |
+| `compact` | Optimize store by running SQLite VACUUM and PRAGMA optimize. Reports before/after sizes. Flags: `--json` |
 | `history <label>` | Show chronological history of entries with a given label (oldest first). Flags: `--json`, `--limit N`, `--data <substring>` |
 | `alias` | Named queries. Subcommands: `set <name> -- [query flags]` (save), `run <name> [--mode query\|export\|delete] [--confirm]` (execute), `list` (show all), `rm <name>` (delete) |
 | `completions <shell>` | Generate shell completions (bash, zsh, fish, elvish, powershell) |
@@ -230,6 +231,24 @@ whose `created_at` is older than the given duration. This is useful for bulk cle
 of old entries regardless of whether they were pushed with a TTL.
 
 Use `gc --json` for structured output: `{"collected":1,"ids":["..."]}` or `{"dry_run":true,"count":0}`.
+
+## Compact
+
+Optimize the store database by running SQLite VACUUM (reclaims unused space)
+and PRAGMA optimize (updates query planner statistics). Reports before and
+after sizes so you can see how much space was freed.
+
+```bash
+# Compact the store
+agent-store compact
+# 340.0 KB → 232.0 KB (freed 108.0 KB)
+
+# JSON output for scripting
+agent-store compact --json
+# {"size_before":348160,"size_after":237568,"freed":110592}
+```
+
+Run compact after large deletes, purges, or gc runs to reclaim disk space.
 
 ## Pushing data
 
