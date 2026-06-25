@@ -234,7 +234,8 @@ agent-store pull <id>                         # Retrieve by ID
 
 const AGENT_MD_FILES: &[&str] = &["CLAUDE.md", "AGENTS.md"];
 
-fn install_skill(root: &Path, name: &str, content: &str) {
+/// Install a skill file. Returns true on success, false on error.
+fn install_skill(root: &Path, name: &str, content: &str) -> bool {
     let skill_dir = root.join(".agents").join("skills").join(name);
     let skill_path = skill_dir.join("SKILL.md");
 
@@ -243,7 +244,7 @@ fn install_skill(root: &Path, name: &str, content: &str) {
             Ok(s) => s,
             Err(e) => {
                 eprintln!("  error  .agents/skills/{name}/SKILL.md: {e}");
-                return;
+                return false;
             }
         };
         if existing == content {
@@ -251,21 +252,22 @@ fn install_skill(root: &Path, name: &str, content: &str) {
         } else {
             if let Err(e) = fs::write(&skill_path, content) {
                 eprintln!("  error  .agents/skills/{name}/SKILL.md: {e}");
-                return;
+                return false;
             }
             println!("  update  .agents/skills/{name}/SKILL.md");
         }
     } else {
         if let Err(e) = fs::create_dir_all(&skill_dir) {
             eprintln!("  error  creating .agents/skills/{name}/: {e}");
-            return;
+            return false;
         }
         if let Err(e) = fs::write(&skill_path, content) {
             eprintln!("  error  .agents/skills/{name}/SKILL.md: {e}");
-            return;
+            return false;
         }
         println!("  create  .agents/skills/{name}/SKILL.md");
     }
+    true
 }
 
 fn is_claude_available(root: &Path) -> bool {
@@ -289,8 +291,9 @@ fn which_exists(name: &str) -> bool {
         .is_ok_and(|s| s.success())
 }
 
+/// Create a symlink for Claude skill discovery. Returns true on success, false on error.
 #[cfg(unix)]
-fn link_skill_for_claude(root: &Path, name: &str) {
+fn link_skill_for_claude(root: &Path, name: &str) -> bool {
     let link_dir = root.join(".claude").join("skills");
     let link_path = link_dir.join(name);
     let target = Path::new("..")
@@ -303,32 +306,41 @@ fn link_skill_for_claude(root: &Path, name: &str) {
         if let Ok(current) = fs::read_link(&link_path) {
             if current == target {
                 println!("  skip  .claude/skills/{name} (link up to date)");
-                return;
+                return true;
             }
         }
         let _ = fs::remove_file(&link_path);
     } else if link_path.exists() {
         println!("  skip  .claude/skills/{name} (exists, not a symlink)");
-        return;
+        return true;
     }
 
     if let Err(e) = fs::create_dir_all(&link_dir) {
         eprintln!("  error  creating .claude/skills/: {e}");
-        return;
+        return false;
     }
     match std::os::unix::fs::symlink(&target, &link_path) {
-        Ok(()) => println!("  link  .claude/skills/{name} -> .agents/skills/{name}"),
-        Err(e) => eprintln!("  error  .claude/skills/{name}: {e}"),
+        Ok(()) => {
+            println!("  link  .claude/skills/{name} -> .agents/skills/{name}");
+            true
+        }
+        Err(e) => {
+            eprintln!("  error  .claude/skills/{name}: {e}");
+            false
+        }
     }
 }
 
 #[cfg(not(unix))]
-fn link_skill_for_claude(_root: &Path, name: &str) {
+fn link_skill_for_claude(_root: &Path, name: &str) -> bool {
     println!("  skip  .claude/skills/{name} (symlinks not supported on this platform)");
+    true
 }
 
-fn install_agent_docs(root: &Path) {
+/// Install agent-store docs section into CLAUDE.md or AGENTS.md. Returns true on success, false on error.
+fn install_agent_docs(root: &Path) -> bool {
     let mut installed = false;
+    let mut had_errors = false;
 
     for name in AGENT_MD_FILES {
         let path = root.join(name);
@@ -339,6 +351,7 @@ fn install_agent_docs(root: &Path) {
             Ok(s) => s,
             Err(e) => {
                 eprintln!("  error  reading {name}: {e}");
+                had_errors = true;
                 continue;
             }
         };
@@ -348,6 +361,7 @@ fn install_agent_docs(root: &Path) {
                 Some(pos) => pos,
                 None => {
                     eprintln!("  error  malformed agent-store section in {name} (missing end marker)");
+                    had_errors = true;
                     continue;
                 }
             };
@@ -362,6 +376,7 @@ fn install_agent_docs(root: &Path) {
                 new_content.push_str(&content[end..]);
                 if let Err(e) = fs::write(&path, new_content) {
                     eprintln!("  error  writing {name}: {e}");
+                    had_errors = true;
                     continue;
                 }
                 println!("  update  {name} (agent-store section updated)");
@@ -378,6 +393,7 @@ fn install_agent_docs(root: &Path) {
             new_content.push('\n');
             if let Err(e) = fs::write(&path, new_content) {
                 eprintln!("  error  writing {name}: {e}");
+                had_errors = true;
                 continue;
             }
             println!("  update  {name} (added agent-store section)");
@@ -392,10 +408,12 @@ fn install_agent_docs(root: &Path) {
         content.push('\n');
         if let Err(e) = fs::write(&path, content) {
             eprintln!("  error  creating {name}: {e}");
-            return;
+            return false;
         }
         println!("  create  {name} (with agent-store section)");
     }
+
+    !had_errors
 }
 
 fn find_project_root() -> Option<PathBuf> {
@@ -445,10 +463,11 @@ fn open_db() -> Connection {
     conn
 }
 
-fn ensure_gitignore(root: &Path) {
+/// Ensure .agent-store/ is in .gitignore. Returns true on success, false on error.
+fn ensure_gitignore(root: &Path) -> bool {
     // Only add .gitignore protection in git repos
     if !root.join(".git").exists() {
-        return;
+        return true;
     }
 
     let gitignore_path = root.join(".gitignore");
@@ -459,7 +478,7 @@ fn ensure_gitignore(root: &Path) {
             Ok(s) => s,
             Err(e) => {
                 eprintln!("  error  reading .gitignore: {e}");
-                return;
+                return false;
             }
         };
 
@@ -471,7 +490,7 @@ fn ensure_gitignore(root: &Path) {
 
         if already_ignored {
             println!("  skip  .gitignore (.agent-store/ already ignored)");
-            return;
+            return true;
         }
 
         // Append to existing .gitignore
@@ -484,7 +503,7 @@ fn ensure_gitignore(root: &Path) {
 
         if let Err(e) = fs::write(&gitignore_path, new_content) {
             eprintln!("  error  writing .gitignore: {e}");
-            return;
+            return false;
         }
         println!("  update  .gitignore (added .agent-store/)");
     } else {
@@ -492,10 +511,11 @@ fn ensure_gitignore(root: &Path) {
         let content = format!("{entry}\n");
         if let Err(e) = fs::write(&gitignore_path, content) {
             eprintln!("  error  creating .gitignore: {e}");
-            return;
+            return false;
         }
         println!("  create  .gitignore (added .agent-store/)");
     }
+    true
 }
 
 fn init() {
@@ -553,19 +573,33 @@ fn init() {
 
     let root = find_project_root().unwrap_or_else(|| std::env::current_dir().unwrap());
 
-    ensure_gitignore(&root);
+    let mut had_errors = false;
+
+    if !ensure_gitignore(&root) {
+        had_errors = true;
+    }
 
     for (name, content) in INSTALLABLE_SKILLS {
-        install_skill(&root, name, content);
+        if !install_skill(&root, name, content) {
+            had_errors = true;
+        }
     }
 
     if is_claude_available(&root) {
         for (name, _) in INSTALLABLE_SKILLS {
-            link_skill_for_claude(&root, name);
+            if !link_skill_for_claude(&root, name) {
+                had_errors = true;
+            }
         }
     }
 
-    install_agent_docs(&root);
+    if !install_agent_docs(&root) {
+        had_errors = true;
+    }
+
+    if had_errors {
+        process::exit(1);
+    }
 }
 
 fn parse_attr(attr: &str) -> (&str, &str) {
