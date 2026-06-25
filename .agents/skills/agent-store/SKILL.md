@@ -154,6 +154,7 @@ agent-store delete 7bf8d3f
 | `compact` | Optimize store by running SQLite VACUUM and PRAGMA optimize. Reports before/after sizes. Flags: `--json` |
 | `history <label>` | Show chronological history of entries with a given label (oldest first). Flags: `--json`, `--limit N`, `--data <substring>` |
 | `alias` | Named queries. Subcommands: `set <name> -- [query flags]` (save), `run <name> [--mode query\|export\|delete] [--confirm]` (execute), `list` (show all), `rm <name>` (delete) |
+| `tail` | Watch the store for new entries (like `tail -f`). Flags: `--interval <N>` (poll seconds, default 1), `--since <datetime>`, `--json`. Supports all filter flags: `--label`, `--not-label`, `--type`, `--not-type`, `--attr`, `--not-attr`, `--data`, `--search` |
 | `completions <shell>` | Generate shell completions (bash, zsh, fish, elvish, powershell) |
 
 ## Tagging
@@ -741,6 +742,39 @@ before the flags is required by the CLI parser.
 - `--mode query` (default) — run as a `query` command
 - `--mode export` — run as an `export` command (JSONL output)
 - `--mode delete` — run as a `delete` command (requires `--confirm` to execute)
+
+## Tail (live watch)
+
+Watch the store for new entries in real time, like `tail -f`. Polls at a
+configurable interval and prints each new entry as it arrives. Supports all
+filter flags so you can watch a specific slice of the store.
+
+```bash
+# Watch all new entries (Ctrl+C to stop)
+agent-store tail
+
+# Watch only entries with a specific label
+agent-store tail --label deploy
+
+# JSON output (one JSON object per line, same format as query --json entries)
+agent-store tail --json
+
+# Custom poll interval (seconds, default: 1)
+agent-store tail --interval 5
+
+# Start from a past timestamp (shows pre-existing entries after that time first)
+agent-store tail --since "2024-06-01 09:00:00"
+
+# Combine filters
+agent-store tail --label error --type event --json --interval 2
+
+# Pipe to jq for live structured processing
+agent-store tail --json | jq '.data'
+```
+
+Default output is raw entry data (one entry per poll cycle). Use `--json`
+for structured output with id, data, entity_type, created_at, labels, and
+attributes. Clean exit via Ctrl+C (SIGINT) or broken pipe from downstream.
 
 ## Shell completions
 

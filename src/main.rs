@@ -29,8 +29,10 @@ Start here (for AI agents):
   skills get agent-store-pipelines         Shell composition (import, export, chaining)
   skills path [name]                       Print skill directory path",
     after_long_help = "\
-Entry payloads cannot be modified after push. Labels can be added or \
-removed with `tag` and `untag`. Entries can be removed with `delete`."
+Entry payloads are immutable by default. Use `push --update <id>` to \
+replace data in place. Labels can be added or removed with `tag` and \
+`untag`. Attributes can be changed with `set-attr` and `unset-attr`. \
+Entries can be removed with `delete`."
 )]
 struct Cli {
     #[command(subcommand)]

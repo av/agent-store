@@ -35,11 +35,22 @@ agent-store query --type scratch --attr task=refactor-auth
 ID=$(echo "$EXPENSIVE_RESULT" | agent-store push --type scratch --id-only)
 # ... do other work ...
 agent-store pull "$ID"
+
+# Overwrite scratch data in place (no new entry, no history)
+echo "$UPDATED_RESULT" | agent-store push --update "$ID"
+
+# Clean up scratch entries when done
+agent-store delete --type scratch --attr task=refactor-auth --confirm
+
+# Or delete a single scratch entry by ID
+agent-store delete "$ID"
 ```
 
 **Gotcha:** Scratchpad entries accumulate. Use a task-scoped attribute
 (`--attr task=<name>`) so you can query just one workflow's state, and
-clean up when done (see Data lifecycle below).
+clean up with `delete` when done (see Data lifecycle below). For data
+you expect to overwrite repeatedly (e.g., a running summary), use
+`push --update` to replace in place instead of appending new entries.
 
 ## Task tracking
 
@@ -59,27 +70,48 @@ echo "update README"            | agent-store push --type task \
 agent-store query --type task --attr status=pending
 agent-store query --type task --attr status=pending --attr priority=high
 
+# Quick lookups — grab the newest or oldest task
+agent-store query --type task --attr status=pending --last   # newest pending task
+agent-store query --type task --attr status=pending --first  # oldest pending task
+
 # Find tasks by area
 agent-store query --type task --label backend
 
-# Mark a task done by tagging it
-ID=$(agent-store query --type task --label backend --latest --json | jq -r '.[0].id')
+# Update task status with set-attr (no new entry needed)
+ID=$(agent-store query --type task --label backend --last --json | jq -r '.[0].id')
+agent-store set-attr "$ID" status in-progress
+agent-store set-attr "$ID" status done
+
+# Mark a task done by tagging it (label-based workflow)
 agent-store tag "$ID" done
 
 # Exclude completed tasks
 agent-store query --type task --not-label done
+agent-store query --type task --not-attr status=done
 
-# Re-open a task by removing the done label
+# Re-open a task
 agent-store untag "$ID" done
+agent-store set-attr "$ID" status pending
+
+# Reprioritize
+agent-store set-attr "$ID" priority critical
+
+# Remove an attribute that's no longer relevant
+agent-store unset-attr "$ID" blocked-by
 
 # View everything as JSON for structured processing
 agent-store query --type task --json | jq '.[] | select(.attributes.status == "pending")'
+
+# Search tasks by content
+agent-store query --type task --search "auth middleware"
 ```
 
-**Tip:** Use `tag` and `untag` to move tasks through workflow stages.
-Tag entries with `done`, `blocked`, `in-progress` etc. and use
-`--not-label done` to filter them out of active queries. This avoids
-needing to push new entries just to change status.
+**Tip:** Use `set-attr` to move tasks through workflow stages when
+status is an attribute (`status=pending` -> `status=done`). Use `tag`
+and `untag` when status is a label (`done`, `blocked`, `in-progress`).
+Both approaches avoid pushing new entries just to change status.
+`--first` and `--last` are useful for quick lookups without `--json |
+jq`.
 
 ## Decision log
 
@@ -180,11 +212,27 @@ echo "$RESPONSE" | agent-store push --type cache \
   --label api-response --attr endpoint="$ENDPOINT"
 ```
 
-**Tip:** Use `--ttl` to set automatic expiry on cache entries so they
-don't accumulate indefinitely. Run `agent-store gc` to collect expired
-entries. For example: `echo "$RESULT" | agent-store push --type cache
---label file-analysis --attr hash="$HASH" --ttl 24h`. See the TTL
-section in `agent-store skills get agent-store` for details.
+**Tip:** Use `--ttl` to set automatic expiry on cache entries:
+
+```bash
+# Push with TTL — entry expires after 24 hours
+echo "$RESULT" | agent-store push --type cache \
+  --label file-analysis --attr hash="$HASH" --ttl 24h
+
+# Collect expired cache entries
+agent-store gc
+
+# Aggressive cleanup — delete ALL cache entries older than 1 hour
+agent-store gc --ttl 1h
+
+# Preview what gc would collect before running
+agent-store gc --dry-run
+
+# Reclaim disk space after large cleanup
+agent-store compact
+```
+
+See the TTL section in `agent-store skills get agent-store` for details.
 
 ## Knowledge base
 
@@ -210,14 +258,29 @@ Deploy only on main branch. Test timeout is 10 minutes." | \
 agent-store query --type knowledge --label auth
 agent-store query --type knowledge --attr area=backend
 
+# Full-text search across all knowledge (FTS5, relevance-ranked)
+agent-store query --type knowledge --search "JWT tokens"
+agent-store query --type knowledge --search "rate limit*"
+
+# Combine search with filters
+agent-store query --type knowledge --search "deploy" --attr area=infra
+
+# Export knowledge in different formats
+agent-store export --type knowledge --format json > knowledge.json
+agent-store export --type knowledge --format csv > knowledge.csv
+agent-store export --type knowledge --label auth --format jsonl > auth.jsonl
+
 # Full knowledge dump for context
 agent-store query --type knowledge --json | jq -r '.[].data'
 ```
 
 **Gotcha:** Knowledge entries can become stale. When you discover
-something has changed, push a corrected entry with the same labels.
-Periodically review with `agent-store query --type knowledge --json`
-to spot outdated information.
+something has changed, use `push --update` to correct an entry in
+place, or push a new entry with the same labels for versioned history.
+Use `--search` instead of `--data` when you need relevance-ranked
+results or fuzzy matching (e.g., `--search "database connection"` finds
+entries about DB connections even if they don't contain the exact
+substring).
 
 ## Project artifact catalog
 
@@ -471,6 +534,89 @@ store. It relies on agents consistently setting `--attr supersedes=<id>`
 when pushing replacements. If you skip the attribute, the entries are
 still queryable by recency — you just lose the explicit link between
 versions.
+
+## Multi-agent coordination
+
+**When:** Multiple agents share a store and need to watch each other's
+output in real time — one agent produces work, another reacts to it.
+
+```bash
+# Shared store setup
+export AGENT_STORE_PATH=/path/to/shared/store
+
+# Agent A: push findings as it works
+echo "SQL injection in users.rs:42" | agent-store push --type finding \
+  --label security --attr severity=critical --attr from=agent-a
+
+# Agent B: watch for new findings in real time
+agent-store tail --type finding --label security --json
+
+# Agent B: watch only critical findings
+agent-store tail --type finding --attr severity=critical --json --interval 2
+
+# Agent B: pipe live findings to a processing script
+agent-store tail --type finding --json | jq -r '.data' | while read -r finding; do
+  echo "New finding: $finding"
+done
+
+# Coordination: one agent signals readiness, another waits for it
+# Agent A (producer):
+echo "ready" | agent-store push --type signal --label phase-1-done
+
+# Agent B (consumer) — tail exits on first match via head
+agent-store tail --type signal --label phase-1-done | head -1
+echo "Phase 1 complete, starting phase 2"
+
+# Watch entries from a specific point in time
+agent-store tail --since "2024-06-01 09:00:00" --type event --json
+```
+
+**Tip:** `tail` is ideal for live coordination. For polling-based
+workflows where you check periodically rather than streaming, use
+`query --last` to grab the newest entry in a loop. For one-shot
+handoffs, the cross-agent communication pattern (above) is simpler.
+
+## Audit trail
+
+**When:** You want to annotate entries after the fact — add metadata
+to record what happened to an entry without modifying its original
+data.
+
+```bash
+# Push an entry
+ID=$(echo "deploy v2.3.1 to production" | agent-store push \
+  --type event --label deploy --id-only)
+
+# Later: annotate with audit metadata
+agent-store set-attr "$ID" reviewed-by agent-b
+agent-store set-attr "$ID" reviewed-at "2024-06-15 14:30:00"
+agent-store set-attr "$ID" outcome success
+
+# Tag with audit labels
+agent-store tag "$ID" reviewed
+agent-store tag "$ID" approved
+
+# Query for unreviewed entries
+agent-store query --type event --not-label reviewed
+
+# Query for entries with a specific outcome
+agent-store query --type event --attr outcome=success
+
+# Annotate a finding with resolution details
+FINDING_ID=$(agent-store query --type finding --label security --last --json | jq -r '.[0].id')
+agent-store set-attr "$FINDING_ID" resolution "patched in commit abc1234"
+agent-store set-attr "$FINDING_ID" resolved-by agent-c
+agent-store tag "$FINDING_ID" resolved
+
+# Remove a mistaken annotation
+agent-store unset-attr "$FINDING_ID" resolution
+agent-store untag "$FINDING_ID" resolved
+```
+
+**Tip:** The audit trail pattern separates the original data (immutable)
+from annotations added later (mutable via `set-attr` and `tag`). This
+gives you the benefits of append-only data (nothing lost) with the
+flexibility to track status changes and review outcomes after the fact.
 
 ## Putting it together
 

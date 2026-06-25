@@ -119,8 +119,8 @@
 - label: agent-store --help shows Start here section directing agents to skills
   command: agent-store --help 2>&1 | grep -q "Start here" && echo "OK"
   tags: [spec, implemented]
-- label: long help explains that entry payloads cannot be modified after push
-  command: agent-store help 2>&1 | grep -q "cannot be modified" && echo "OK"
+- label: long help explains that entry payloads are immutable by default with push --update for in-place replacement
+  command: agent-store help 2>&1 | grep -q "immutable by default" && echo "OK"
   tags: [spec, implemented]
 
 ## skills
@@ -443,18 +443,18 @@
   tags: [spec, implemented]
 
 
-# resilience
+## resilience
 - PRAGMA foreign_keys = ON is set on every database connection so ON DELETE CASCADE is enforced @spec @implemented
 - label: PRAGMA busy_timeout = 5000 is set on every database connection so concurrent writes retry instead of failing with database locked
   command: rm -rf /tmp/as-busy-test && mkdir -p /tmp/as-busy-test/.git && cd /tmp/as-busy-test && agent-store init && seq 100 | xargs -P50 -I{} sh -c "echo data-{} | agent-store push --quiet --label batch" && COUNT=$(agent-store query --label batch --json | python3 -c "import sys,json; print(len(json.load(sys.stdin)))") && test "$COUNT" -eq 100 && echo "OK"
   tags: [spec, implemented]
 
-# cli > query
+## cli/query-id
 - label: query --id filters entries by exact ID match, returning the entry in query format with --json support
   command: ID=$(echo "id-test-data" | agent-store push --label id-test --id-only) && agent-store query --id "$ID" --json | jq -e ".[0].id == \"$ID\""
   tags: [spec, implemented]
 
-# cli > info
+## cli/info
 - label: agent-store info shows store path, database path, database size, AGENT_STORE_PATH status, project root, and version
   command: agent-store info 2>&1 | grep -q "Store path:" && agent-store info 2>&1 | grep -q "Version:" && echo "OK"
   tags: [spec, implemented]
@@ -462,12 +462,12 @@
   command: agent-store info --json | python3 -c "import sys,json; d=json.load(sys.stdin); assert \"store_path\" in d and \"version\" in d and \"db_size_bytes\" in d; print(\"OK\")"
   tags: [spec, implemented]
 
-# cli > push
+## cli/push-file
 - label: push --file reads data from a file instead of stdin; file not found prints clear error and exits 1
   command: echo "file-push-content" > /tmp/as-test-file-push.txt && agent-store push --label file-test --file /tmp/as-test-file-push.txt 2>&1 | grep -q "stored entry" && agent-store query --label file-test | grep -q "file-push-content" && agent-store push --file /tmp/nonexistent-file-xxx --label x 2>&1; test $? -ne 0 && echo "OK"
   tags: [spec, implemented]
 
-# cli > labels
+## cli/labels
 - label: agent-store labels lists all unique labels in the store, one per line, sorted alphabetically
   command: export AGENT_STORE_PATH=$(mktemp -d) && agent-store init >/dev/null 2>&1 && echo "a" | agent-store push --label zebra -q && echo "b" | agent-store push --label alpha -q && echo "c" | agent-store push --label beta -q && RESULT=$(agent-store labels) && FIRST=$(echo "$RESULT" | head -1) && LAST=$(echo "$RESULT" | tail -1) && test "$FIRST" = "alpha" && test "$LAST" = "zebra"
   tags: [spec, implemented]
@@ -478,7 +478,7 @@
   command: export AGENT_STORE_PATH=$(mktemp -d) && agent-store init >/dev/null 2>&1 && echo "a" | agent-store push --label todo -q && echo "b" | agent-store push --label todo -q && echo "c" | agent-store push --label done -q && agent-store labels --count | grep -q "todo (2)" && agent-store labels --count | grep -q "done (1)"
   tags: [spec, implemented]
 
-# cli > types
+## cli/types
 - label: agent-store types lists all unique entity types in the store, one per line, sorted alphabetically
   command: export AGENT_STORE_PATH=$(mktemp -d) && agent-store init >/dev/null 2>&1 && echo "a" | agent-store push --type note -q && echo "b" | agent-store push --type task -q && echo "c" | agent-store push --type config -q && RESULT=$(agent-store types) && FIRST=$(echo "$RESULT" | head -1) && LAST=$(echo "$RESULT" | tail -1) && test "$FIRST" = "config" && test "$LAST" = "task"
   tags: [spec, implemented]
@@ -489,13 +489,13 @@
   command: export AGENT_STORE_PATH=$(mktemp -d) && agent-store init >/dev/null 2>&1 && echo "a" | agent-store push --type note -q && echo "b" | agent-store push --type note -q && echo "c" | agent-store push --type task -q && agent-store types --count | grep -q "note (2)" && agent-store types --count | grep -q "task (1)"
   tags: [spec, implemented]
 
-# cli > push-json @spec
+## cli/push-json @spec
 
 - label: push --json outputs structured JSON with id, labels, type, and attributes (only non-null fields)
   command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && OUT=\$(echo test | \$AS push --label tag1 --type note --attr k=v --json --strip) && echo \"\$OUT\" | python3 -c \"import sys,json; d=json.load(sys.stdin); assert 'id' in d; assert d['labels']==['tag1']; assert d['type']=='note'; assert d['attributes']=={'k':'v'}; print('OK')\" && rm -rf \"\$TESTDIR\""
   tags: [implemented]
 
-# cli > push-update @spec
+## cli/push-update @spec
 
 - label: push --update replaces data in-place while preserving created_at
   command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && ID=\$(echo v1 | \$AS push --id-only --strip) && echo v2 | \$AS push --update \"\$ID\" -q && RESULT=\$(\$AS pull \"\$ID\" --raw) && rm -rf \"\$TESTDIR\" && test \"\$RESULT\" = 'v2'"
@@ -504,7 +504,7 @@
   command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && ID=\$(echo v1 | \$AS push --label old --id-only --strip) && echo v2 | \$AS push --update \"\$ID\" --label new -q && LABELS=\$(\$AS pull \"\$ID\" --json | python3 -c \"import sys,json; print(','.join(sorted(json.load(sys.stdin)['labels'])))\") && rm -rf \"\$TESTDIR\" && test \"\$LABELS\" = 'new,old'"
   tags: [implemented]
 
-# cli > compact @implemented
+## cli/compact @implemented
 
 - label: compact runs VACUUM and reports size before/after in human-readable format
   command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && for i in \$(seq 1 50); do echo \"padding data \$i \$(head -c 200 /dev/urandom | base64)\" | \$AS push -q; done && \$AS compact 2>&1 | grep -qE '[0-9.]+ [KMG]?B .* [0-9.]+ [KMG]?B' && rm -rf \"\$TESTDIR\" && echo OK"
