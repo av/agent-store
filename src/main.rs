@@ -1031,14 +1031,14 @@ fn parse_ttl(s: &str) -> Result<u64, String> {
     if s.is_empty() {
         return Err("TTL cannot be empty".to_string());
     }
-    let (num_str, unit) = if s.ends_with('d') {
-        (&s[..s.len() - 1], 86400u64)
-    } else if s.ends_with('h') {
-        (&s[..s.len() - 1], 3600u64)
-    } else if s.ends_with('m') {
-        (&s[..s.len() - 1], 60u64)
-    } else if s.ends_with('s') {
-        (&s[..s.len() - 1], 1u64)
+    let (num_str, unit) = if let Some(n) = s.strip_suffix('d') {
+        (n, 86400u64)
+    } else if let Some(n) = s.strip_suffix('h') {
+        (n, 3600u64)
+    } else if let Some(n) = s.strip_suffix('m') {
+        (n, 60u64)
+    } else if let Some(n) = s.strip_suffix('s') {
+        (n, 1u64)
     } else {
         return Err(format!("invalid TTL unit in '{s}', use s/m/h/d"));
     };
@@ -1198,15 +1198,15 @@ fn push(
             process::exit(1);
         }
 
-        if let Some(ref t) = entity_type {
-            if let Err(e) = conn.execute(
+        if let Some(ref t) = entity_type
+            && let Err(e) = conn.execute(
                 "UPDATE entries SET entity_type = ?2 WHERE id = ?1",
                 rusqlite::params![resolved_id, t],
-            ) {
-                let _ = conn.execute("ROLLBACK", []);
-                eprintln!("error: failed to update entity type: {e}");
-                process::exit(1);
-            }
+            )
+        {
+            let _ = conn.execute("ROLLBACK", []);
+            eprintln!("error: failed to update entity type: {e}");
+            process::exit(1);
         }
 
         for label in &labels {
@@ -1334,7 +1334,11 @@ fn push(
     } else if id_only {
         print!("{id}");
     } else if !quiet {
-        let verb = if update.is_some() { "updated" } else { "stored" };
+        let verb = if update.is_some() {
+            "updated"
+        } else {
+            "stored"
+        };
         println!("{verb} entry {id}");
     }
 }
@@ -2351,14 +2355,14 @@ fn import(dry_run: bool) {
                 failed = true;
             }
 
-            if !failed {
-                if let Err(e) = conn.execute(
+            if !failed
+                && let Err(e) = conn.execute(
                     "INSERT INTO entries_fts(id, data) VALUES (?1, ?2)",
                     rusqlite::params![id, data],
-                ) {
-                    eprintln!("error: failed to insert FTS entry: {e}");
-                    failed = true;
-                }
+                )
+            {
+                eprintln!("error: failed to insert FTS entry: {e}");
+                failed = true;
             }
 
             if !failed {
