@@ -167,6 +167,9 @@ enum Command {
         /// filter linked results by relationship type (requires --linked-to or --linked-from)
         #[arg(long = "link-rel")]
         link_rel: Option<String>,
+        /// include outgoing and incoming links in JSON output (requires --json)
+        #[arg(long = "with-links")]
+        with_links: bool,
     },
     /// Show entity types and label counts
     Schema,
@@ -551,6 +554,18 @@ enum Command {
         /// start from entries created after this timestamp (ISO 8601)
         #[arg(long)]
         since: Option<String>,
+    },
+    /// List all links in the store, optionally filtered by relationship or entry
+    Links {
+        /// output as JSON array of {from, to, rel, created_at} objects
+        #[arg(long)]
+        json: bool,
+        /// filter by relationship type
+        #[arg(long)]
+        rel: Option<String>,
+        /// filter to links involving this entry (as source or target, ID or prefix)
+        #[arg(long)]
+        entry: Option<String>,
     },
     /// Show audit trail of mutations (tag, untag, set-attr, unset-attr, delete, update)
     Log {
@@ -2066,6 +2081,102 @@ impl FilterArgs {
     }
 }
 
+fn links_cmd(json: bool, rel: Option<String>, entry: Option<String>) {
+    let conn = open_db();
+
+    // Resolve entry ID if provided
+    let resolved_entry = entry.as_ref().map(|e| resolve_entry_id(&conn, e));
+
+    // Build query dynamically based on filters
+    let mut sql = String::from("SELECT from_id, to_id, rel, created_at FROM links");
+    let mut conditions: Vec<String> = Vec::new();
+    let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+
+    if let Some(ref r) = rel {
+        let idx = params.len() as u32 + 1;
+        conditions.push(format!("rel = ?{idx}"));
+        params.push(Box::new(r.clone()));
+    }
+
+    if let Some(ref eid) = resolved_entry {
+        let idx = params.len() as u32 + 1;
+        conditions.push(format!("(from_id = ?{idx} OR to_id = ?{idx})"));
+        params.push(Box::new(eid.clone()));
+    }
+
+    if !conditions.is_empty() {
+        sql.push_str(" WHERE ");
+        sql.push_str(&conditions.join(" AND "));
+    }
+
+    sql.push_str(" ORDER BY created_at DESC");
+
+    let mut stmt = match conn.prepare(&sql) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("error: failed to prepare links query: {e}");
+            process::exit(1);
+        }
+    };
+
+    let params_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+    let rows = match stmt.query_map(params_refs.as_slice(), |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, String>(3)?,
+        ))
+    }) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("error: failed to query links: {e}");
+            process::exit(1);
+        }
+    };
+
+    if json {
+        let mut links: Vec<serde_json::Value> = Vec::new();
+        for row in rows {
+            match row {
+                Ok((from_id, to_id, rel, created_at)) => {
+                    links.push(serde_json::json!({
+                        "from": from_id,
+                        "to": to_id,
+                        "rel": rel,
+                        "created_at": created_at
+                    }));
+                }
+                Err(e) => {
+                    eprintln!("error: failed to read link row: {e}");
+                    process::exit(1);
+                }
+            }
+        }
+        match serde_json::to_string(&links) {
+            Ok(json_str) => println!("{json_str}"),
+            Err(e) => {
+                eprintln!("error: failed to serialize links: {e}");
+                process::exit(1);
+            }
+        }
+    } else {
+        for row in rows {
+            match row {
+                Ok((from_id, to_id, rel, _created_at)) => {
+                    let from_short = &from_id[..8.min(from_id.len())];
+                    let to_short = &to_id[..8.min(to_id.len())];
+                    println!("{from_short}\t{to_short}\t{rel}");
+                }
+                Err(e) => {
+                    eprintln!("error: failed to read link row: {e}");
+                    process::exit(1);
+                }
+            }
+        }
+    }
+}
+
 fn link_cmd(from: &str, to: &str, rel: Option<String>, json: bool) {
     let conn = open_db();
     let from_id = resolve_entry_id(&conn, from);
@@ -2162,6 +2273,7 @@ fn query(
     linked_to: Option<String>,
     linked_from: Option<String>,
     link_rel: Option<String>,
+    with_links: bool,
 ) {
     let filters = FilterArgs {
         labels,
@@ -2367,11 +2479,35 @@ fn query(
             }
         }
 
-        match serde_json::to_string(&entries) {
-            Ok(json_str) => println!("{json_str}"),
-            Err(e) => {
-                eprintln!("error: failed to serialize JSON: {e}");
-                process::exit(1);
+        if with_links {
+            // Add links_from and links_to arrays to each entry
+            let mut json_entries: Vec<serde_json::Value> = Vec::new();
+            for entry in &entries {
+                let links_from = fetch_links_from(&conn, &entry.id);
+                let links_to = fetch_links_to(&conn, &entry.id);
+                let mut val = serde_json::to_value(entry).expect("failed to serialize entry");
+                let obj = val.as_object_mut().unwrap();
+                obj.insert(
+                    "links_from".to_string(),
+                    serde_json::Value::Array(links_from),
+                );
+                obj.insert("links_to".to_string(), serde_json::Value::Array(links_to));
+                json_entries.push(val);
+            }
+            match serde_json::to_string(&json_entries) {
+                Ok(json_str) => println!("{json_str}"),
+                Err(e) => {
+                    eprintln!("error: failed to serialize JSON: {e}");
+                    process::exit(1);
+                }
+            }
+        } else {
+            match serde_json::to_string(&entries) {
+                Ok(json_str) => println!("{json_str}"),
+                Err(e) => {
+                    eprintln!("error: failed to serialize JSON: {e}");
+                    process::exit(1);
+                }
             }
         }
     } else {
@@ -2533,7 +2669,7 @@ fn export(
                 };
 
                 let entry = EntryJson {
-                    id,
+                    id: id.clone(),
                     data,
                     entity_type: etype,
                     created_at,
@@ -2542,14 +2678,16 @@ fn export(
                 };
 
                 if format == "jsonl" {
-                    // Stream immediately for JSONL
-                    match serde_json::to_string(&entry) {
-                        Ok(json_str) => println!("{json_str}"),
-                        Err(e) => {
-                            eprintln!("error: failed to serialize entry: {e}");
-                            process::exit(1);
-                        }
+                    // Stream immediately for JSONL — add links_from
+                    let links_from = fetch_links_from(&conn, &id);
+                    let mut val = serde_json::to_value(&entry).expect("failed to serialize entry");
+                    if !links_from.is_empty() {
+                        val.as_object_mut().unwrap().insert(
+                            "links_from".to_string(),
+                            serde_json::Value::Array(links_from),
+                        );
                     }
+                    println!("{val}");
                 } else {
                     entries.push(entry);
                 }
@@ -2562,13 +2700,28 @@ fn export(
     }
 
     match format {
-        "json" => match serde_json::to_string_pretty(&entries) {
-            Ok(json_str) => println!("{json_str}"),
-            Err(e) => {
-                eprintln!("error: failed to serialize entries: {e}");
-                process::exit(1);
+        "json" => {
+            // Add links_from to each entry
+            let mut json_entries: Vec<serde_json::Value> = Vec::new();
+            for entry in &entries {
+                let links_from = fetch_links_from(&conn, &entry.id);
+                let mut val = serde_json::to_value(entry).expect("failed to serialize entry");
+                if !links_from.is_empty() {
+                    val.as_object_mut().unwrap().insert(
+                        "links_from".to_string(),
+                        serde_json::Value::Array(links_from),
+                    );
+                }
+                json_entries.push(val);
             }
-        },
+            match serde_json::to_string_pretty(&json_entries) {
+                Ok(json_str) => println!("{json_str}"),
+                Err(e) => {
+                    eprintln!("error: failed to serialize entries: {e}");
+                    process::exit(1);
+                }
+            }
+        }
         "csv" => {
             println!("id,created_at,entity_type,labels,data");
             for entry in &entries {
@@ -2593,6 +2746,50 @@ fn export(
         }
         _ => {} // jsonl already streamed above
     }
+}
+
+/// Fetch outgoing links (links_from) for an entry.
+fn fetch_links_from(conn: &Connection, entry_id: &str) -> Vec<serde_json::Value> {
+    let mut stmt = conn
+        .prepare("SELECT to_id, rel FROM links WHERE from_id = ?1")
+        .unwrap_or_else(|e| {
+            eprintln!("error: failed to query links: {e}");
+            process::exit(1);
+        });
+    stmt.query_map(rusqlite::params![entry_id], |r| {
+        Ok(serde_json::json!({
+            "to": r.get::<_, String>(0)?,
+            "rel": r.get::<_, String>(1)?
+        }))
+    })
+    .unwrap_or_else(|e| {
+        eprintln!("error: failed to query links: {e}");
+        process::exit(1);
+    })
+    .filter_map(|r| r.ok())
+    .collect()
+}
+
+/// Fetch incoming links (links_to) for an entry.
+fn fetch_links_to(conn: &Connection, entry_id: &str) -> Vec<serde_json::Value> {
+    let mut stmt = conn
+        .prepare("SELECT from_id, rel FROM links WHERE to_id = ?1")
+        .unwrap_or_else(|e| {
+            eprintln!("error: failed to query links: {e}");
+            process::exit(1);
+        });
+    stmt.query_map(rusqlite::params![entry_id], |r| {
+        Ok(serde_json::json!({
+            "from": r.get::<_, String>(0)?,
+            "rel": r.get::<_, String>(1)?
+        }))
+    })
+    .unwrap_or_else(|e| {
+        eprintln!("error: failed to query links: {e}");
+        process::exit(1);
+    })
+    .filter_map(|r| r.ok())
+    .collect()
 }
 
 /// Escape a field for CSV output: wrap in quotes if it contains commas, quotes, or newlines.
@@ -4928,6 +5125,7 @@ fn alias_run(name: &str, mode: &str, confirm: bool) {
             linked_to,
             linked_from,
             link_rel,
+            with_links,
         } => query(
             label,
             not_label,
@@ -4950,6 +5148,7 @@ fn alias_run(name: &str, mode: &str, confirm: bool) {
             linked_to,
             linked_from,
             link_rel,
+            with_links,
         ),
         Command::Export {
             id,
@@ -5325,6 +5524,7 @@ fn main() {
             linked_to,
             linked_from,
             link_rel,
+            with_links,
         } => query(
             label,
             not_label,
@@ -5347,6 +5547,7 @@ fn main() {
             linked_to,
             linked_from,
             link_rel,
+            with_links,
         ),
 
         Command::Export {
@@ -5447,6 +5648,7 @@ fn main() {
             before,
             json,
         ),
+        Command::Links { json, rel, entry } => links_cmd(json, rel, entry),
         Command::Link {
             from,
             to,

@@ -676,3 +676,14 @@
 - label: end-to-end integration test exercises all 5 new features (upsert, links, update, tally, changelog) together in a realistic workflow and passes all assertions
   command: bash tests/integration_top5.sh
   tags: [spec, implemented]
+
+## links-subcommand
+- label: links subcommand lists all links in the store, filtered by --rel and --entry, with tab-separated plain text or --json array output
+  command: ID=$(echo "links-fact-a" | agent-store push --label links-fact-test --id-only) && ID2=$(echo "links-fact-b" | agent-store push --label links-fact-test --id-only) && agent-store link "$ID" "$ID2" test-rel && PLAIN=$(agent-store links --rel test-rel) && echo "$PLAIN" | grep -q "test-rel" && JSON=$(agent-store links --json --entry "${ID:0:8}") && echo "$JSON" | python3 -c "import sys,json; d=json.load(sys.stdin); assert len(d)>=1 and d[0][\"rel\"]==\"test-rel\"" && agent-store delete "$ID" --json >/dev/null && agent-store delete "$ID2" --json >/dev/null && echo PASS
+  tags: [spec, implemented]
+- label: export includes links_from array in JSON/JSONL output for each entry that has outgoing links
+  command: ID=$(echo "export-links-a" | agent-store push --label export-link-test --id-only) && ID2=$(echo "export-links-b" | agent-store push --label export-link-test --id-only) && agent-store link "$ID" "$ID2" export-rel && JSONL=$(agent-store export --label export-link-test) && echo "$JSONL" | python3 -c "import sys,json; lines=[json.loads(l) for l in sys.stdin]; linked=[e for e in lines if \"links_from\" in e]; assert len(linked)>=1 and linked[0][\"links_from\"][0][\"rel\"]==\"export-rel\"" && agent-store delete "$ID" --json >/dev/null && agent-store delete "$ID2" --json >/dev/null && echo PASS
+  tags: [spec, implemented]
+- label: query --with-links --json includes links_from and links_to arrays on each entry, matching pull --with-links behavior
+  command: ID=$(echo "query-links-a" | agent-store push --label query-link-test --id-only) && ID2=$(echo "query-links-b" | agent-store push --label query-link-test --id-only) && agent-store link "$ID" "$ID2" qrel && JSON=$(agent-store query --label query-link-test --with-links --json) && echo "$JSON" | python3 -c "import sys,json; entries=json.load(sys.stdin); wl=[e for e in entries if len(e.get(\"links_from\",[]))>0]; assert len(wl)>=1 and wl[0][\"links_from\"][0][\"rel\"]==\"qrel\"; assert all(\"links_to\" in e for e in entries)" && agent-store delete "$ID" --json >/dev/null && agent-store delete "$ID2" --json >/dev/null && echo PASS
+  tags: [spec, implemented]

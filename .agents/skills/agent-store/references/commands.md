@@ -100,6 +100,7 @@ Options:
 - `--linked-to <ID>` — Find entries that link TO this entry (entries where to_id matches). Supports prefix matching
 - `--linked-from <ID>` — Find entries that this entry links TO (entries where from_id matches). Supports prefix matching
 - `--link-rel <REL>` — Filter linked results by relationship type (requires `--linked-to` or `--linked-from`)
+- `--with-links` — Include `links_from` and `links_to` arrays on each entry in JSON output (requires `--json`). Same format as `pull --with-links`
 - `--json` — Output as JSON array of full entry objects
 - `--count` — Output only the number of matching entries (just a number, for scripting)
 - `--latest` — Return only the single most recent matching entry (conflicts with `--limit`, `--first`, `--last`)
@@ -211,7 +212,8 @@ All filters match `query` — see `query` docs for filter semantics.
 
 - **`jsonl`** (default) — One JSON object per line. Each line is a self-contained
   JSON object with fields: `id`, `data`, `entity_type`, `created_at`, `labels`,
-  `attributes`. Streams well, works with `jq` and `wc -l`, and is the input
+  `attributes`. Entries with outgoing links also include a `links_from` array
+  of `{to, rel}` objects. Streams well, works with `jq` and `wc -l`, and is the input
   format for `import`.
 
 - **`json`** — Proper JSON array, pretty-printed with indentation. Contains the
@@ -588,6 +590,39 @@ agent-store unlink $A $B
 # JSON output
 agent-store unlink $A $B --json
 # {"from":"<uuid>","to":"<uuid>","removed":2}
+```
+
+## agent-store links
+
+List all links in the store, optionally filtered by relationship type or entry.
+
+```
+agent-store links [--json] [--rel <REL>] [--entry <ID>]
+```
+
+Flags:
+- `--json` — Output as JSON array of `{from, to, rel, created_at}` objects
+- `--rel <REL>` — Filter by relationship type
+- `--entry <ID>` — Filter to links involving this entry (as source or target). Supports prefix matching
+
+Plain text output: tab-separated `from_short\tto_short\trel` (8-char ID prefixes). Sorted by created_at descending (newest first).
+
+```bash
+# List all links
+agent-store links
+
+# Filter by relationship type
+agent-store links --rel depends-on
+
+# Links involving a specific entry
+agent-store links --entry abc123
+
+# JSON output
+agent-store links --json
+# [{"from":"<uuid>","to":"<uuid>","rel":"depends-on","created_at":"..."},...]
+
+# Combine filters
+agent-store links --rel blocks --entry abc123 --json
 ```
 
 ## agent-store set-attr
