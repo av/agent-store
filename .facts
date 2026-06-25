@@ -219,6 +219,12 @@
 - label: push without --timestamp uses current time as created_at (default behavior preserved)
   command: cd /tmp/as-test-timestamp && ID=$(echo "recent" | agent-store push --label test --id-only) && agent-store pull "$ID" --json | python3 -c "import sys,json; d=json.load(sys.stdin); assert d[\"created_at\"].startswith(\"20\"); print(\"OK\")"
   tags: [spec, implemented]
+- label: push --strip trims trailing whitespace from stdin data before storing
+  command: DIR=$(mktemp -d) && cd "$DIR" && agent-store init >/dev/null 2>&1 && ID=$(echo "hello" | agent-store push --label test --strip --id-only) && DATA=$(agent-store pull "$ID" --raw) && test "$DATA" = "hello" && rm -rf "$DIR"
+  tags: [spec, implemented]
+- label: push --strip works with --file flag to trim trailing whitespace from file data
+  command: DIR=$(mktemp -d) && cd "$DIR" && agent-store init >/dev/null 2>&1 && printf "file content\n\n" > testfile.txt && ID=$(agent-store push --file testfile.txt --strip --id-only) && DATA=$(agent-store pull "$ID" --raw) && test "$DATA" = "file content" && rm -rf "$DIR"
+  tags: [spec, implemented]
 
 ## completions
 - label: agent-store completions <shell> generates shell completion scripts for the specified shell and writes to stdout
@@ -276,6 +282,17 @@
   tags: [spec, implemented]
 - label: pull --raw omits trailing newline for binary-safe piping
   command: TEST_ID=$(echo -n "rawtest" | agent-store push --id-only --label raw-test) && BYTES=$(agent-store pull "$TEST_ID" --raw | wc -c) && test "$BYTES" = "7"
+  tags: [spec, implemented]
+
+## attrs
+- label: agent-store attrs lists all unique attribute keys in the store, one per line, sorted alphabetically
+  command: DIR=$(mktemp -d) && cd "$DIR" && agent-store init >/dev/null 2>&1 && echo "d1" | agent-store push --attr color=red --attr size=large -q && echo "d2" | agent-store push --attr color=blue --attr weight=10 -q && OUTPUT=$(agent-store attrs) && echo "$OUTPUT" | head -1 | grep -q "^color$" && test "$(echo "$OUTPUT" | wc -l)" = "3" && rm -rf "$DIR"
+  tags: [spec, implemented]
+- label: agent-store attrs --json outputs a JSON array of unique attribute keys
+  command: DIR=$(mktemp -d) && cd "$DIR" && agent-store init >/dev/null 2>&1 && echo "d1" | agent-store push --attr color=red --attr size=large -q && agent-store attrs --json | python3 -c "import json,sys; d=json.load(sys.stdin); assert d==[\"color\",\"size\"]" && rm -rf "$DIR"
+  tags: [spec, implemented]
+- label: agent-store attrs --count shows entry count next to each attribute key
+  command: DIR=$(mktemp -d) && cd "$DIR" && agent-store init >/dev/null 2>&1 && echo "d1" | agent-store push --attr color=red -q && echo "d2" | agent-store push --attr color=blue -q && echo "d3" | agent-store push --attr size=large -q && agent-store attrs --count | head -1 | grep -q "^color (2)$" && rm -rf "$DIR"
   tags: [spec, implemented]
 
 # resilience

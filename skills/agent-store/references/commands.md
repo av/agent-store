@@ -32,6 +32,7 @@ Options:
 - `-q`, `--quiet` — Suppress all output (for scripting when no feedback is needed)
 - `--id-only` — Output only the raw UUID (no "stored entry" prefix). Conflicts with `--quiet`
 - `--timestamp <DATETIME>` — Override created_at timestamp (ISO 8601: `"2024-01-15 10:30:00"` or `"2024-01-15"`). Default: current time
+- `--strip` — Strip trailing whitespace (including newlines) from data before storing. Useful with `echo` which adds a trailing newline
 
 Data is read from stdin until EOF (or from `--file` if provided). Empty
 input is an error. When `--file` is set, it takes precedence over stdin.
@@ -42,6 +43,7 @@ Scripting example:
 ```bash
 ID=$(echo "data" | agent-store push --label tag --id-only)
 agent-store push --label config --file config.json
+echo "data" | agent-store push --label x --strip    # stores "data", not "data\n"
 ```
 
 ## agent-store pull \<ID\>
@@ -316,6 +318,31 @@ agent-store types --json               # ["config","note","task"]
 # With counts
 agent-store types --count              # config (1)\n note (3)\n task (2)
 agent-store types --count --json       # {"config":1,"note":3,"task":2}
+```
+
+## agent-store attrs
+
+List all unique attribute keys in the store, one per line, sorted alphabetically.
+Same pattern as `labels` and `types` but for attribute keys.
+
+```
+agent-store attrs [--json] [--count]
+```
+
+Options:
+- `--json` — Output as a JSON array of key strings (or JSON object of key-to-count when combined with `--count`)
+- `--count` — Show entry count next to each attribute key
+
+```bash
+# Plain list (one per line, sorted)
+agent-store attrs
+
+# JSON array
+agent-store attrs --json               # ["color","size","weight"]
+
+# With counts
+agent-store attrs --count              # color (3)\n size (1)\n weight (2)
+agent-store attrs --count --json       # {"color":3,"size":1,"weight":2}
 ```
 
 ## agent-store completions

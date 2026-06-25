@@ -101,7 +101,7 @@ agent-store stats     # entry count and store size
 | Command | What it does |
 |---------|-------------|
 | `init` | Create `.agent-store/store.db`, install skills to `.agents/skills/`, set up project docs |
-| `push` | Read stdin (or `--file`), store as entry. Flags: `--label`, `--type`, `--attr key=value`, `--timestamp`, `-f`/`--file`, `-q`/`--quiet`, `--id-only` |
+| `push` | Read stdin (or `--file`), store as entry. Flags: `--label`, `--type`, `--attr key=value`, `--timestamp`, `-f`/`--file`, `-q`/`--quiet`, `--id-only`, `--strip` |
 | `pull <id>` | Retrieve entry by ID, print data to stdout. Flags: `--json` (full entry as JSON object), `--raw` (omit trailing newline for binary-safe piping) |
 | `query` | List entries. Filter: `--label` (repeat), `--not-label` (repeat, exclude), `--type`, `--attr key=value` (repeat), `--data <substring>`, `--after <datetime>`, `--before <datetime>`, `--json`, `--count`, `--latest`, `--limit N`, `--offset N`, `-r`/`--reverse` |
 | `schema` | Show entity types and label counts |
@@ -112,6 +112,7 @@ agent-store stats     # entry count and store size
 | `purge` | Delete ALL entries (destructive). Requires `--confirm` flag. |
 | `labels` | List all unique labels in the store, sorted. Flags: `--json` (JSON array), `--count` (with counts) |
 | `types` | List all unique entity types in the store, sorted. Flags: `--json` (JSON array), `--count` (with counts) |
+| `attrs` | List all unique attribute keys in the store, sorted. Flags: `--json` (JSON array), `--count` (with counts) |
 | `info` | Show store configuration and environment. Flags: `--json` |
 | `completions <shell>` | Generate shell completions (bash, zsh, fish, elvish, powershell) |
 
@@ -150,6 +151,10 @@ agent-store push --type artifact -f output.txt
 
 # Override the created_at timestamp (for migrations, imports)
 echo "historical data" | agent-store push --type note --timestamp "2020-01-15 10:30:00"
+
+# Strip trailing whitespace/newlines from data before storing
+echo "data" | agent-store push --label x --strip    # stores "data", not "data\n"
+agent-store push --file output.txt --strip           # strip works with --file too
 ```
 
 ## Querying data
@@ -342,8 +347,8 @@ Fields: `store_path`, `db_path`, `db_size_bytes`, `agent_store_path_env`,
 
 ## Discovery
 
-List what labels and entity types exist in the store — useful for agents
-exploring a store without querying all entries:
+List what labels, entity types, and attribute keys exist in the store — useful
+for agents exploring a store without querying all entries:
 
 ```bash
 # List all unique labels (sorted, one per line)
@@ -365,6 +370,16 @@ agent-store types --json
 # Types with entry counts
 agent-store types --count
 agent-store types --count --json
+
+# List all unique attribute keys (sorted, one per line)
+agent-store attrs
+
+# JSON array of attribute keys
+agent-store attrs --json
+
+# Attribute keys with entry counts
+agent-store attrs --count
+agent-store attrs --count --json
 ```
 
 ## Shell completions

@@ -64,6 +64,9 @@ enum Command {
         /// Read data from a file instead of stdin
         #[arg(long, short = 'f')]
         file: Option<String>,
+        /// Strip trailing whitespace (including newlines) from data before storing
+        #[arg(long)]
+        strip: bool,
     },
     /// Pull an entry by ID and print to stdout
     Pull {
@@ -199,6 +202,15 @@ enum Command {
         #[arg(long)]
         json: bool,
         /// Show count next to each type
+        #[arg(long)]
+        count: bool,
+    },
+    /// List all unique attribute keys in the store
+    Attrs {
+        /// Output as JSON array
+        #[arg(long)]
+        json: bool,
+        /// Show count next to each key
         #[arg(long)]
         count: bool,
     },
@@ -735,7 +747,8 @@ fn parse_attr(attr: &str) -> (&str, &str) {
     }
 }
 
-fn push(labels: Vec<String>, entity_type: Option<String>, quiet: bool, id_only: bool, attrs: Vec<String>, timestamp: Option<String>, file: Option<String>) {
+#[allow(clippy::too_many_arguments)]
+fn push(labels: Vec<String>, entity_type: Option<String>, quiet: bool, id_only: bool, attrs: Vec<String>, timestamp: Option<String>, file: Option<String>, strip: bool) {
     // Validate empty strings before any DB work
     for label in &labels {
         if label.trim().is_empty() {
@@ -782,6 +795,12 @@ fn push(labels: Vec<String>, entity_type: Option<String>, quiet: bool, id_only: 
             process::exit(1);
         }
         buf
+    };
+
+    let data = if strip {
+        data.trim_end().to_string()
+    } else {
+        data
     };
 
     if data.is_empty() {
@@ -2085,6 +2104,83 @@ fn types_cmd(json: bool, count: bool) {
     }
 }
 
+fn attrs_cmd(json: bool, count: bool) {
+    let conn = open_db();
+
+    if count {
+        // Attr keys with counts
+        let mut stmt = match conn
+            .prepare("SELECT key, COUNT(*) FROM attributes GROUP BY key ORDER BY key")
+        {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("error: failed to query attributes: {e}");
+                process::exit(1);
+            }
+        };
+
+        let rows: Vec<(String, i64)> =
+            match stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?))) {
+                Ok(r) => r.filter_map(|r| r.ok()).collect(),
+                Err(e) => {
+                    eprintln!("error: failed to query attributes: {e}");
+                    process::exit(1);
+                }
+            };
+
+        if json {
+            // JSON object: {"key": count, ...}
+            let map: serde_json::Map<String, serde_json::Value> = rows
+                .into_iter()
+                .map(|(k, c)| (k, serde_json::Value::Number(c.into())))
+                .collect();
+            match serde_json::to_string(&map) {
+                Ok(s) => println!("{s}"),
+                Err(e) => {
+                    eprintln!("error: failed to serialize JSON: {e}");
+                    process::exit(1);
+                }
+            }
+        } else {
+            for (key, c) in &rows {
+                println!("{key} ({c})");
+            }
+        }
+    } else {
+        // Just unique attr keys, sorted
+        let mut stmt =
+            match conn.prepare("SELECT DISTINCT key FROM attributes ORDER BY key") {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("error: failed to query attributes: {e}");
+                    process::exit(1);
+                }
+            };
+
+        let rows: Vec<String> = match stmt.query_map([], |row| row.get::<_, String>(0)) {
+            Ok(r) => r.filter_map(|r| r.ok()).collect(),
+            Err(e) => {
+                eprintln!("error: failed to query attributes: {e}");
+                process::exit(1);
+            }
+        };
+
+        if json {
+            match serde_json::to_string(&rows) {
+                Ok(s) => println!("{s}"),
+                Err(e) => {
+                    eprintln!("error: failed to serialize JSON: {e}");
+                    process::exit(1);
+                }
+            }
+        } else {
+            for key in &rows {
+                println!("{key}");
+            }
+        }
+    }
+}
+
 fn main() {
     // Reset SIGPIPE to default so piping to head/tail/etc. exits cleanly
     // instead of panicking with "Broken pipe".
@@ -2105,7 +2201,8 @@ fn main() {
             attr,
             timestamp,
             file,
-        } => push(label, entity_type, quiet, id_only, attr, timestamp, file),
+            strip,
+        } => push(label, entity_type, quiet, id_only, attr, timestamp, file, strip),
         Command::Pull { id, json, raw } => pull(&id, json, raw),
         Command::Query {
             id,
@@ -2146,6 +2243,7 @@ fn main() {
         Command::Info { json } => info(json),
         Command::Labels { json, count } => labels_cmd(json, count),
         Command::Types { json, count } => types_cmd(json, count),
+        Command::Attrs { json, count } => attrs_cmd(json, count),
         Command::Completions { shell } => {
             let mut cmd = Cli::command();
             clap_complete::generate(shell, &mut cmd, "agent-store", &mut std::io::stdout());
