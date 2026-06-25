@@ -259,6 +259,15 @@
 - label: export --not-type and --not-attr exclusion filters match query filter parity
   command: agent-store init 2>/dev/null; echo "a" | agent-store push --type note --label test-ent; echo "b" | agent-store push --type log --label test-ent; RESULT=$(agent-store export --label test-ent --not-type note 2>/dev/null | jq -r ".data"); [ "$RESULT" = "b" ] && echo "PASS" || echo "FAIL: got $RESULT"
   tags: [spec, implemented]
+- label: export --format jsonl (default) outputs one JSON object per line, matching current behavior
+  command: agent-store push --label test-fmt <<< "hello" && agent-store export --format jsonl --label test-fmt | python3 -c "import sys,json; lines=sys.stdin.read().strip().split(chr(10)); assert len(lines)>=1; [json.loads(l) for l in lines]; print(\"PASS\")" && agent-store delete --label test-fmt --confirm
+  tags: [spec, implemented]
+- label: export --format json outputs a proper JSON array with brackets and commas
+  command: agent-store push --label test-fmt <<< "hello" && agent-store export --format json --label test-fmt | python3 -c "import sys,json; data=json.load(sys.stdin); assert isinstance(data,list); assert len(data)>=1; print(\"PASS\")" && agent-store delete --label test-fmt --confirm
+  tags: [spec, implemented]
+- label: export --format csv outputs CSV with headers id,created_at,entity_type,labels,data
+  command: agent-store push --label test-csv <<< "hello world" && agent-store export --format csv --label test-csv | python3 -c "import sys; lines=sys.stdin.read().strip().split(chr(10)); assert lines[0]==\"id,created_at,entity_type,labels,data\"; assert len(lines)>=2; print(\"PASS\")" && agent-store delete --label test-csv --confirm
+  tags: [spec, implemented]
 
 ## import
 - label: agent-store import reads JSONL from stdin and inserts entries into the store, printing a summary of imported entries and errors

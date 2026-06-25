@@ -161,7 +161,7 @@ enum Command {
         #[command(subcommand)]
         action: SkillsAction,
     },
-    /// Export entries as JSONL (one JSON object per line) for backup and migration
+    /// Export entries for backup, migration, or piping to other tools
     Export {
         /// Filter by entry ID
         #[arg(long)]
@@ -196,6 +196,9 @@ enum Command {
         /// Only entries created before this timestamp (ISO 8601)
         #[arg(long)]
         before: Option<String>,
+        /// Output format: jsonl (default, one JSON object per line), json (array), csv
+        #[arg(long, default_value = "jsonl")]
+        format: String,
     },
     /// Import entries from JSONL on stdin (complement of export)
     Import {
@@ -1846,7 +1849,16 @@ fn export(
     after: Option<String>,
     before: Option<String>,
     id_filter: Option<String>,
+    format: &str,
 ) {
+    match format {
+        "jsonl" | "json" | "csv" => {}
+        _ => {
+            eprintln!("error: unknown format '{format}', expected jsonl, json, or csv");
+            process::exit(1);
+        }
+    }
+
     let filters = FilterArgs {
         labels,
         not_labels,
@@ -1903,11 +1915,14 @@ fn export(
         }
     };
 
+    // Collect entries for all formats (json/csv need buffering; jsonl streams)
+    let mut entries: Vec<EntryJson> = Vec::new();
+
     for row in rows {
         match row {
             Ok((id, data, etype, created_at)) => {
                 // Fetch labels for this entry
-                let labels = {
+                let entry_labels = {
                     let mut lstmt =
                         match conn.prepare("SELECT label FROM labels WHERE entry_id = ?1") {
                             Ok(s) => s,
@@ -1952,16 +1967,21 @@ fn export(
                     data,
                     entity_type: etype,
                     created_at,
-                    labels,
+                    labels: entry_labels,
                     attributes,
                 };
 
-                match serde_json::to_string(&entry) {
-                    Ok(json_str) => println!("{json_str}"),
-                    Err(e) => {
-                        eprintln!("error: failed to serialize entry: {e}");
-                        process::exit(1);
+                if format == "jsonl" {
+                    // Stream immediately for JSONL
+                    match serde_json::to_string(&entry) {
+                        Ok(json_str) => println!("{json_str}"),
+                        Err(e) => {
+                            eprintln!("error: failed to serialize entry: {e}");
+                            process::exit(1);
+                        }
                     }
+                } else {
+                    entries.push(entry);
                 }
             }
             Err(e) => {
@@ -1969,6 +1989,48 @@ fn export(
                 process::exit(1);
             }
         }
+    }
+
+    match format {
+        "json" => match serde_json::to_string_pretty(&entries) {
+            Ok(json_str) => println!("{json_str}"),
+            Err(e) => {
+                eprintln!("error: failed to serialize entries: {e}");
+                process::exit(1);
+            }
+        },
+        "csv" => {
+            println!("id,created_at,entity_type,labels,data");
+            for entry in &entries {
+                let etype = entry.entity_type.as_deref().unwrap_or("");
+                let labels_str = entry.labels.join(";");
+                // Truncate data to 100 chars
+                let data_truncated = if entry.data.len() > 100 {
+                    format!("{}...", &entry.data[..100])
+                } else {
+                    entry.data.clone()
+                };
+                // CSV-escape fields that may contain commas, quotes, or newlines
+                println!(
+                    "{},{},{},{},{}",
+                    csv_escape(&entry.id),
+                    csv_escape(&entry.created_at),
+                    csv_escape(etype),
+                    csv_escape(&labels_str),
+                    csv_escape(&data_truncated),
+                );
+            }
+        }
+        _ => {} // jsonl already streamed above
+    }
+}
+
+/// Escape a field for CSV output: wrap in quotes if it contains commas, quotes, or newlines.
+fn csv_escape(field: &str) -> String {
+    if field.contains(',') || field.contains('"') || field.contains('\n') || field.contains('\r') {
+        format!("\"{}\"", field.replace('"', "\"\""))
+    } else {
+        field.to_string()
     }
 }
 
@@ -3420,6 +3482,7 @@ fn alias_run(name: &str, mode: &str, confirm: bool) {
             search,
             after,
             before,
+            format,
         } => export(
             label,
             not_label,
@@ -3432,6 +3495,7 @@ fn alias_run(name: &str, mode: &str, confirm: bool) {
             after,
             before,
             id,
+            &format,
         ),
         Command::Delete {
             id,
@@ -3616,6 +3680,7 @@ fn main() {
             search,
             after,
             before,
+            format,
         } => export(
             label,
             not_label,
@@ -3628,6 +3693,7 @@ fn main() {
             after,
             before,
             id,
+            &format,
         ),
         Command::Import { dry_run } => import(dry_run),
         Command::Delete {
