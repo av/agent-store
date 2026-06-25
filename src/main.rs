@@ -600,6 +600,9 @@ fn init() {
     if had_errors {
         process::exit(1);
     }
+
+    println!();
+    println!("  hint   run `agent-store skills get agent-store` to get started");
 }
 
 fn parse_attr(attr: &str) -> (&str, &str) {
@@ -734,10 +737,16 @@ fn query(labels: Vec<String>, entity_type: Option<String>, attrs: Vec<String>, j
         }
     }
 
-    let conn = open_db();
-
-    // Parse attribute filters
+    // Parse and validate attribute filters
     let parsed_attrs: Vec<(&str, &str)> = attrs.iter().map(|a| parse_attr(a)).collect();
+    for (key, _) in &parsed_attrs {
+        if key.trim().is_empty() {
+            eprintln!("error: attribute key cannot be empty");
+            process::exit(1);
+        }
+    }
+
+    let conn = open_db();
 
     // Build query dynamically — select all fields when --json, only data otherwise
     let select_cols = if json {

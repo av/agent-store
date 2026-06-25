@@ -111,6 +111,9 @@
 - label: agent-store init adds .agent-store/ to .gitignore in git repos so the SQLite database is not accidentally committed
   command: cd /tmp/as-test-gitignore && rm -rf .agent-store .agents .gitignore .git AGENTS.md && mkdir -p .git && agent-store init && grep -q ".agent-store/" .gitignore && echo "OK"
   tags: [spec, implemented]
+- label: agent-store init prints a hint directing users to skills after successful completion
+  command: rm -rf /tmp/as-hint-test2 && mkdir -p /tmp/as-hint-test2/.git && cd /tmp/as-hint-test2 && /home/everlier/code/agent-store/target/release/agent-store init 2>&1 | grep -q "hint.*skills get agent-store" && echo "OK"
+  tags: [spec, implemented]
 
 ## help
 - label: agent-store --help shows Start here section directing agents to skills
@@ -141,6 +144,9 @@
 ## query
 - label: query --label accepts multiple values with AND semantics, matching push repeatable --label
   command: cd /tmp/as-test-m3 && rm -rf .agent-store && agent-store init > /dev/null && echo "ab" | agent-store push --label a --label b --quiet > /dev/null && echo "a-only" | agent-store push --label a --quiet > /dev/null && echo "b-only" | agent-store push --label b --quiet > /dev/null && result=$(agent-store query --label a --label b) && [ "$result" = "ab" ]
+  tags: [spec, implemented]
+- label: query --attr rejects empty key with "attribute key cannot be empty" error and exit 1, matching push validation
+  command: cd /tmp/as-test-m3 && /home/everlier/code/agent-store/target/release/agent-store query --attr "=" 2>&1 | grep -q "attribute key cannot be empty" && echo "OK"
   tags: [spec, implemented]
 
 # resilience
