@@ -56,8 +56,13 @@ Options:
 - `--type <TYPE>` — Filter by entity type (exact match)
 - `--attr <KEY=VALUE>` — Filter by attribute (can be repeated, AND logic — all must match)
 - `--json` — Output as JSON array of full entry objects
+- `--count` — Output only the number of matching entries (just a number, for scripting)
+- `--limit <N>` — Return at most N entries
+- `--offset <N>` — Skip first N entries (requires `--limit`)
 
 Without any filter flags, returns all entries.
+
+`--count` ignores `--limit`/`--offset` and always reports the total matching count.
 
 **Default output:** raw entry data (payloads only) concatenated with no
 separator. Entries appear on separate lines only if their data contains

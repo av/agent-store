@@ -93,7 +93,7 @@ agent-store stats     # entry count and store size
 | `init` | Create `.agent-store/store.db`, install skills to `.agents/skills/`, set up project docs |
 | `push` | Read stdin, store as entry. Flags: `--label`, `--type`, `--attr key=value`, `--quiet` |
 | `pull <id>` | Retrieve entry by ID, print data to stdout |
-| `query` | List entries. Filter: `--label` (repeat), `--type`, `--attr key=value` (repeat), `--json` |
+| `query` | List entries. Filter: `--label` (repeat), `--type`, `--attr key=value` (repeat), `--json`, `--count`, `--limit N`, `--offset N` |
 | `schema` | Show entity types and label counts |
 | `stats` | Show entry count and store size |
 | `skills` | List and read built-in usage guides |
@@ -148,6 +148,13 @@ agent-store query --label review --type task --attr status=open
 
 # JSON output — array of objects with id, data, entity_type, created_at, labels, attributes
 agent-store query --json
+
+# Count matching entries (outputs just a number — useful for scripting)
+agent-store query --label urgent --count
+
+# Pagination
+agent-store query --limit 10                  # first 10 entries
+agent-store query --limit 10 --offset 20      # entries 21-30
 ```
 
 **Default output** is raw entry data (just the payloads) concatenated with no

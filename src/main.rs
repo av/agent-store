@@ -72,6 +72,15 @@ enum Command {
         /// Output as JSON array
         #[arg(long)]
         json: bool,
+        /// Output only the count of matching entries
+        #[arg(long)]
+        count: bool,
+        /// Return at most N entries
+        #[arg(long)]
+        limit: Option<u64>,
+        /// Skip first N entries (requires --limit)
+        #[arg(long, requires = "limit")]
+        offset: Option<u64>,
     },
     /// Show entity types and label counts
     Schema,
@@ -722,7 +731,7 @@ struct EntryJson {
     attributes: HashMap<String, String>,
 }
 
-fn query(labels: Vec<String>, entity_type: Option<String>, attrs: Vec<String>, json: bool) {
+fn query(labels: Vec<String>, entity_type: Option<String>, attrs: Vec<String>, json: bool, count: bool, limit: Option<u64>, offset: Option<u64>) {
     // Validate empty strings before any DB work
     for label in &labels {
         if label.trim().is_empty() {
@@ -748,8 +757,10 @@ fn query(labels: Vec<String>, entity_type: Option<String>, attrs: Vec<String>, j
 
     let conn = open_db();
 
-    // Build query dynamically — select all fields when --json, only data otherwise
-    let select_cols = if json {
+    // Build query dynamically
+    let select_cols = if count {
+        "COUNT(DISTINCT e.id)"
+    } else if json {
         "e.id, e.data, e.entity_type, e.created_at"
     } else {
         "DISTINCT e.data"
@@ -796,7 +807,29 @@ fn query(labels: Vec<String>, entity_type: Option<String>, attrs: Vec<String>, j
         sql.push_str(&conditions.join(" AND "));
     }
 
-    if json {
+    // Add LIMIT/OFFSET (not applied when --count)
+    if !count {
+        if let Some(lim) = limit {
+            sql.push_str(&format!(" LIMIT {lim}"));
+            if let Some(off) = offset {
+                sql.push_str(&format!(" OFFSET {off}"));
+            }
+        }
+    }
+
+    if count {
+        // Count-only output: single integer
+        let params_refs: Vec<&dyn rusqlite::types::ToSql> =
+            params.iter().map(|p| p.as_ref()).collect();
+        let result: i64 = match conn.query_row(&sql, params_refs.as_slice(), |row| row.get(0)) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("error: failed to execute count query: {e}");
+                process::exit(1);
+            }
+        };
+        println!("{result}");
+    } else if json {
         // JSON output: collect full entry objects
         let mut stmt = match conn.prepare(&sql) {
             Ok(s) => s,
@@ -1092,7 +1125,10 @@ fn main() {
             entity_type,
             attr,
             json,
-        } => query(label, entity_type, attr, json),
+            count,
+            limit,
+            offset,
+        } => query(label, entity_type, attr, json, count, limit, offset),
 
         Command::Schema => schema(),
         Command::Stats => stats(),

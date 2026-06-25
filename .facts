@@ -148,6 +148,15 @@
 - label: query --attr rejects empty key with "attribute key cannot be empty" error and exit 1, matching push validation
   command: cd /tmp/as-test-m3 && /home/everlier/code/agent-store/target/release/agent-store query --attr "=" 2>&1 | grep -q "attribute key cannot be empty" && echo "OK"
   tags: [spec, implemented]
+- label: query --count outputs the number of matching entries instead of entry data
+  command: echo "count-test-data" | agent-store push --label count-test-xx --quiet > /dev/null && count=$(agent-store query --label count-test-xx --count) && test "$count" -ge 1 && echo "PASS: count=$count"
+  tags: [spec, implemented]
+- label: query --limit N returns at most N entries
+  command: echo "limit-test" | agent-store push --label limit-test-xx --quiet > /dev/null && echo "limit-test-2" | agent-store push --label limit-test-xx --quiet > /dev/null && result=$(agent-store query --label limit-test-xx --json --limit 1 | jq length) && test "$result" -eq 1 && echo "PASS: limit=1 returned 1 entry"
+  tags: [spec, implemented]
+- label: query --offset N skips the first N entries (requires --limit)
+  command: echo "offset-test-1" | agent-store push --label offset-test-xx --quiet > /dev/null && echo "offset-test-2" | agent-store push --label offset-test-xx --quiet > /dev/null && all=$(agent-store query --label offset-test-xx --json | jq length) && offset_result=$(agent-store query --label offset-test-xx --json --limit 100 --offset 1 | jq length) && test "$offset_result" -lt "$all" && echo "PASS: offset skipped entries"
+  tags: [spec, implemented]
 
 # resilience
 - PRAGMA foreign_keys = ON is set on every database connection so ON DELETE CASCADE is enforced @spec @implemented
