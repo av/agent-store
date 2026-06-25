@@ -29,8 +29,8 @@ Start here (for AI agents):
   skills get agent-store-pipelines         Shell composition (import, export, chaining)
   skills path [name]                       Print skill directory path",
     after_long_help = "\
-agent-store is append-only by design. There are no update or delete commands. \
-To supersede an entry, push a new one with the same labels."
+agent-store is append-only for data by design. Entry payloads cannot be \
+modified after push. Labels can be added or removed with `tag` and `untag`."
 )]
 struct Cli {
     #[command(subcommand)]
@@ -225,6 +225,22 @@ enum Command {
         /// Show count next to each key
         #[arg(long)]
         count: bool,
+    },
+    /// Add labels to an existing entry
+    Tag {
+        /// Entry ID to tag
+        id: String,
+        /// Labels to add (at least one required)
+        #[arg(required = true)]
+        label: Vec<String>,
+    },
+    /// Remove labels from an existing entry
+    Untag {
+        /// Entry ID to untag
+        id: String,
+        /// Labels to remove (at least one required)
+        #[arg(required = true)]
+        label: Vec<String>,
     },
     /// Show chronological history of entries with a given label
     History {
@@ -2264,6 +2280,78 @@ fn attrs_cmd(json: bool, count: bool) {
     }
 }
 
+fn resolve_entry_id(conn: &Connection, id: &str) -> String {
+    let exists: bool = conn
+        .query_row(
+            "SELECT COUNT(*) FROM entries WHERE id = ?1",
+            rusqlite::params![id],
+            |row| row.get::<_, i64>(0),
+        )
+        .map(|c| c > 0)
+        .unwrap_or(false);
+
+    if !exists {
+        eprintln!("error: entry not found: {id}");
+        process::exit(1);
+    }
+    id.to_string()
+}
+
+fn tag(id: &str, labels: Vec<String>) {
+    // Validate labels
+    for label in &labels {
+        if label.trim().is_empty() {
+            eprintln!("error: label cannot be empty");
+            process::exit(1);
+        }
+    }
+
+    let conn = open_db();
+    let id = resolve_entry_id(&conn, id);
+
+    for label in &labels {
+        // INSERT OR IGNORE for idempotency — duplicate (entry_id, label) is a no-op
+        if let Err(e) = conn.execute(
+            "INSERT OR IGNORE INTO labels (entry_id, label) VALUES (?1, ?2)",
+            rusqlite::params![id, label],
+        ) {
+            eprintln!("error: failed to add label: {e}");
+            process::exit(1);
+        }
+    }
+
+    let short_id = &id[..7.min(id.len())];
+    let label_list = labels.join(", ");
+    eprintln!("Tagged {short_id} with: {label_list}");
+}
+
+fn untag(id: &str, labels: Vec<String>) {
+    // Validate labels
+    for label in &labels {
+        if label.trim().is_empty() {
+            eprintln!("error: label cannot be empty");
+            process::exit(1);
+        }
+    }
+
+    let conn = open_db();
+    let id = resolve_entry_id(&conn, id);
+
+    for label in &labels {
+        if let Err(e) = conn.execute(
+            "DELETE FROM labels WHERE entry_id = ?1 AND label = ?2",
+            rusqlite::params![id, label],
+        ) {
+            eprintln!("error: failed to remove label: {e}");
+            process::exit(1);
+        }
+    }
+
+    let short_id = &id[..7.min(id.len())];
+    let label_list = labels.join(", ");
+    eprintln!("Untagged {short_id}: {label_list}");
+}
+
 fn history(label: &str, json: bool, limit: Option<u64>, data_filter: Option<String>) {
     let conn = open_db();
 
@@ -2501,7 +2589,16 @@ fn main() {
             after,
             before,
         } => export(
-            label, not_label, entity_type, not_type, attr, not_attr, data, after, before, id,
+            label,
+            not_label,
+            entity_type,
+            not_type,
+            attr,
+            not_attr,
+            data,
+            after,
+            before,
+            id,
         ),
         Command::Import { dry_run } => import(dry_run),
         Command::Purge { confirm } => purge(confirm),
@@ -2516,6 +2613,8 @@ fn main() {
         Command::Labels { json, count } => labels_cmd(json, count),
         Command::Types { json, count } => types_cmd(json, count),
         Command::Attrs { json, count } => attrs_cmd(json, count),
+        Command::Tag { id, label } => tag(&id, label),
+        Command::Untag { id, label } => untag(&id, label),
         Command::History {
             label,
             json,
