@@ -173,38 +173,6 @@ agent-store history config --limit 5
 agent-store history config --data "database"
 ```
 
-## Full-text search
-
-Search entry content using FTS5 full-text search — much more powerful
-than `--data` substring matching. Supports phrases, boolean operators,
-and prefix matching.
-
-```bash
-# Basic search
-agent-store query --search "authentication"
-
-# Phrase search (exact phrase)
-agent-store query --search '"rate limiting"'
-
-# Boolean operators
-agent-store query --search "auth OR authentication"
-agent-store query --search "auth NOT expired"
-
-# Prefix matching
-agent-store query --search "config*"
-
-# Combine with filters
-agent-store query --search "middleware" --type knowledge
-agent-store query --search "error" --label backend --json
-
-# Also works with export and delete
-agent-store export --search "deprecated"
-agent-store delete --search "temp" --type scratch --confirm
-```
-
-Results are ordered by relevance when `--search` is active (most relevant
-first). Use `--reverse` to fall back to chronological ordering.
-
 ## Pushing data
 
 ```bash
