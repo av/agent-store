@@ -100,6 +100,8 @@ Options:
 - `--linked-to <ID>` — Find entries that link TO this entry (entries where to_id matches). Supports prefix matching
 - `--linked-from <ID>` — Find entries that this entry links TO (entries where from_id matches). Supports prefix matching
 - `--link-rel <REL>` — Filter linked results by relationship type (requires `--linked-to` or `--linked-from`)
+- `--has-links` — Only entries with at least one outgoing link
+- `--no-links` — Only entries with no outgoing links
 - `--json` — Output as JSON array of full entry objects
 - `--count` — Output only the number of matching entries (just a number, for scripting)
 - `--latest` — Return only the single most recent matching entry (conflicts with `--limit`, `--first`, `--last`)

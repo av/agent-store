@@ -208,6 +208,12 @@
 - label: query --not-attr key=value excludes entries having the specified attribute; repeatable with AND semantics
   command: agent-store init 2>/dev/null; echo "keep" | agent-store push --attr status=active --label test-na; echo "drop" | agent-store push --attr status=archived --label test-na; RESULT=$(agent-store query --label test-na --not-attr status=archived --json 2>/dev/null | jq -r ".[].data"); [ "$RESULT" = "keep" ] && echo "PASS" || echo "FAIL: got $RESULT"
   tags: [spec, implemented]
+- label: query --has-links returns only entries with at least one outgoing link
+  command: bash -c "cd /tmp && rm -rf test-haslinks && mkdir test-haslinks && cd test-haslinks && agent-store init >/dev/null 2>&1 && A=\$(echo a | agent-store push --id-only --strip) && B=\$(echo b | agent-store push --id-only --strip) && agent-store link \$A \$B rel && COUNT=\$(agent-store query --has-links --count) && [ \"\$COUNT\" = \"1\" ]"
+  tags: [spec, implemented]
+- label: query --no-links returns only entries with no outgoing links
+  command: bash -c "cd /tmp && rm -rf test-nolinks && mkdir test-nolinks && cd test-nolinks && agent-store init >/dev/null 2>&1 && A=\$(echo a | agent-store push --id-only --strip) && B=\$(echo b | agent-store push --id-only --strip) && agent-store link \$A \$B rel && COUNT=\$(agent-store query --no-links --count) && [ \"\$COUNT\" = \"1\" ]"
+  tags: [spec, implemented]
 
 ## push
 - label: push -q/--quiet suppresses all output including the entry ID

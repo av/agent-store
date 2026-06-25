@@ -170,6 +170,12 @@ enum Command {
         /// include outgoing and incoming links in JSON output (requires --json)
         #[arg(long = "with-links")]
         with_links: bool,
+        /// only entries with at least one outgoing link
+        #[arg(long = "has-links")]
+        has_links: bool,
+        /// only entries with no outgoing links
+        #[arg(long = "no-links")]
+        no_links: bool,
     },
     /// Show entity types and label counts
     Schema,
@@ -1639,6 +1645,8 @@ fn push(
             after: None,
             before: None,
             id_filter: None,
+            has_links: false,
+            no_links: false,
         };
 
         let (joins, conditions, params) = filter.build_filter_sql();
@@ -1942,6 +1950,8 @@ struct FilterArgs {
     after: Option<String>,
     before: Option<String>,
     id_filter: Option<String>,
+    has_links: bool,
+    no_links: bool,
 }
 
 impl FilterArgs {
@@ -2085,6 +2095,14 @@ impl FilterArgs {
             params.push(Box::new(ts.clone()));
             param_idx += 1;
         }
+        // Link presence filters
+        if self.has_links {
+            conditions.push("e.id IN (SELECT DISTINCT from_id FROM links)".to_string());
+        }
+        if self.no_links {
+            conditions.push("e.id NOT IN (SELECT DISTINCT from_id FROM links)".to_string());
+        }
+
         let _ = param_idx; // suppress unused assignment warning
 
         (joins, conditions, params)
@@ -2327,6 +2345,8 @@ fn query(
     linked_from: Option<String>,
     link_rel: Option<String>,
     with_links: bool,
+    has_links: bool,
+    no_links: bool,
 ) {
     let filters = FilterArgs {
         labels,
@@ -2340,6 +2360,8 @@ fn query(
         after,
         before,
         id_filter,
+        has_links,
+        no_links,
     };
     filters.validate();
 
@@ -2630,6 +2652,8 @@ fn export(
         after,
         before,
         id_filter,
+        has_links: false,
+        no_links: false,
     };
     filters.validate();
 
@@ -3678,6 +3702,8 @@ fn delete(
             after,
             before,
             id_filter: None,
+            has_links: false,
+            no_links: false,
         };
         filters.validate();
 
@@ -4072,6 +4098,8 @@ fn tally_cmd(
         after,
         before,
         id_filter: None,
+        has_links: false,
+        no_links: false,
     };
     filters.validate();
 
@@ -4746,6 +4774,8 @@ fn update_cmd(
             after,
             before,
             id_filter: None,
+            has_links: false,
+            no_links: false,
         };
         filters.validate();
 
@@ -5470,6 +5500,8 @@ fn alias_run(name: &str, mode: &str, confirm: bool) {
             linked_from,
             link_rel,
             with_links,
+            has_links,
+            no_links,
         } => query(
             label,
             not_label,
@@ -5493,6 +5525,8 @@ fn alias_run(name: &str, mode: &str, confirm: bool) {
             linked_from,
             link_rel,
             with_links,
+            has_links,
+            no_links,
         ),
         Command::Export {
             id,
@@ -5639,6 +5673,8 @@ fn tail(
         after: None,
         before: None,
         id_filter: None,
+        has_links: false,
+        no_links: false,
     };
     filters.validate();
 
@@ -5869,6 +5905,8 @@ fn main() {
             linked_from,
             link_rel,
             with_links,
+            has_links,
+            no_links,
         } => query(
             label,
             not_label,
@@ -5892,6 +5930,8 @@ fn main() {
             linked_from,
             link_rel,
             with_links,
+            has_links,
+            no_links,
         ),
 
         Command::Export {
