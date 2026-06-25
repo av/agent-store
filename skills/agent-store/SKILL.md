@@ -148,6 +148,8 @@ agent-store delete 7bf8d3f
 | `info` | Show store configuration and environment. Flags: `--json` |
 | `tag <id> <label>...` | Add labels to an existing entry. Idempotent (duplicate labels are ignored). Flags: `--json` |
 | `untag <id> <label>...` | Remove labels from an existing entry. Idempotent (missing labels are ignored). Flags: `--json` |
+| `set-attr <id> <key> <value>` | Set or update an attribute on an existing entry. Idempotent (overwrites existing value). Flags: `--json` |
+| `unset-attr <id> <key>` | Remove an attribute from an existing entry. Idempotent (missing key is a no-op). Flags: `--json` |
 | `gc` | Collect expired entries (those past their TTL). Flags: `--ttl <duration>`, `--dry-run`, `--json` |
 | `compact` | Optimize store by running SQLite VACUUM and PRAGMA optimize. Reports before/after sizes. Flags: `--json` |
 | `history <label>` | Show chronological history of entries with a given label (oldest first). Flags: `--json`, `--limit N`, `--data <substring>` |
@@ -175,6 +177,35 @@ agent-store query --label backend --json | jq '.[].data'
 ```
 
 Both `tag` and `untag` accept `--json` for structured output (e.g., `{"id":"...","labels_added":["urgent"]}`).
+
+## Attribute mutation
+
+Attributes can be set or removed after push using `set-attr` and `unset-attr`.
+Both are idempotent — setting an existing key overwrites the value, and unsetting
+a missing key is a no-op.
+
+```bash
+# Set an attribute on an existing entry
+ID=$(echo "data" | agent-store push --id-only)
+agent-store set-attr $ID priority high
+agent-store set-attr $ID status pending
+
+# Update an existing attribute (overwrites)
+agent-store set-attr $ID status done
+
+# Remove an attribute
+agent-store unset-attr $ID priority
+
+# Removing a non-existent attribute is a no-op (no error)
+agent-store unset-attr $ID nonexistent
+
+# Verify
+agent-store pull $ID --json | jq .attributes
+```
+
+Both `set-attr` and `unset-attr` accept `--json` for structured output:
+- `set-attr --json`: `{"id":"...","key":"priority","value":"high"}`
+- `unset-attr --json`: `{"id":"...","key":"priority","removed":true}`
 
 ## History
 

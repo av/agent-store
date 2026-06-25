@@ -530,6 +530,75 @@ agent-store untag $ID urgent review
 agent-store untag $ID nonexistent    # no error
 ```
 
+## agent-store set-attr
+
+Set or update an attribute on an existing entry.
+
+```
+agent-store set-attr <ID> <KEY> <VALUE> [--json]
+```
+
+Arguments:
+- `<ID>` — Entry ID (or unambiguous prefix) to modify.
+- `<KEY>` — Attribute key. Cannot be empty.
+- `<VALUE>` — Attribute value to set.
+
+Options:
+- `--json` — Output as JSON object: `{"id":"...","key":"...","value":"..."}`
+
+Idempotent: setting an attribute that already exists overwrites the value (uses
+`INSERT OR REPLACE` on the `(entry_id, key)` primary key). Empty keys are
+rejected with an error. Unknown entry IDs print "not found" and exit 1.
+
+Output: `Set <key>=<value> on <short-id>` on stderr (or JSON to stdout with `--json`).
+
+```bash
+# Set an attribute
+agent-store set-attr $ID priority high
+
+# Update an existing attribute (overwrites)
+agent-store set-attr $ID priority low
+
+# JSON output
+agent-store set-attr $ID status done --json
+# {"id":"<uuid>","key":"status","value":"done"}
+```
+
+## agent-store unset-attr
+
+Remove an attribute from an existing entry.
+
+```
+agent-store unset-attr <ID> <KEY> [--json]
+```
+
+Arguments:
+- `<ID>` — Entry ID (or unambiguous prefix) to modify.
+- `<KEY>` — Attribute key to remove. Cannot be empty.
+
+Options:
+- `--json` — Output as JSON object: `{"id":"...","key":"...","removed":true|false}`
+
+Idempotent: removing an attribute that doesn't exist on the entry is a no-op
+(the `DELETE` simply affects zero rows, and `removed` is `false` in JSON output).
+Unknown entry IDs print "not found" and exit 1.
+
+Output: `Removed <key> from <short-id>` on stderr when removed, or
+`No attribute <key> on <short-id> (no-op)` when the attribute didn't exist
+(or JSON to stdout with `--json`).
+
+```bash
+# Remove an attribute
+agent-store unset-attr $ID priority
+
+# Safe to repeat (idempotent)
+agent-store unset-attr $ID nonexistent    # no error, prints no-op message
+
+# JSON output
+agent-store unset-attr $ID priority --json
+# {"id":"<uuid>","key":"priority","removed":true}
+```
+
 ## agent-store history
 
 Show chronological history of entries with a given label. Since agent-store is append-only, pushing multiple entries with the same label tracks changes over time. The `history` subcommand makes this explicit with human-readable output.
