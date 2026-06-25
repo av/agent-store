@@ -437,6 +437,46 @@ many entries would be deleted and exits 1 — use this as a dry-run
 preview before committing. For selective cleanup, prefer `delete` with
 filters over `purge` (which removes everything).
 
+## Upsert — atomic find-or-create
+
+**When:** You want to ensure exactly one entry exists for a given identity
+(combination of labels, type, and/or attrs), creating it if missing or
+updating it if found. Ideal for singleton config, agent state, or
+deduplicated records.
+
+```bash
+# First call creates the entry
+echo "initial config" | agent-store push --upsert --label config --attr env=prod
+
+# Second call with same filters updates the existing entry's data
+echo "updated config" | agent-store push --upsert --label config --attr env=prod
+
+# Check: only one entry exists
+agent-store query --label config --attr env=prod --count  # => 1
+```
+
+The filters (`--label`, `--type`, `--attr`) define the entry's identity.
+All provided filters must match for an existing entry to be found:
+
+- **0 matches** - creates a new entry with the given data, labels, type, and attrs
+- **1 match** - updates that entry's data, merges labels (INSERT OR IGNORE),
+  upserts attrs (INSERT OR REPLACE)
+- **2+ matches** - errors with "upsert matched N entries, narrow your filters"
+
+Use `--json` to see the action taken:
+
+```bash
+echo "data" | agent-store push --upsert --label singleton --json
+# => {"action":"created","id":"...","labels":["singleton"]}
+
+echo "new data" | agent-store push --upsert --label singleton --json
+# => {"action":"updated","id":"...","labels":["singleton"]}
+```
+
+**Gotcha:** All labels and attrs are used as match filters AND applied to the
+entry. If you need to add new labels/attrs during an update, use `tag`,
+`set-attr`, or `push --update <id>` after the upsert.
+
 ## Supersede / versioning
 
 **When:** You need to "update" an entry and want to preserve the original

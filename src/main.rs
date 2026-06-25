@@ -76,8 +76,11 @@ enum Command {
         #[arg(long)]
         json: bool,
         /// replace data of an existing entry in-place (ID or prefix)
-        #[arg(long)]
+        #[arg(long, conflicts_with = "upsert")]
         update: Option<String>,
+        /// atomic find-or-create: if filters match 0 entries, create; if 1, update; if 2+, error
+        #[arg(long, conflicts_with = "update")]
+        upsert: bool,
     },
     /// Pull an entry by ID and print to stdout
     Pull {
@@ -1227,6 +1230,7 @@ fn push(
     ttl: Option<String>,
     json: bool,
     update: Option<String>,
+    upsert: bool,
 ) {
     // Validate empty strings before any DB work
     for label in &labels {
@@ -1323,9 +1327,79 @@ fn push(
 
     let conn = open_db();
 
-    let id = if let Some(ref update_id) = update {
-        let resolved_id = resolve_entry_id(&conn, update_id);
+    // Resolve upsert: find existing entry or decide to create
+    let upsert_resolved_id: Option<String> = if upsert {
+        // Validate: --upsert requires at least one filter flag
+        if labels.is_empty() && entity_type.is_none() && parsed_attrs.is_empty() {
+            eprintln!(
+                "error: --upsert requires at least one filter flag (--label, --type, or --attr)"
+            );
+            process::exit(1);
+        }
 
+        // Build filter query using only labels, type, and attrs (not internal attrs like _expires_at)
+        // We use only the user-supplied attrs for matching, not TTL-injected ones
+        let filter = FilterArgs {
+            labels: labels.clone(),
+            not_labels: Vec::new(),
+            entity_type: entity_type.clone(),
+            not_types: Vec::new(),
+            attrs: attrs
+                .iter()
+                .filter(|a| !a.starts_with("_expires_at="))
+                .cloned()
+                .collect(),
+            not_attrs: Vec::new(),
+            data_filter: None,
+            search: None,
+            after: None,
+            before: None,
+            id_filter: None,
+        };
+
+        let (joins, conditions, params) = filter.build_filter_sql();
+        let where_clause = if conditions.is_empty() {
+            String::new()
+        } else {
+            format!(" WHERE {}", conditions.join(" AND "))
+        };
+        let sql = format!("SELECT e.id FROM entries e{joins}{where_clause}");
+
+        let params_refs: Vec<&dyn rusqlite::types::ToSql> =
+            params.iter().map(|p| p.as_ref()).collect();
+        let mut stmt = conn.prepare(&sql).unwrap_or_else(|e| {
+            eprintln!("error: failed to prepare upsert query: {e}");
+            process::exit(1);
+        });
+        let ids: Vec<String> = stmt
+            .query_map(params_refs.as_slice(), |row| row.get(0))
+            .unwrap_or_else(|e| {
+                eprintln!("error: failed to execute upsert query: {e}");
+                process::exit(1);
+            })
+            .filter_map(|r| r.ok())
+            .collect();
+
+        match ids.len() {
+            0 => None,                                  // will create
+            1 => Some(ids.into_iter().next().unwrap()), // will update
+            n => {
+                eprintln!("error: upsert matched {n} entries, narrow your filters");
+                process::exit(1);
+            }
+        }
+    } else {
+        None
+    };
+
+    // Determine the effective update target: --update <id>, or upsert-resolved id
+    let effective_update_id: Option<String> = if let Some(ref update_id) = update {
+        Some(resolve_entry_id(&conn, update_id))
+    } else {
+        upsert_resolved_id.clone()
+    };
+
+    let id = if let Some(ref resolved_id) = effective_update_id {
         if let Err(e) = conn.execute("BEGIN", []) {
             eprintln!("error: failed to begin transaction: {e}");
             process::exit(1);
@@ -1393,7 +1467,7 @@ fn push(
             process::exit(1);
         }
 
-        resolved_id
+        resolved_id.clone()
     } else {
         let new_id = Uuid::new_v4().to_string();
 
@@ -1459,9 +1533,28 @@ fn push(
         new_id
     };
 
+    // Determine the action for output purposes
+    let action = if upsert {
+        if upsert_resolved_id.is_some() {
+            "updated"
+        } else {
+            "created"
+        }
+    } else if update.is_some() {
+        "updated"
+    } else {
+        "stored"
+    };
+
     if json {
         let mut obj = serde_json::Map::new();
         obj.insert("id".to_string(), serde_json::Value::String(id));
+        if upsert {
+            obj.insert(
+                "action".to_string(),
+                serde_json::Value::String(action.to_string()),
+            );
+        }
         if !labels.is_empty() {
             obj.insert(
                 "labels".to_string(),
@@ -1490,12 +1583,7 @@ fn push(
     } else if id_only {
         print!("{id}");
     } else if !quiet {
-        let verb = if update.is_some() {
-            "updated"
-        } else {
-            "stored"
-        };
-        println!("{verb} entry {id}");
+        println!("{action} entry {id}");
     }
 }
 
@@ -3995,6 +4083,7 @@ fn main() {
             ttl,
             json,
             update,
+            upsert,
         } => push(
             label,
             entity_type,
@@ -4007,6 +4096,7 @@ fn main() {
             ttl,
             json,
             update,
+            upsert,
         ),
         Command::Pull { id, json, raw } => pull(&id, json, raw),
         Command::Query {

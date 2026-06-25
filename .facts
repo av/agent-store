@@ -504,6 +504,27 @@
   command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && ID=\$(echo v1 | \$AS push --label old --id-only --strip) && echo v2 | \$AS push --update \"\$ID\" --label new -q && LABELS=\$(\$AS pull \"\$ID\" --json | python3 -c \"import sys,json; print(','.join(sorted(json.load(sys.stdin)['labels'])))\") && rm -rf \"\$TESTDIR\" && test \"\$LABELS\" = 'new,old'"
   tags: [implemented]
 
+## cli/push-upsert @spec
+
+- label: push --upsert with no match creates a new entry (normal push)
+  command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && OUT=\$(echo new-data | \$AS push --upsert --label unique-upsert-test --strip --json) && echo \"\$OUT\" | python3 -c \"import sys,json; d=json.load(sys.stdin); assert d['action']=='created'; assert 'id' in d; print('OK')\" && rm -rf \"\$TESTDIR\""
+  tags: [implemented]
+- label: push --upsert with exactly one match updates that entry's data and preserves identity
+  command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && ID=\$(echo v1 | \$AS push --label config --attr env=prod --id-only --strip) && echo v2 | \$AS push --upsert --label config --attr env=prod --strip -q && DATA=\$(\$AS pull \"\$ID\" --raw) && COUNT=\$(\$AS query --label config --count) && rm -rf \"\$TESTDIR\" && test \"\$DATA\" = 'v2' && test \"\$COUNT\" = '1'"
+  tags: [implemented]
+- label: push --upsert with 2+ matches prints error with match count and exits 1
+  command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && echo a | \$AS push --label dup --strip -q && echo b | \$AS push --label dup --strip -q && echo c | \$AS push --upsert --label dup --strip 2>&1; EXIT=\$?; rm -rf \"\$TESTDIR\" && test \"\$EXIT\" = '1'"
+  tags: [implemented]
+- label: push --upsert conflicts with --update (cannot use both)
+  command: bash -c "echo test | agent-store push --upsert --update fake-id 2>&1 | grep -qi 'cannot be used with\|conflict' && echo PASS || echo FAIL"
+  tags: [implemented]
+- label: push --upsert requires at least one filter flag (--label, --type, or --attr)
+  command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && echo test | \$AS push --upsert --strip 2>&1; EXIT=\$?; rm -rf \"\$TESTDIR\" && test \"\$EXIT\" = '1'"
+  tags: [implemented]
+- label: push --upsert --json includes action field showing created or updated
+  command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && OUT1=\$(echo v1 | \$AS push --upsert --label upsert-json --strip --json) && echo \"\$OUT1\" | python3 -c \"import sys,json; d=json.load(sys.stdin); assert d['action']=='created'\" && OUT2=\$(echo v2 | \$AS push --upsert --label upsert-json --strip --json) && echo \"\$OUT2\" | python3 -c \"import sys,json; d=json.load(sys.stdin); assert d['action']=='updated'; print('OK')\" && rm -rf \"\$TESTDIR\""
+  tags: [implemented]
+
 ## cli/compact @implemented
 
 - label: compact runs VACUUM and reports size before/after in human-readable format
