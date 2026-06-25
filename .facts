@@ -304,7 +304,7 @@
   command: DIR=$(mktemp -d) && cd "$DIR" && agent-store init >/dev/null 2>&1 && echo "d1" | agent-store push --attr color=red -q && echo "d2" | agent-store push --attr color=blue -q && echo "d3" | agent-store push --attr size=large -q && agent-store attrs --count | head -1 | grep -q "^color (2)$" && rm -rf "$DIR"
   tags: [spec, implemented]
 
-## cli/delete @spec
+## cli/delete @implemented
 
 - label: agent-store delete <id> deletes a single entry by ID with its labels and attributes, no --confirm needed
   command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && ID=\$(echo test | \$AS push --label x --attr k=v --id-only --strip) && \$AS delete \"\$ID\" 2>&1 | grep -q 'Deleted' && test \"\$(\$AS query --count)\" = '0' && test \"\$(\$AS labels)\" = '' && rm -rf \"\$TESTDIR\""
@@ -317,7 +317,7 @@
 - label: agent-store delete exits 1 with error for nonexistent entry ID
   command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && \$AS delete fake-id 2>&1 | grep -q 'entry not found' && rm -rf \"\$TESTDIR\""
 
-## cli/tag @spec
+## cli/tag @implemented
 
 - label: agent-store tag adds one or more labels to an existing entry
   command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && ID=\$(echo test | \$AS push --id-only --strip) && \$AS tag \"\$ID\" done reviewed 2>&1 && LABELS=\$(\$AS pull \"\$ID\" --json | python3 -c \"import sys,json; print(','.join(sorted(json.load(sys.stdin)['labels'])))\") && rm -rf \"\$TESTDIR\" && test \"\$LABELS\" = 'done,reviewed'"
@@ -328,7 +328,7 @@
 - label: agent-store tag rejects empty label with error and exit 1
   command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && ID=\$(echo test | \$AS push --id-only --strip) && \$AS tag \"\$ID\" '' 2>&1 | grep -q 'label cannot be empty' && rm -rf \"\$TESTDIR\""
 
-## cli/untag @spec
+## cli/untag @implemented
 
 - label: agent-store untag removes one or more labels from an existing entry
   command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && ID=\$(echo test | \$AS push --label a --label b --id-only --strip) && \$AS untag \"\$ID\" a 2>&1 && LABELS=\$(\$AS pull \"\$ID\" --json | python3 -c \"import sys,json; print(','.join(sorted(json.load(sys.stdin)['labels'])))\") && rm -rf \"\$TESTDIR\" && test \"\$LABELS\" = 'b'"
@@ -339,7 +339,7 @@
 - label: agent-store untag rejects empty label with error and exit 1
   command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && ID=\$(echo test | \$AS push --id-only --strip) && \$AS untag \"\$ID\" '' 2>&1 | grep -q 'label cannot be empty' && rm -rf \"\$TESTDIR\""
 
-## cli/search @spec
+## cli/search @implemented
 
 - label: agent-store query --search returns entries matching a full-text query
   command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && echo 'The auth middleware validates tokens' | \$AS push -q && echo 'Database connection pooling config' | \$AS push -q && \$AS query --search 'auth tokens' | grep -q 'middleware' && rm -rf \"\$TESTDIR\""
@@ -348,10 +348,10 @@
 - label: agent-store query --search orders results by relevance
   command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && echo 'unrelated content' | \$AS push -q && echo 'JWT token validation in auth' | \$AS push -q && FIRST=\$(\$AS query --search 'JWT auth' --json | python3 -c 'import sys,json; print(json.load(sys.stdin)[0][\"data\"])') && echo \"\$FIRST\" | grep -q JWT && rm -rf \"\$TESTDIR\""
 
-## cli/ttl @spec
+## cli/ttl @implemented
 
 - label: agent-store push --ttl sets expiry time as _expires_at attribute
-  command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && echo data | \$AS push --ttl 1h -q && \$AS query --attr _expires_at --count | grep -q '1' && rm -rf \"\$TESTDIR\""
+  command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && echo data | \$AS push --ttl 1h -q && \$AS query --json | python3 -c 'import sys,json; d=json.load(sys.stdin); assert \"_expires_at\" in d[0][\"attributes\"]; print(\"OK\")' && rm -rf \"\$TESTDIR\""
 - label: agent-store gc collects entries past their TTL
   command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && echo old | \$AS push --ttl 1s -q && echo keep | \$AS push -q && sleep 2 && \$AS gc 2>&1 | grep -q 'Collected 1' && test \"\$(\$AS query --count)\" = '1' && rm -rf \"\$TESTDIR\""
 - label: agent-store gc --dry-run shows count without deleting
@@ -359,7 +359,7 @@
 - label: agent-store push --ttl rejects invalid duration format
   command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && echo data | \$AS push --ttl invalid 2>&1 | grep -qi 'invalid\\|error' && rm -rf \"\$TESTDIR\""
 
-## cli/alias @spec
+## cli/alias @implemented
 
 - label: alias set saves a named query and alias run executes it
   command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=/home/everlier/code/agent-store/target/debug/agent-store && \$AS init >/dev/null 2>&1 && echo urgent-data | \$AS push --label urgent --type task -q && \$AS alias set myq -- --label urgent --type task && RESULT=\$(\$AS alias run myq) && rm -rf \"\$TESTDIR\" && test \"\$RESULT\" = 'urgent-data'"
@@ -370,7 +370,7 @@
 - label: alias set overwrites an existing alias with the same name (upsert)
   command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=/home/everlier/code/agent-store/target/debug/agent-store && \$AS init >/dev/null 2>&1 && \$AS alias set myq -- --label old && \$AS alias set myq -- --label new && \$AS alias list | grep -q 'new' && rm -rf \"\$TESTDIR\""
 
-## conventions/supersede @spec
+## conventions/supersede @implemented
 
 - label: supersede convention is documented in the agent-store-patterns skill with examples for versioned config, chain traversal, cleanup, and iterative draft
   check: manual
