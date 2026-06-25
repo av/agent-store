@@ -668,3 +668,8 @@
 - label: update --set is idempotent: setting same key=value reports attrs_set=0 and produces no changelog entry
   command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && ID=\$(echo test | \$AS push --label x --id-only --strip) && \$AS update \"\$ID\" --set k=v >/dev/null 2>&1 && \$AS update \"\$ID\" --set k=v --json | python3 -c \"import sys,json; d=json.load(sys.stdin); assert d['attrs_set']==0; print('OK')\" && rm -rf \"\$TESTDIR\""
   tags: [spec, implemented]
+
+## integration @implemented
+- label: end-to-end integration test exercises all 5 new features (upsert, links, update, tally, changelog) together in a realistic workflow and passes all assertions
+  command: bash tests/integration_top5.sh
+  tags: [spec, implemented]
