@@ -58,6 +58,9 @@ enum Command {
         /// Set attribute key=value pair (can be repeated)
         #[arg(long = "attr")]
         attr: Vec<String>,
+        /// Override created_at timestamp (ISO 8601: "2024-01-15 10:30:00" or "2024-01-15")
+        #[arg(long)]
+        timestamp: Option<String>,
     },
     /// Pull an entry by ID and print to stdout
     Pull {
@@ -705,7 +708,7 @@ fn parse_attr(attr: &str) -> (&str, &str) {
     }
 }
 
-fn push(labels: Vec<String>, entity_type: Option<String>, quiet: bool, id_only: bool, attrs: Vec<String>) {
+fn push(labels: Vec<String>, entity_type: Option<String>, quiet: bool, id_only: bool, attrs: Vec<String>, timestamp: Option<String>) {
     // Validate empty strings before any DB work
     for label in &labels {
         if label.trim().is_empty() {
@@ -757,10 +760,18 @@ fn push(labels: Vec<String>, entity_type: Option<String>, quiet: bool, id_only: 
         process::exit(1);
     }
 
-    if let Err(e) = conn.execute(
-        "INSERT INTO entries (id, data, entity_type) VALUES (?1, ?2, ?3)",
-        rusqlite::params![id, data, entity_type],
-    ) {
+    let insert_result = if let Some(ref ts) = timestamp {
+        conn.execute(
+            "INSERT INTO entries (id, data, entity_type, created_at) VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params![id, data, entity_type, ts],
+        )
+    } else {
+        conn.execute(
+            "INSERT INTO entries (id, data, entity_type) VALUES (?1, ?2, ?3)",
+            rusqlite::params![id, data, entity_type],
+        )
+    };
+    if let Err(e) = insert_result {
         let _ = conn.execute("ROLLBACK", []);
         eprintln!("error: failed to insert entry: {e}");
         process::exit(1);
@@ -1491,6 +1502,46 @@ fn stats(json: bool) {
         }
     };
 
+    // Per-type entry counts
+    let entries_by_type: HashMap<String, i64> = {
+        let mut stmt = match conn.prepare(
+            "SELECT entity_type, COUNT(*) FROM entries WHERE entity_type IS NOT NULL GROUP BY entity_type",
+        ) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("error: failed to query entries by type: {e}");
+                process::exit(1);
+            }
+        };
+        match stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))) {
+            Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
+            Err(e) => {
+                eprintln!("error: failed to query entries by type: {e}");
+                process::exit(1);
+            }
+        }
+    };
+
+    // Per-label entry counts
+    let entries_by_label: HashMap<String, i64> = {
+        let mut stmt = match conn.prepare(
+            "SELECT label, COUNT(*) FROM labels GROUP BY label",
+        ) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("error: failed to query entries by label: {e}");
+                process::exit(1);
+            }
+        };
+        match stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))) {
+            Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
+            Err(e) => {
+                eprintln!("error: failed to query entries by label: {e}");
+                process::exit(1);
+            }
+        }
+    };
+
     if json {
         #[derive(Serialize)]
         struct StatsJson {
@@ -1499,6 +1550,8 @@ fn stats(json: bool) {
             labels: Vec<String>,
             entity_type_count: usize,
             label_count: usize,
+            entries_by_type: HashMap<String, i64>,
+            entries_by_label: HashMap<String, i64>,
         }
 
         let stats = StatsJson {
@@ -1507,6 +1560,8 @@ fn stats(json: bool) {
             label_count: labels.len(),
             entity_types,
             labels,
+            entries_by_type,
+            entries_by_label,
         };
 
         match serde_json::to_string(&stats) {
@@ -1542,9 +1597,23 @@ fn stats(json: bool) {
         };
         println!("{type_count} {type_word}");
 
+        // Per-type breakdown (sorted by count descending)
+        let mut type_pairs: Vec<_> = entries_by_type.iter().collect();
+        type_pairs.sort_by(|a, b| b.1.cmp(a.1).then_with(|| a.0.cmp(b.0)));
+        for (t, c) in &type_pairs {
+            println!("  {t}: {c}");
+        }
+
         let label_count = labels.len();
         let label_word = if label_count == 1 { "label" } else { "labels" };
         println!("{label_count} {label_word}");
+
+        // Per-label breakdown (sorted by count descending)
+        let mut label_pairs: Vec<_> = entries_by_label.iter().collect();
+        label_pairs.sort_by(|a, b| b.1.cmp(a.1).then_with(|| a.0.cmp(b.0)));
+        for (l, c) in &label_pairs {
+            println!("  {l}: {c}");
+        }
     }
 }
 
@@ -1762,7 +1831,8 @@ fn main() {
             quiet,
             id_only,
             attr,
-        } => push(label, entity_type, quiet, id_only, attr),
+            timestamp,
+        } => push(label, entity_type, quiet, id_only, attr, timestamp),
         Command::Pull { id, json, raw } => pull(&id, json, raw),
         Command::Query {
             id,
