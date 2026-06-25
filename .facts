@@ -317,8 +317,8 @@
 - label: agent-store delete exits 1 with error for nonexistent entry ID
   command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && \$AS delete fake-id 2>&1 | grep -q 'entry not found' && rm -rf \"\$TESTDIR\""
 - label: delete --dry-run lists matching entries with details without deleting, conflicts with --confirm, outputs JSON array with --json
-  command: bash -c "TESTDIR=$(mktemp -d) && export AGENT_STORE_PATH=\"$TESTDIR/.agent-store\" && AS=target/release/agent-store && $AS init >/dev/null 2>&1 && echo a | $AS push --label todo --type task -q && echo b | $AS push --label todo --type note -q && echo c | $AS push --label done -q && $AS delete --label todo --dry-run 2>&1 | grep -q todo && JSON=$($AS delete --label todo --dry-run --json) && python3 -c 'import sys,json; d=json.loads(sys.argv[1]); assert len(d)==2; assert all(\"id\" in e for e in d); print(\"OK\")' \"$JSON\" && test \"$($AS query --count)\" = '3' && rm -rf \"$TESTDIR\""
-  tags: [spec]
+  command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && echo a | \$AS push --label todo --type task -q && echo b | \$AS push --label todo --type note -q && echo c | \$AS push --label done -q && \$AS delete --label todo --dry-run 2>&1 | grep -q todo && JSON=\$(\$AS delete --label todo --dry-run --json) && python3 -c 'import sys,json; d=json.loads(sys.argv[1]); assert len(d)==2; assert all(\"id\" in e for e in d); print(\"OK\")' \"\$JSON\" && test \"\$(\$AS query --count)\" = '3' && rm -rf \"\$TESTDIR\""
+  tags: [spec, implemented]
 
 ## cli/json-output @implemented
 

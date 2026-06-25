@@ -208,8 +208,11 @@ enum Command {
         /// Entry ID to delete (if provided, deletes a single entry without --confirm)
         id: Option<String>,
         /// Require confirmation for filter-based deletes
-        #[arg(long)]
+        #[arg(long, conflicts_with = "dry_run")]
         confirm: bool,
+        /// Preview matching entries without deleting (read-only)
+        #[arg(long, conflicts_with = "confirm")]
+        dry_run: bool,
         /// Filter by label (can be repeated, AND logic)
         #[arg(long)]
         label: Vec<String>,
@@ -821,6 +824,79 @@ fn delete_entry(conn: &Connection, entry_id: &str) {
     ) {
         eprintln!("error: failed to delete entry: {e}");
         process::exit(1);
+    }
+}
+
+/// Fetch full details (id, labels, type, created_at) for a list of entry IDs.
+fn fetch_entry_details(conn: &Connection, ids: &[String]) -> Vec<EntryJson> {
+    let mut entries = Vec::new();
+    for entry_id in ids {
+        let row: Option<(String, String, Option<String>, String)> = conn
+            .query_row(
+                "SELECT id, data, entity_type, created_at FROM entries WHERE id = ?1",
+                rusqlite::params![entry_id],
+                |r| {
+                    Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, String>(1)?,
+                        r.get::<_, Option<String>>(2)?,
+                        r.get::<_, String>(3)?,
+                    ))
+                },
+            )
+            .ok();
+
+        if let Some((id, data, entity_type, created_at)) = row {
+            let labels: Vec<String> = conn
+                .prepare("SELECT label FROM labels WHERE entry_id = ?1")
+                .and_then(|mut s| {
+                    s.query_map(rusqlite::params![id], |r| r.get::<_, String>(0))
+                        .map(|rows| rows.filter_map(|r| r.ok()).collect())
+                })
+                .unwrap_or_default();
+
+            let attributes: HashMap<String, String> = conn
+                .prepare("SELECT key, value FROM attributes WHERE entry_id = ?1")
+                .and_then(|mut s| {
+                    s.query_map(rusqlite::params![id], |r| {
+                        Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+                    })
+                    .map(|rows| rows.filter_map(|r| r.ok()).collect())
+                })
+                .unwrap_or_default();
+
+            entries.push(EntryJson {
+                id,
+                data,
+                entity_type,
+                created_at,
+                labels,
+                attributes,
+            });
+        }
+    }
+    entries
+}
+
+/// Print a human-readable summary table of entries for dry-run previews.
+fn print_entry_summary(entries: &[EntryJson]) {
+    let count = entries.len();
+    let word = if count == 1 { "entry" } else { "entries" };
+    eprintln!("Would delete {count} {word}:");
+    eprintln!();
+    for entry in entries {
+        let short_id = &entry.id[..7.min(entry.id.len())];
+        let labels = if entry.labels.is_empty() {
+            String::new()
+        } else {
+            format!(" [{}]", entry.labels.join(", "))
+        };
+        let etype = entry
+            .entity_type
+            .as_deref()
+            .map(|t| format!(" type={t}"))
+            .unwrap_or_default();
+        eprintln!("  {short_id}  {}{}{}", entry.created_at, etype, labels);
     }
 }
 
@@ -2481,6 +2557,7 @@ fn purge(confirm: bool) {
 fn delete(
     id: Option<String>,
     confirm: bool,
+    dry_run: bool,
     labels: Vec<String>,
     not_labels: Vec<String>,
     entity_type: Option<String>,
@@ -2497,6 +2574,23 @@ fn delete(
 
     if let Some(ref entry_id) = id {
         let resolved = resolve_entry_id(&conn, entry_id);
+
+        if dry_run {
+            let entries = fetch_entry_details(&conn, &[resolved]);
+            if json {
+                match serde_json::to_string(&entries) {
+                    Ok(json_str) => println!("{json_str}"),
+                    Err(e) => {
+                        eprintln!("error: failed to serialize JSON: {e}");
+                        process::exit(1);
+                    }
+                }
+            } else {
+                print_entry_summary(&entries);
+            }
+            return;
+        }
+
         delete_entry(&conn, &resolved);
 
         if json {
@@ -2540,37 +2634,6 @@ fn delete(
 
         let (joins, conditions, params) = filters.build_filter_sql();
 
-        // Count matching entries first
-        let count_sql = if conditions.is_empty() {
-            format!("SELECT COUNT(DISTINCT e.id) FROM entries e{joins}")
-        } else {
-            format!(
-                "SELECT COUNT(DISTINCT e.id) FROM entries e{joins} WHERE {}",
-                conditions.join(" AND ")
-            )
-        };
-
-        let params_refs: Vec<&dyn rusqlite::types::ToSql> =
-            params.iter().map(|p| p.as_ref()).collect();
-        let count: i64 = match conn.query_row(&count_sql, params_refs.as_slice(), |row| row.get(0))
-        {
-            Ok(c) => c,
-            Err(e) => {
-                eprintln!("error: failed to count matching entries: {e}");
-                process::exit(1);
-            }
-        };
-
-        if !confirm {
-            if json {
-                println!("{}", serde_json::json!({"dry_run": true, "count": count}));
-            } else {
-                let word = if count == 1 { "entry" } else { "entries" };
-                eprintln!("Would delete {count} {word}. Run with --confirm to proceed.");
-            }
-            process::exit(1);
-        }
-
         // Collect matching IDs
         let ids_sql = if conditions.is_empty() {
             format!("SELECT DISTINCT e.id FROM entries e{joins}")
@@ -2599,6 +2662,33 @@ fn delete(
                     process::exit(1);
                 }
             };
+
+        if dry_run {
+            let entries = fetch_entry_details(&conn, &ids);
+            if json {
+                match serde_json::to_string(&entries) {
+                    Ok(json_str) => println!("{json_str}"),
+                    Err(e) => {
+                        eprintln!("error: failed to serialize JSON: {e}");
+                        process::exit(1);
+                    }
+                }
+            } else {
+                print_entry_summary(&entries);
+            }
+            return;
+        }
+
+        if !confirm {
+            let count = ids.len() as i64;
+            if json {
+                println!("{}", serde_json::json!({"dry_run": true, "count": count}));
+            } else {
+                let word = if count == 1 { "entry" } else { "entries" };
+                eprintln!("Would delete {count} {word}. Run with --confirm to proceed.");
+            }
+            process::exit(1);
+        }
 
         delete_entries(&conn, &ids);
 
@@ -3315,6 +3405,7 @@ fn alias_run(name: &str, mode: &str, confirm: bool) {
         Command::Delete {
             id,
             confirm,
+            dry_run,
             label,
             not_label,
             entity_type,
@@ -3329,6 +3420,7 @@ fn alias_run(name: &str, mode: &str, confirm: bool) {
         } => delete(
             id,
             confirm,
+            dry_run,
             label,
             not_label,
             entity_type,
@@ -3510,6 +3602,7 @@ fn main() {
         Command::Delete {
             id,
             confirm,
+            dry_run,
             label,
             not_label,
             entity_type,
@@ -3524,6 +3617,7 @@ fn main() {
         } => delete(
             id,
             confirm,
+            dry_run,
             label,
             not_label,
             entity_type,
