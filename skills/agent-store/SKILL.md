@@ -132,9 +132,9 @@ agent-store delete 7bf8d3f
 | Command | What it does |
 |---------|-------------|
 | `init` | Create `.agent-store/store.db`, install skills to `.agents/skills/`, set up project docs |
-| `push` | Read stdin (or `--file`), store as entry. Flags: `--label`, `--type`, `--attr key=value`, `--timestamp`, `--ttl <duration>`, `-f`/`--file`, `-q`/`--quiet`, `--id-only`, `--strip`, `--json`, `--update <id>`, `--upsert` |
-| `pull <id>` | Retrieve entry by ID, print data to stdout. Flags: `--json` (full entry as JSON object), `--raw` (omit trailing newline for binary-safe piping) |
-| `query` | List entries. Filter: `--label` (repeat), `--not-label` (repeat, exclude), `--type`, `--not-type` (repeat, exclude, NULL-safe), `--attr key=value` (repeat), `--not-attr key=value` (repeat, exclude), `--data <substring>`, `--search <query>` (FTS5 full-text search), `--after <datetime>`, `--before <datetime>`, `--json`, `--count`, `--latest`, `--first`, `--last`, `--limit N`, `--offset N`, `-r`/`--reverse` |
+| `push` | Read stdin (or `--file`), store as entry. Flags: `--label`, `--type`, `--attr key=value`, `--timestamp`, `--ttl <duration>`, `-f`/`--file`, `-q`/`--quiet`, `--id-only`, `--strip`, `--json`, `--update <id>`, `--upsert`, `--link rel:id` (repeat, create links at push time) |
+| `pull <id>` | Retrieve entry by ID, print data to stdout. Flags: `--json` (full entry as JSON object), `--raw` (omit trailing newline for binary-safe piping), `--with-links` (include `links_from`/`links_to` arrays in JSON) |
+| `query` | List entries. Filter: `--label` (repeat), `--not-label` (repeat, exclude), `--type`, `--not-type` (repeat, exclude, NULL-safe), `--attr key=value` (repeat), `--not-attr key=value` (repeat, exclude), `--data <substring>`, `--search <query>` (FTS5 full-text search), `--after <datetime>`, `--before <datetime>`, `--linked-to <id>` (entries linking to this id), `--linked-from <id>` (entries this id links to), `--link-rel <rel>` (filter by relationship type), `--json`, `--count`, `--latest`, `--first`, `--last`, `--limit N`, `--offset N`, `-r`/`--reverse` |
 | `schema` | Show entity types and label counts |
 | `stats` | Show entry count and store size. Flags: `--json` |
 | `skills` | List and read built-in usage guides |
@@ -146,6 +146,8 @@ agent-store delete 7bf8d3f
 | `types` | List all unique entity types in the store, sorted. Flags: `--json` (JSON array), `--count` (with counts) |
 | `attrs` | List all unique attribute keys in the store, sorted. Flags: `--json` (JSON array), `--count` (with counts) |
 | `info` | Show store configuration and environment. Flags: `--json` |
+| `link <from> <to> [rel]` | Create a directional typed edge between two entries. Idempotent. Flags: `--json` |
+| `unlink <from> <to> [rel]` | Remove a link. If `rel` is omitted, removes ALL links from->to. Idempotent. Flags: `--json` |
 | `tag <id> <label>...` | Add labels to an existing entry. Idempotent (duplicate labels are ignored). Flags: `--json` |
 | `untag <id> <label>...` | Remove labels from an existing entry. Idempotent (missing labels are ignored). Flags: `--json` |
 | `set-attr <id> <key> <value>` | Set or update an attribute on an existing entry. Idempotent (overwrites existing value). Flags: `--json` |
@@ -209,6 +211,46 @@ agent-store pull $ID --json | jq .attributes
 Both `set-attr` and `unset-attr` accept `--json` for structured output:
 - `set-attr --json`: `{"id":"...","key":"priority","value":"high"}`
 - `unset-attr --json`: `{"id":"...","key":"priority","removed":true}`
+
+## Links
+
+Entries can be connected with directional typed edges. Links form a graph
+overlay on top of the flat entry store, enabling dependency tracking, parent-child
+relationships, and other structured connections.
+
+```bash
+# Create entries and link them
+PARENT=$(echo "parent task" | agent-store push --label task --id-only)
+CHILD=$(echo "subtask" | agent-store push --label task --id-only)
+agent-store link $PARENT $CHILD blocks
+
+# Create links at push time (format: rel:id)
+BLOCKER=$(echo "blocker" | agent-store push --link "blocks:$PARENT" --id-only)
+
+# Query by link relationships
+agent-store query --linked-from $PARENT       # entries PARENT links to
+agent-store query --linked-to $CHILD          # entries linking to CHILD
+agent-store query --linked-from $PARENT --link-rel blocks  # filter by rel
+
+# Inspect links on an entry
+agent-store pull $PARENT --json --with-links
+# adds links_from: [{to, rel, created_at}] and links_to: [{from, rel, created_at}]
+
+# Remove links
+agent-store unlink $PARENT $CHILD blocks      # remove specific rel
+agent-store unlink $PARENT $CHILD             # remove ALL rels between them
+
+# Cascade: deleting an entry removes its link rows (not linked entries)
+agent-store delete $PARENT
+```
+
+Key behaviors:
+- Links are directional (from -> to) and typed (rel field, defaults to empty)
+- `link` is idempotent (INSERT OR IGNORE on composite primary key)
+- `unlink` is idempotent (no error if link doesn't exist)
+- Deleting an entry removes all its link rows (both directions)
+- Both `link` and `unlink` accept `--json` for structured output
+- All ID arguments support prefix matching via `resolve_entry_id()`
 
 ## History
 

@@ -610,3 +610,30 @@
 - label: update --dry-run shows entries that would be affected without modifying them
   command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && echo a | \$AS push --label task -q && \$AS update --label task --tag done --dry-run 2>&1 | grep -q 'task' && test \"\$(\$AS query --label done --count)\" = '0' && rm -rf \"\$TESTDIR\" && echo OK"
   tags: [spec, implemented]
+
+## cli/link @spec
+
+- label: link creates a directional edge between two entries and unlink removes it
+  command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && ID1=\$(echo parent | \$AS push --id-only --strip) && ID2=\$(echo child | \$AS push --id-only --strip) && \$AS link \"\$ID1\" \"\$ID2\" blocks 2>&1 | grep -q 'linked' && \$AS unlink \"\$ID1\" \"\$ID2\" blocks 2>&1 | grep -q 'unlinked' && rm -rf \"\$TESTDIR\" && echo OK"
+  tags: [spec, implemented]
+- label: link is idempotent and --json outputs structured response with from, to, rel fields
+  command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && ID1=\$(echo a | \$AS push --id-only --strip) && ID2=\$(echo b | \$AS push --id-only --strip) && \$AS link \"\$ID1\" \"\$ID2\" rel1 && \$AS link \"\$ID1\" \"\$ID2\" rel1 --json | python3 -c \"import sys,json; d=json.load(sys.stdin); assert 'from' in d and 'to' in d and d['rel']=='rel1'; print('OK')\" && rm -rf \"\$TESTDIR\""
+  tags: [spec, implemented]
+- label: unlink without rel removes all links between two entries; --json shows removed count
+  command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && ID1=\$(echo a | \$AS push --id-only --strip) && ID2=\$(echo b | \$AS push --id-only --strip) && \$AS link \"\$ID1\" \"\$ID2\" rel1 && \$AS link \"\$ID1\" \"\$ID2\" rel2 && \$AS unlink \"\$ID1\" \"\$ID2\" --json | python3 -c \"import sys,json; d=json.load(sys.stdin); assert d['removed']==2; print('OK')\" && rm -rf \"\$TESTDIR\""
+  tags: [spec, implemented]
+- label: push --link rel:id creates links from the new entry to target entries at push time
+  command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && TGT=\$(echo target | \$AS push --id-only --strip) && PREFIX=\${TGT:0:7} && NEW=\$(echo child | \$AS push --link \"parent:\$PREFIX\" --id-only --strip) && \$AS query --linked-from \"\$NEW\" --json | python3 -c \"import sys,json; d=json.load(sys.stdin); assert len(d)==1 and d[0]['data']=='target'; print('OK')\" && rm -rf \"\$TESTDIR\""
+  tags: [spec, implemented]
+- label: query --linked-to finds entries that link TO the given entry; --linked-from finds entries it links TO
+  command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && A=\$(echo nodeA | \$AS push --id-only --strip) && B=\$(echo nodeB | \$AS push --id-only --strip) && \$AS link \"\$A\" \"\$B\" depends && test \"\$(\$AS query --linked-to \"\$B\" --count)\" = '1' && test \"\$(\$AS query --linked-from \"\$A\" --count)\" = '1' && rm -rf \"\$TESTDIR\" && echo OK"
+  tags: [spec, implemented]
+- label: query --link-rel filters linked results by relationship type
+  command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && A=\$(echo a | \$AS push --id-only --strip) && B=\$(echo b | \$AS push --id-only --strip) && C=\$(echo c | \$AS push --id-only --strip) && \$AS link \"\$A\" \"\$B\" blocks && \$AS link \"\$A\" \"\$C\" related && test \"\$(\$AS query --linked-from \"\$A\" --link-rel blocks --count)\" = '1' && rm -rf \"\$TESTDIR\" && echo OK"
+  tags: [spec, implemented]
+- label: deleting an entry cascade-deletes its link rows without deleting linked entries
+  command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && A=\$(echo a | \$AS push --id-only --strip) && B=\$(echo b | \$AS push --id-only --strip) && \$AS link \"\$A\" \"\$B\" dep && \$AS delete \"\$A\" 2>&1 && test \"\$(\$AS query --linked-to \"\$B\" --count)\" = '0' && test \"\$(\$AS query --count)\" = '1' && rm -rf \"\$TESTDIR\" && echo OK"
+  tags: [spec, implemented]
+- label: pull --with-links includes outgoing and incoming link arrays in JSON output
+  command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && A=\$(echo a | \$AS push --id-only --strip) && B=\$(echo b | \$AS push --id-only --strip) && \$AS link \"\$A\" \"\$B\" dep && \$AS pull \"\$A\" --json --with-links | python3 -c \"import sys,json; d=json.load(sys.stdin); assert len(d['links_from'])>=1; print('OK')\" && rm -rf \"\$TESTDIR\""
+  tags: [spec, implemented]

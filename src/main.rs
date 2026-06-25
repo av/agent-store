@@ -81,6 +81,9 @@ enum Command {
         /// atomic find-or-create: if filters match 0 entries, create; if 1, update; if 2+, error
         #[arg(long, conflicts_with = "update")]
         upsert: bool,
+        /// create a link from this entry to target (format: rel:id, repeatable)
+        #[arg(long = "link")]
+        links: Vec<String>,
     },
     /// Pull an entry by ID and print to stdout
     Pull {
@@ -92,6 +95,9 @@ enum Command {
         /// omit trailing newline for binary-safe piping
         #[arg(long)]
         raw: bool,
+        /// include outgoing and incoming links in JSON output
+        #[arg(long = "with-links")]
+        with_links: bool,
     },
     /// List and filter entries
     Query {
@@ -152,6 +158,15 @@ enum Command {
         /// include only entries created before this timestamp (ISO 8601)
         #[arg(long)]
         before: Option<String>,
+        /// find entries that link TO this entry (entries where to_id matches)
+        #[arg(long = "linked-to")]
+        linked_to: Option<String>,
+        /// find entries that this entry links TO (entries where from_id matches)
+        #[arg(long = "linked-from")]
+        linked_from: Option<String>,
+        /// filter linked results by relationship type (requires --linked-to or --linked-from)
+        #[arg(long = "link-rel")]
+        link_rel: Option<String>,
     },
     /// Show entity types and label counts
     Schema,
@@ -473,6 +488,30 @@ enum Command {
         /// include only entries created before this timestamp (ISO 8601)
         #[arg(long)]
         before: Option<String>,
+        /// output as JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Create a directional link between two entries
+    Link {
+        /// source entry ID or prefix
+        from: String,
+        /// target entry ID or prefix
+        to: String,
+        /// relationship type (optional, defaults to empty)
+        rel: Option<String>,
+        /// output as JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Remove a link between two entries
+    Unlink {
+        /// source entry ID or prefix
+        from: String,
+        /// target entry ID or prefix
+        to: String,
+        /// relationship type (if omitted, removes ALL links from->to)
+        rel: Option<String>,
         /// output as JSON
         #[arg(long)]
         json: bool,
@@ -933,6 +972,20 @@ fn open_db() -> Connection {
         eprintln!("error: failed to ensure aliases table: {e}");
         process::exit(1);
     }
+    if let Err(e) = conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS links (
+            from_id TEXT NOT NULL REFERENCES entries(id),
+            to_id TEXT NOT NULL REFERENCES entries(id),
+            rel TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            PRIMARY KEY (from_id, to_id, rel)
+        );
+        CREATE INDEX IF NOT EXISTS idx_links_from ON links(from_id);
+        CREATE INDEX IF NOT EXISTS idx_links_to ON links(to_id);",
+    ) {
+        eprintln!("error: failed to ensure links table: {e}");
+        process::exit(1);
+    }
     conn
 }
 
@@ -967,7 +1020,7 @@ fn ensure_fts_table(conn: &Connection) {
     }
 }
 
-/// Delete a single entry and its associated FTS, attributes, and labels in FK-safe order.
+/// Delete a single entry and its associated FTS, attributes, labels, and links in FK-safe order.
 fn delete_entry(conn: &Connection, entry_id: &str) {
     if let Err(e) = conn.execute(
         "DELETE FROM entries_fts WHERE id = ?1",
@@ -988,6 +1041,14 @@ fn delete_entry(conn: &Connection, entry_id: &str) {
         rusqlite::params![entry_id],
     ) {
         eprintln!("error: failed to delete labels: {e}");
+        process::exit(1);
+    }
+    // Delete all links where this entry is either the source or the target
+    if let Err(e) = conn.execute(
+        "DELETE FROM links WHERE from_id = ?1 OR to_id = ?1",
+        rusqlite::params![entry_id],
+    ) {
+        eprintln!("error: failed to delete links: {e}");
         process::exit(1);
     }
     if let Err(e) = conn.execute(
@@ -1233,8 +1294,18 @@ fn init() {
             args TEXT NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS links (
+            from_id TEXT NOT NULL REFERENCES entries(id),
+            to_id TEXT NOT NULL REFERENCES entries(id),
+            rel TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            PRIMARY KEY (from_id, to_id, rel)
+        );
+
         CREATE INDEX IF NOT EXISTS idx_labels_label ON labels(label);
         CREATE INDEX IF NOT EXISTS idx_attributes_key_value ON attributes(key, value);
+        CREATE INDEX IF NOT EXISTS idx_links_from ON links(from_id);
+        CREATE INDEX IF NOT EXISTS idx_links_to ON links(to_id);
 
         CREATE VIRTUAL TABLE IF NOT EXISTS entries_fts USING fts5(id UNINDEXED, data);
     ";
@@ -1326,6 +1397,7 @@ fn push(
     json: bool,
     update: Option<String>,
     upsert: bool,
+    links: Vec<String>,
 ) {
     // Validate empty strings before any DB work
     for label in &labels {
@@ -1421,6 +1493,29 @@ fn push(
     }
 
     let conn = open_db();
+
+    // Parse and validate --link arguments (format: rel:id)
+    let parsed_links: Vec<(String, String)> = links
+        .iter()
+        .map(|link_str| match link_str.split_once(':') {
+            Some((rel, id)) => {
+                if rel.is_empty() {
+                    eprintln!("error: invalid --link format '{link_str}', expected rel:id");
+                    process::exit(1);
+                }
+                if id.is_empty() {
+                    eprintln!("error: invalid --link format '{link_str}', expected rel:id");
+                    process::exit(1);
+                }
+                let resolved = resolve_entry_id(&conn, id);
+                (rel.to_string(), resolved)
+            }
+            None => {
+                eprintln!("error: invalid --link format '{link_str}', expected rel:id");
+                process::exit(1);
+            }
+        })
+        .collect();
 
     // Resolve upsert: find existing entry or decide to create
     let upsert_resolved_id: Option<String> = if upsert {
@@ -1556,6 +1651,17 @@ fn push(
             }
         }
 
+        for (rel, target_id) in &parsed_links {
+            if let Err(e) = conn.execute(
+                "INSERT OR IGNORE INTO links (from_id, to_id, rel) VALUES (?1, ?2, ?3)",
+                rusqlite::params![resolved_id, target_id, rel],
+            ) {
+                let _ = conn.execute("ROLLBACK", []);
+                eprintln!("error: failed to create link: {e}");
+                process::exit(1);
+            }
+        }
+
         if let Err(e) = conn.execute("COMMIT", []) {
             let _ = conn.execute("ROLLBACK", []);
             eprintln!("error: failed to commit transaction: {e}");
@@ -1615,6 +1721,17 @@ fn push(
             ) {
                 let _ = conn.execute("ROLLBACK", []);
                 eprintln!("error: failed to insert attribute: {e}");
+                process::exit(1);
+            }
+        }
+
+        for (rel, target_id) in &parsed_links {
+            if let Err(e) = conn.execute(
+                "INSERT OR IGNORE INTO links (from_id, to_id, rel) VALUES (?1, ?2, ?3)",
+                rusqlite::params![new_id, target_id, rel],
+            ) {
+                let _ = conn.execute("ROLLBACK", []);
+                eprintln!("error: failed to create link: {e}");
                 process::exit(1);
             }
         }
@@ -1860,6 +1977,79 @@ impl FilterArgs {
     }
 }
 
+fn link_cmd(from: &str, to: &str, rel: Option<String>, json: bool) {
+    let conn = open_db();
+    let from_id = resolve_entry_id(&conn, from);
+    let to_id = resolve_entry_id(&conn, to);
+    let rel = rel.unwrap_or_default();
+
+    if let Err(e) = conn.execute(
+        "INSERT OR IGNORE INTO links (from_id, to_id, rel) VALUES (?1, ?2, ?3)",
+        rusqlite::params![from_id, to_id, rel],
+    ) {
+        eprintln!("error: failed to create link: {e}");
+        process::exit(1);
+    }
+
+    if json {
+        let obj = serde_json::json!({
+            "from": from_id,
+            "to": to_id,
+            "rel": rel
+        });
+        println!("{obj}");
+    } else {
+        println!(
+            "linked {from_id} -> {to_id} (rel: {})",
+            if rel.is_empty() { "(none)" } else { &rel }
+        );
+    }
+}
+
+fn unlink_cmd(from: &str, to: &str, rel: Option<String>, json: bool) {
+    let conn = open_db();
+    let from_id = resolve_entry_id(&conn, from);
+    let to_id = resolve_entry_id(&conn, to);
+
+    let removed = if let Some(ref rel) = rel {
+        // Remove only the specific relationship
+        match conn.execute(
+            "DELETE FROM links WHERE from_id = ?1 AND to_id = ?2 AND rel = ?3",
+            rusqlite::params![from_id, to_id, rel],
+        ) {
+            Ok(n) => n,
+            Err(e) => {
+                eprintln!("error: failed to delete link: {e}");
+                process::exit(1);
+            }
+        }
+    } else {
+        // Remove ALL links from -> to
+        match conn.execute(
+            "DELETE FROM links WHERE from_id = ?1 AND to_id = ?2",
+            rusqlite::params![from_id, to_id],
+        ) {
+            Ok(n) => n,
+            Err(e) => {
+                eprintln!("error: failed to delete links: {e}");
+                process::exit(1);
+            }
+        }
+    };
+
+    if json {
+        let obj = serde_json::json!({
+            "from": from_id,
+            "to": to_id,
+            "removed": removed
+        });
+        println!("{obj}");
+    } else {
+        let word = if removed == 1 { "link" } else { "links" };
+        println!("unlinked {removed} {word} from {from_id} -> {to_id}");
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn query(
     labels: Vec<String>,
@@ -1880,6 +2070,9 @@ fn query(
     after: Option<String>,
     before: Option<String>,
     id_filter: Option<String>,
+    linked_to: Option<String>,
+    linked_from: Option<String>,
+    link_rel: Option<String>,
 ) {
     let filters = FilterArgs {
         labels,
@@ -1899,7 +2092,44 @@ fn query(
     let conn = open_db();
 
     // Build query dynamically
-    let (joins, conditions, params) = filters.build_filter_sql();
+    let (joins, conditions, mut params) = filters.build_filter_sql();
+
+    // Handle --linked-to and --linked-from filters
+    let mut extra_joins = String::new();
+    if let Some(ref linked_to_input) = linked_to {
+        let resolved = resolve_entry_id(&conn, linked_to_input);
+        let param_idx = params.len() as u32 + 1;
+        if let Some(ref rel) = link_rel {
+            extra_joins.push_str(&format!(
+                " JOIN links lk_to ON e.id = lk_to.from_id AND lk_to.to_id = ?{param_idx} AND lk_to.rel = ?{}",
+                param_idx + 1
+            ));
+            params.push(Box::new(resolved));
+            params.push(Box::new(rel.clone()));
+        } else {
+            extra_joins.push_str(&format!(
+                " JOIN links lk_to ON e.id = lk_to.from_id AND lk_to.to_id = ?{param_idx}"
+            ));
+            params.push(Box::new(resolved));
+        }
+    }
+    if let Some(ref linked_from_input) = linked_from {
+        let resolved = resolve_entry_id(&conn, linked_from_input);
+        let param_idx = params.len() as u32 + 1;
+        if let Some(ref rel) = link_rel {
+            extra_joins.push_str(&format!(
+                " JOIN links lk_from ON e.id = lk_from.to_id AND lk_from.from_id = ?{param_idx} AND lk_from.rel = ?{}",
+                param_idx + 1
+            ));
+            params.push(Box::new(resolved));
+            params.push(Box::new(rel.clone()));
+        } else {
+            extra_joins.push_str(&format!(
+                " JOIN links lk_from ON e.id = lk_from.to_id AND lk_from.from_id = ?{param_idx}"
+            ));
+            params.push(Box::new(resolved));
+        }
+    }
 
     // When --count + (--latest/--first or --limit/--offset), select rows first then wrap in COUNT subquery
     let needs_count_subquery = count && (latest || first || limit.is_some());
@@ -1912,7 +2142,7 @@ fn query(
     } else {
         "DISTINCT e.data"
     };
-    let mut sql = format!("SELECT {select_cols} FROM entries e{joins}");
+    let mut sql = format!("SELECT {select_cols} FROM entries e{joins}{extra_joins}");
 
     if !conditions.is_empty() {
         sql.push_str(" WHERE ");
@@ -2285,7 +2515,7 @@ fn csv_escape(field: &str) -> String {
     }
 }
 
-fn pull(id: &str, json: bool, raw: bool) {
+fn pull(id: &str, json: bool, raw: bool, with_links: bool) {
     let conn = open_db();
     let id = resolve_entry_id(&conn, id);
 
@@ -2341,7 +2571,7 @@ fn pull(id: &str, json: bool, raw: bool) {
                 };
 
                 let entry = EntryJson {
-                    id: eid,
+                    id: eid.clone(),
                     data,
                     entity_type: etype,
                     created_at,
@@ -2349,11 +2579,71 @@ fn pull(id: &str, json: bool, raw: bool) {
                     attributes,
                 };
 
-                match serde_json::to_string(&entry) {
-                    Ok(json_str) => println!("{json_str}"),
-                    Err(e) => {
-                        eprintln!("error: failed to serialize JSON: {e}");
-                        process::exit(1);
+                if with_links {
+                    // Build JSON with links_from and links_to arrays
+                    let mut val = serde_json::to_value(&entry).expect("failed to serialize entry");
+                    let obj = val.as_object_mut().unwrap();
+
+                    // Outgoing links (from this entry)
+                    let links_from: Vec<serde_json::Value> = {
+                        let mut stmt = conn
+                            .prepare("SELECT to_id, rel, created_at FROM links WHERE from_id = ?1")
+                            .unwrap_or_else(|e| {
+                                eprintln!("error: failed to query links: {e}");
+                                process::exit(1);
+                            });
+                        stmt.query_map(rusqlite::params![eid], |r| {
+                            Ok(serde_json::json!({
+                                "to": r.get::<_, String>(0)?,
+                                "rel": r.get::<_, String>(1)?,
+                                "created_at": r.get::<_, String>(2)?
+                            }))
+                        })
+                        .unwrap_or_else(|e| {
+                            eprintln!("error: failed to query links: {e}");
+                            process::exit(1);
+                        })
+                        .filter_map(|r| r.ok())
+                        .collect()
+                    };
+
+                    // Incoming links (to this entry)
+                    let links_to: Vec<serde_json::Value> = {
+                        let mut stmt = conn
+                            .prepare("SELECT from_id, rel, created_at FROM links WHERE to_id = ?1")
+                            .unwrap_or_else(|e| {
+                                eprintln!("error: failed to query links: {e}");
+                                process::exit(1);
+                            });
+                        stmt.query_map(rusqlite::params![eid], |r| {
+                            Ok(serde_json::json!({
+                                "from": r.get::<_, String>(0)?,
+                                "rel": r.get::<_, String>(1)?,
+                                "created_at": r.get::<_, String>(2)?
+                            }))
+                        })
+                        .unwrap_or_else(|e| {
+                            eprintln!("error: failed to query links: {e}");
+                            process::exit(1);
+                        })
+                        .filter_map(|r| r.ok())
+                        .collect()
+                    };
+
+                    obj.insert(
+                        "links_from".to_string(),
+                        serde_json::Value::Array(links_from),
+                    );
+                    obj.insert("links_to".to_string(), serde_json::Value::Array(links_to));
+
+                    println!("{val}");
+                } else {
+                    match serde_json::to_string(&entry) {
+                        Ok(json_str) => println!("{json_str}"),
+                        Err(e) => {
+                            eprintln!("error: failed to serialize JSON: {e}");
+                            process::exit(1);
+                        }
                     }
                 }
             }
@@ -4269,6 +4559,9 @@ fn alias_run(name: &str, mode: &str, confirm: bool) {
             search,
             after,
             before,
+            linked_to,
+            linked_from,
+            link_rel,
         } => query(
             label,
             not_label,
@@ -4288,6 +4581,9 @@ fn alias_run(name: &str, mode: &str, confirm: bool) {
             after,
             before,
             id,
+            linked_to,
+            linked_from,
+            link_rel,
         ),
         Command::Export {
             id,
@@ -4618,6 +4914,7 @@ fn main() {
             json,
             update,
             upsert,
+            links,
         } => push(
             label,
             entity_type,
@@ -4631,8 +4928,14 @@ fn main() {
             json,
             update,
             upsert,
+            links,
         ),
-        Command::Pull { id, json, raw } => pull(&id, json, raw),
+        Command::Pull {
+            id,
+            json,
+            raw,
+            with_links,
+        } => pull(&id, json, raw, with_links),
         Command::Query {
             id,
             label,
@@ -4653,6 +4956,9 @@ fn main() {
             search,
             after,
             before,
+            linked_to,
+            linked_from,
+            link_rel,
         } => query(
             label,
             not_label,
@@ -4672,6 +4978,9 @@ fn main() {
             after,
             before,
             id,
+            linked_to,
+            linked_from,
+            link_rel,
         ),
 
         Command::Export {
@@ -4772,6 +5081,18 @@ fn main() {
             before,
             json,
         ),
+        Command::Link {
+            from,
+            to,
+            rel,
+            json,
+        } => link_cmd(&from, &to, rel, json),
+        Command::Unlink {
+            from,
+            to,
+            rel,
+            json,
+        } => unlink_cmd(&from, &to, rel, json),
         Command::Tag { id, label, json } => tag(&id, label, json),
         Command::Untag { id, label, json } => untag(&id, label, json),
         Command::SetAttr {
