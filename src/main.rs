@@ -335,6 +335,9 @@ enum Command {
         /// Output result as JSON
         #[arg(long)]
         json: bool,
+        /// Treat ALL entries older than this duration as expired (e.g. 30m, 24h, 7d)
+        #[arg(long)]
+        ttl: Option<String>,
     },
     /// Save, run, list, and remove named query aliases
     Alias {
@@ -3226,26 +3229,54 @@ fn history(label: &str, json: bool, limit: Option<u64>, data_filter: Option<Stri
     }
 }
 
-fn gc(dry_run: bool, json: bool) {
+fn gc(dry_run: bool, json: bool, ttl: Option<String>) {
     let conn = open_db();
 
-    let sql = "SELECT DISTINCT e.id FROM entries e \
-               JOIN attributes a ON e.id = a.entry_id \
-               WHERE a.key = '_expires_at' AND a.value < datetime('now')";
+    let ids: Vec<String> = if let Some(ref ttl_str) = ttl {
+        // --ttl mode: collect ALL entries older than the given duration
+        let ttl_secs = match parse_ttl(ttl_str) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("error: {e}");
+                process::exit(1);
+            }
+        };
+        let cutoff = chrono::Utc::now() - chrono::Duration::seconds(ttl_secs as i64);
+        let cutoff_str = cutoff.format("%Y-%m-%d %H:%M:%S").to_string();
 
-    let mut stmt = match conn.prepare(sql) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("error: failed to prepare gc query: {e}");
-            process::exit(1);
+        let sql = "SELECT id FROM entries WHERE created_at < ?1";
+        let mut stmt = match conn.prepare(sql) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("error: failed to prepare gc query: {e}");
+                process::exit(1);
+            }
+        };
+        match stmt.query_map(rusqlite::params![cutoff_str], |row| row.get::<_, String>(0)) {
+            Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
+            Err(e) => {
+                eprintln!("error: failed to query old entries: {e}");
+                process::exit(1);
+            }
         }
-    };
-
-    let ids: Vec<String> = match stmt.query_map([], |row| row.get::<_, String>(0)) {
-        Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
-        Err(e) => {
-            eprintln!("error: failed to query expired entries: {e}");
-            process::exit(1);
+    } else {
+        // Default mode: collect only entries with expired _expires_at
+        let sql = "SELECT DISTINCT e.id FROM entries e \
+                   JOIN attributes a ON e.id = a.entry_id \
+                   WHERE a.key = '_expires_at' AND a.value < datetime('now')";
+        let mut stmt = match conn.prepare(sql) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("error: failed to prepare gc query: {e}");
+                process::exit(1);
+            }
+        };
+        match stmt.query_map([], |row| row.get::<_, String>(0)) {
+            Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
+            Err(e) => {
+                eprintln!("error: failed to query expired entries: {e}");
+                process::exit(1);
+            }
         }
     };
 
@@ -3650,7 +3681,7 @@ fn main() {
             limit,
             data,
         } => history(&label, json, limit, data),
-        Command::Gc { dry_run, json } => gc(dry_run, json),
+        Command::Gc { dry_run, json, ttl } => gc(dry_run, json, ttl),
         Command::Completions { shell } => {
             let mut cmd = Cli::command();
             clap_complete::generate(shell, &mut cmd, "agent-store", &mut std::io::stdout());

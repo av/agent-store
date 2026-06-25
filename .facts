@@ -370,6 +370,12 @@
   command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && echo old | \$AS push --ttl 1s -q && sleep 2 && \$AS gc --dry-run 2>&1 | grep -q 'would be collected' && test \"\$(\$AS query --count)\" = '1' && rm -rf \"\$TESTDIR\""
 - label: agent-store push --ttl rejects invalid duration format
   command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && echo data | \$AS push --ttl invalid 2>&1 | grep -qi 'invalid\\|error' && rm -rf \"\$TESTDIR\""
+- label: gc --ttl overrides per-entry expiry to collect entries older than given duration
+  command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && echo old | \$AS push -q && sleep 2 && echo new | \$AS push -q && RESULT=\$(\$AS gc --ttl 1s 2>&1) && echo \"\$RESULT\" | grep -q 'Collected 1' && test \"\$(\$AS query --count)\" = '1' && rm -rf \"\$TESTDIR\""
+  tags: [spec, implemented]
+- label: gc --ttl --dry-run previews collection without deleting
+  command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && echo old | \$AS push -q && sleep 2 && \$AS gc --ttl 1s --dry-run 2>&1 | grep -q 'would be collected' && test \"\$(\$AS query --count)\" = '1' && rm -rf \"\$TESTDIR\""
+  tags: [spec, implemented]
 
 ## cli/alias @implemented
 
