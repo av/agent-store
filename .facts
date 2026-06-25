@@ -119,8 +119,8 @@
 - label: agent-store --help shows Start here section directing agents to skills
   command: agent-store --help 2>&1 | grep -q "Start here" && echo "OK"
   tags: [spec, implemented]
-- label: long help explains that agent-store is append-only by design with no update or delete commands
-  command: agent-store help 2>&1 | grep -q "append-only" && echo "OK"
+- label: long help explains that entry payloads cannot be modified after push
+  command: agent-store help 2>&1 | grep -q "cannot be modified" && echo "OK"
   tags: [spec, implemented]
 
 ## skills
@@ -303,6 +303,19 @@
 - label: agent-store attrs --count shows entry count next to each attribute key
   command: DIR=$(mktemp -d) && cd "$DIR" && agent-store init >/dev/null 2>&1 && echo "d1" | agent-store push --attr color=red -q && echo "d2" | agent-store push --attr color=blue -q && echo "d3" | agent-store push --attr size=large -q && agent-store attrs --count | head -1 | grep -q "^color (2)$" && rm -rf "$DIR"
   tags: [spec, implemented]
+
+## cli/delete @spec
+
+- label: agent-store delete <id> deletes a single entry by ID with its labels and attributes, no --confirm needed
+  command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && ID=\$(echo test | \$AS push --label x --attr k=v --id-only --strip) && \$AS delete \"\$ID\" 2>&1 | grep -q 'Deleted' && test \"\$(\$AS query --count)\" = '0' && test \"\$(\$AS labels)\" = '' && rm -rf \"\$TESTDIR\""
+- label: agent-store delete with filters requires --confirm flag; without it prints count and exits 1
+  command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && echo a | \$AS push --label todo -q && echo b | \$AS push --label todo -q && \$AS delete --label todo 2>&1 | grep -q 'Would delete 2' && test \$? -eq 0 && rm -rf \"\$TESTDIR\""
+- label: agent-store delete with filters and --confirm deletes matching entries
+  command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && echo a | \$AS push --label todo -q && echo b | \$AS push --label done -q && \$AS delete --label todo --confirm 2>&1 | grep -q 'Deleted 1' && test \"\$(\$AS query --count)\" = '1' && rm -rf \"\$TESTDIR\""
+- label: agent-store delete with no ID and no filters prints error and exits 1
+  command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && \$AS delete 2>&1 | grep -q 'specify an ID or at least one filter' && rm -rf \"\$TESTDIR\""
+- label: agent-store delete exits 1 with error for nonexistent entry ID
+  command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && \$AS delete fake-id 2>&1 | grep -q 'entry not found' && rm -rf \"\$TESTDIR\""
 
 ## cli/tag @spec
 
