@@ -1766,6 +1766,7 @@ fn import(dry_run: bool) {
     let stdin = io::stdin();
     let mut imported = 0u64;
     let mut errors = 0u64;
+    let mut parsed_entries: Vec<(String, Option<String>, Vec<String>, Vec<(String, String)>, Option<String>)> = Vec::new();
 
     for (line_num, line_result) in io::BufRead::lines(stdin.lock()).enumerate() {
         let line_num = line_num + 1; // 1-based
@@ -1851,75 +1852,78 @@ fn import(dry_run: bool) {
             continue;
         }
 
-        // Generate fresh ID (always — don't preserve original id to avoid conflicts)
-        let id = Uuid::new_v4().to_string();
+        parsed_entries.push((data, entity_type, labels, attributes, created_at));
+    }
+
+    // Insert all parsed entries in a single transaction for performance and atomicity
+    if !dry_run {
         let conn = conn.as_ref().unwrap();
 
-        // Insert within a transaction
-        if let Err(e) = conn.execute("BEGIN", []) {
-            eprintln!("error: line {line_num}: failed to begin transaction: {e}");
-            errors += 1;
-            continue;
+        if let Err(e) = conn.execute_batch("BEGIN") {
+            eprintln!("error: failed to begin transaction: {e}");
+            process::exit(1);
         }
 
-        let mut failed = false;
+        for (data, entity_type, labels, attributes, created_at) in &parsed_entries {
+            let id = Uuid::new_v4().to_string();
 
-        let insert_result = if let Some(ref ts) = created_at {
-            conn.execute(
-                "INSERT INTO entries (id, data, entity_type, created_at) VALUES (?1, ?2, ?3, ?4)",
-                rusqlite::params![id, data, entity_type, ts],
-            )
-        } else {
-            conn.execute(
-                "INSERT INTO entries (id, data, entity_type) VALUES (?1, ?2, ?3)",
-                rusqlite::params![id, data, entity_type],
-            )
-        };
-        if let Err(e) = insert_result {
-            eprintln!("error: line {line_num}: failed to insert entry: {e}");
-            failed = true;
-        }
+            let mut failed = false;
 
-        if !failed {
-            for label in &labels {
-                if let Err(e) = conn.execute(
-                    "INSERT INTO labels (entry_id, label) VALUES (?1, ?2)",
-                    rusqlite::params![id, label],
-                ) {
-                    eprintln!("error: line {line_num}: failed to insert label: {e}");
-                    failed = true;
-                    break;
+            let insert_result = if let Some(ts) = created_at {
+                conn.execute(
+                    "INSERT INTO entries (id, data, entity_type, created_at) VALUES (?1, ?2, ?3, ?4)",
+                    rusqlite::params![id, data, entity_type, ts],
+                )
+            } else {
+                conn.execute(
+                    "INSERT INTO entries (id, data, entity_type) VALUES (?1, ?2, ?3)",
+                    rusqlite::params![id, data, entity_type],
+                )
+            };
+            if let Err(e) = insert_result {
+                eprintln!("error: failed to insert entry: {e}");
+                failed = true;
+            }
+
+            if !failed {
+                for label in labels {
+                    if let Err(e) = conn.execute(
+                        "INSERT INTO labels (entry_id, label) VALUES (?1, ?2)",
+                        rusqlite::params![id, label],
+                    ) {
+                        eprintln!("error: failed to insert label: {e}");
+                        failed = true;
+                        break;
+                    }
                 }
             }
-        }
 
-        if !failed {
-            for (key, value) in &attributes {
-                if let Err(e) = conn.execute(
-                    "INSERT INTO attributes (entry_id, key, value) VALUES (?1, ?2, ?3)",
-                    rusqlite::params![id, key, value],
-                ) {
-                    eprintln!("error: line {line_num}: failed to insert attribute: {e}");
-                    failed = true;
-                    break;
+            if !failed {
+                for (key, value) in attributes {
+                    if let Err(e) = conn.execute(
+                        "INSERT INTO attributes (entry_id, key, value) VALUES (?1, ?2, ?3)",
+                        rusqlite::params![id, key, value],
+                    ) {
+                        eprintln!("error: failed to insert attribute: {e}");
+                        failed = true;
+                        break;
+                    }
                 }
             }
+
+            if failed {
+                let _ = conn.execute_batch("ROLLBACK");
+                eprintln!("error: transaction rolled back due to insert failure");
+                process::exit(1);
+            }
+
+            imported += 1;
         }
 
-        if failed {
-            let _ = conn.execute("ROLLBACK", []);
-            errors += 1;
-            continue;
+        if let Err(e) = conn.execute_batch("COMMIT") {
+            eprintln!("error: failed to commit transaction: {e}");
+            process::exit(1);
         }
-
-        if let Err(e) = conn.execute("COMMIT", []) {
-            let _ = conn.execute("ROLLBACK", []);
-            eprintln!("error: line {line_num}: failed to commit: {e}");
-            errors += 1;
-            continue;
-        }
-
-        imported += 1;
     }
 
     let error_part = if errors == 1 {
@@ -1952,17 +1956,28 @@ fn purge(confirm: bool) {
         }
     };
 
-    // Delete in FK-safe order: attributes, labels, entries
+    // Delete in FK-safe order within a transaction for atomicity
+    if let Err(e) = conn.execute_batch("BEGIN") {
+        eprintln!("error: failed to begin transaction: {e}");
+        process::exit(1);
+    }
     if let Err(e) = conn.execute("DELETE FROM attributes", []) {
+        let _ = conn.execute_batch("ROLLBACK");
         eprintln!("error: failed to delete attributes: {e}");
         process::exit(1);
     }
     if let Err(e) = conn.execute("DELETE FROM labels", []) {
+        let _ = conn.execute_batch("ROLLBACK");
         eprintln!("error: failed to delete labels: {e}");
         process::exit(1);
     }
     if let Err(e) = conn.execute("DELETE FROM entries", []) {
+        let _ = conn.execute_batch("ROLLBACK");
         eprintln!("error: failed to delete entries: {e}");
+        process::exit(1);
+    }
+    if let Err(e) = conn.execute_batch("COMMIT") {
+        eprintln!("error: failed to commit transaction: {e}");
         process::exit(1);
     }
 
