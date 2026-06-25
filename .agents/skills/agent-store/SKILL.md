@@ -122,7 +122,55 @@ agent-store stats     # entry count and store size
 | `types` | List all unique entity types in the store, sorted. Flags: `--json` (JSON array), `--count` (with counts) |
 | `attrs` | List all unique attribute keys in the store, sorted. Flags: `--json` (JSON array), `--count` (with counts) |
 | `info` | Show store configuration and environment. Flags: `--json` |
+| `tag <id> <label>...` | Add labels to an existing entry. Idempotent (duplicate labels are ignored). |
+| `untag <id> <label>...` | Remove labels from an existing entry. Idempotent (missing labels are ignored). |
+| `history <label>` | Show chronological history of entries with a given label (oldest first). Flags: `--json`, `--limit N`, `--data <substring>` |
 | `completions <shell>` | Generate shell completions (bash, zsh, fish, elvish, powershell) |
+
+## Tagging
+
+Labels can be added or removed after push using `tag` and `untag`. Both are
+idempotent — tagging with an already-present label or untagging a missing label
+is a no-op.
+
+```bash
+# Add labels to an existing entry
+ID=$(echo "data" | agent-store push --id-only)
+agent-store tag $ID urgent
+agent-store tag $ID review backend    # multiple labels at once
+
+# Remove labels
+agent-store untag $ID urgent
+agent-store untag $ID review backend  # multiple labels at once
+
+# Verify
+agent-store query --label backend --json | jq '.[].data'
+```
+
+## History
+
+Since agent-store is append-only, a common pattern is pushing multiple entries with the same label to track changes over time. The `history` subcommand makes this explicit.
+
+```bash
+# Show all entries labeled "config" in chronological order
+agent-store history config
+
+# Output format:
+# [2024-01-15 10:30:00] abc1234
+#   First value
+#
+# [2024-01-15 11:00:00] def4567
+#   Updated value
+
+# JSON output (same format as query --json)
+agent-store history config --json
+
+# Last 5 entries only
+agent-store history config --limit 5
+
+# Search within history
+agent-store history config --data "database"
+```
 
 ## Pushing data
 

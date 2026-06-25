@@ -62,18 +62,24 @@ agent-store query --type task --attr status=pending --attr priority=high
 # Find tasks by area
 agent-store query --type task --label backend
 
+# Mark a task done by tagging it
+ID=$(agent-store query --type task --label backend --latest --json | jq -r '.[0].id')
+agent-store tag "$ID" done
+
 # Exclude completed tasks
-agent-store query --type task --attr status=pending --not-label done
+agent-store query --type task --not-label done
+
+# Re-open a task by removing the done label
+agent-store untag "$ID" done
 
 # View everything as JSON for structured processing
 agent-store query --type task --json | jq '.[] | select(.attributes.status == "pending")'
 ```
 
-**Gotcha:** agent-store has no update command — entries are immutable
-once pushed. To "change status," push a new entry with the updated state
-and use the newer entry. Or track status externally and use the store for
-the task descriptions. For simple tracking, query + external filter is
-usually enough.
+**Tip:** Use `tag` and `untag` to move tasks through workflow stages.
+Tag entries with `done`, `blocked`, `in-progress` etc. and use
+`--not-label done` to filter them out of active queries. This avoids
+needing to push new entries just to change status.
 
 ## Decision log
 

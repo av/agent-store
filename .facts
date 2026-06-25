@@ -304,27 +304,27 @@
   command: DIR=$(mktemp -d) && cd "$DIR" && agent-store init >/dev/null 2>&1 && echo "d1" | agent-store push --attr color=red -q && echo "d2" | agent-store push --attr color=blue -q && echo "d3" | agent-store push --attr size=large -q && agent-store attrs --count | head -1 | grep -q "^color (2)$" && rm -rf "$DIR"
   tags: [spec, implemented]
 
-## tag @spec
+## cli/tag @spec
 
-- label: agent-store tag adds a label to an existing entry
-  command: cd /tmp/as-test-tag && rm -rf .agent-store && agent-store init && ID=$(echo "data" | agent-store push --id-only) && agent-store tag "$ID" urgent && agent-store query --label urgent --json | jq -r '.[0].data' | grep -q "data" && echo "OK"
-- label: agent-store tag is idempotent for duplicate labels
-  command: cd /tmp/as-test-tag && agent-store tag "$(agent-store query --latest --json | jq -r '.[0].id')" urgent urgent && echo "OK"
-- label: agent-store tag errors on unknown entry ID
-  command: cd /tmp/as-test-tag && agent-store tag nonexistent-id urgent 2>&1 | grep -q "not found" && echo "OK"
-- label: agent-store tag rejects empty labels
-  command: cd /tmp/as-test-tag && agent-store tag "$(agent-store query --latest --json | jq -r '.[0].id')" "" 2>&1 | grep -qi "empty" && echo "OK"
-- label: agent-store tag supports multiple labels in one call
-  command: cd /tmp/as-test-tag && ID=$(echo "multi" | agent-store push --id-only) && agent-store tag "$ID" alpha beta && agent-store pull "$ID" --json | jq -e '.labels | sort == ["alpha","beta"]' > /dev/null && echo "OK"
+- label: agent-store tag adds one or more labels to an existing entry
+  command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && ID=\$(echo test | \$AS push --id-only --strip) && \$AS tag \"\$ID\" done reviewed 2>&1 && LABELS=\$(\$AS pull \"\$ID\" --json | python3 -c \"import sys,json; print(','.join(sorted(json.load(sys.stdin)['labels'])))\") && rm -rf \"\$TESTDIR\" && test \"\$LABELS\" = 'done,reviewed'"
+- label: agent-store tag is idempotent when adding a label that already exists
+  command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && ID=\$(echo test | \$AS push --label x --id-only --strip) && \$AS tag \"\$ID\" x 2>&1 && COUNT=\$(\$AS pull \"\$ID\" --json | python3 -c \"import sys,json; print(len(json.load(sys.stdin)['labels']))\") && rm -rf \"\$TESTDIR\" && test \"\$COUNT\" = '1'"
+- label: agent-store tag exits 1 with clear message for nonexistent entry ID
+  command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && \$AS tag fake-id oops 2>&1 | grep -q 'entry not found' && rm -rf \"\$TESTDIR\""
+- label: agent-store tag rejects empty label with error and exit 1
+  command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && ID=\$(echo test | \$AS push --id-only --strip) && \$AS tag \"\$ID\" '' 2>&1 | grep -q 'label cannot be empty' && rm -rf \"\$TESTDIR\""
 
-## untag @spec
+## cli/untag @spec
 
-- label: agent-store untag removes a label from an existing entry
-  command: cd /tmp/as-test-tag && ID=$(agent-store query --latest --json | jq -r '.[0].id') && agent-store untag "$ID" urgent && agent-store query --label urgent --count | grep -q "0" && echo "OK"
-- label: agent-store untag is idempotent for missing labels
-  command: cd /tmp/as-test-tag && agent-store untag "$(agent-store query --latest --json | jq -r '.[0].id')" nonexistent && echo "OK"
-- label: agent-store untag errors on unknown entry ID
-  command: cd /tmp/as-test-tag && agent-store untag nonexistent-id urgent 2>&1 | grep -q "not found" && echo "OK"
+- label: agent-store untag removes one or more labels from an existing entry
+  command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && ID=\$(echo test | \$AS push --label a --label b --id-only --strip) && \$AS untag \"\$ID\" a 2>&1 && LABELS=\$(\$AS pull \"\$ID\" --json | python3 -c \"import sys,json; print(','.join(sorted(json.load(sys.stdin)['labels'])))\") && rm -rf \"\$TESTDIR\" && test \"\$LABELS\" = 'b'"
+- label: agent-store untag is idempotent when label does not exist on entry
+  command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && ID=\$(echo test | \$AS push --label x --id-only --strip) && \$AS untag \"\$ID\" nonexistent 2>&1 && COUNT=\$(\$AS pull \"\$ID\" --json | python3 -c \"import sys,json; print(len(json.load(sys.stdin)['labels']))\") && rm -rf \"\$TESTDIR\" && test \"\$COUNT\" = '1'"
+- label: agent-store untag exits 1 with clear message for nonexistent entry ID
+  command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && \$AS untag fake-id oops 2>&1 | grep -q 'entry not found' && rm -rf \"\$TESTDIR\""
+- label: agent-store untag rejects empty label with error and exit 1
+  command: bash -c "TESTDIR=\$(mktemp -d) && export AGENT_STORE_PATH=\"\$TESTDIR/.agent-store\" && AS=target/release/agent-store && \$AS init >/dev/null 2>&1 && ID=\$(echo test | \$AS push --id-only --strip) && \$AS untag \"\$ID\" '' 2>&1 | grep -q 'label cannot be empty' && rm -rf \"\$TESTDIR\""
 
 ## history
 - label: agent-store history <LABEL> shows all entries with the given label in chronological order (oldest first) with timestamp and ID headers
