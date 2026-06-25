@@ -342,6 +342,12 @@ enum Command {
         #[arg(long)]
         ttl: Option<String>,
     },
+    /// Reclaim disk space by running SQLite VACUUM and PRAGMA optimize
+    Compact {
+        /// Output result as JSON (sizes in bytes)
+        #[arg(long)]
+        json: bool,
+    },
     /// Save, run, list, and remove named query aliases
     Alias {
         #[command(subcommand)]
@@ -2334,15 +2340,7 @@ fn stats(json: bool) {
         // Store file size
         let db_path = store_db();
         if let Ok(meta) = fs::metadata(&db_path) {
-            let size = meta.len();
-            let formatted = if size < 1024 {
-                format!("{} B", size)
-            } else if size < 1024 * 1024 {
-                format!("{:.1} KB", size as f64 / 1024.0)
-            } else {
-                format!("{:.1} MB", size as f64 / (1024.0 * 1024.0))
-            };
-            println!("store size: {formatted}");
+            println!("store size: {}", format_size(meta.len()));
         }
 
         let type_count = entity_types.len();
@@ -3364,6 +3362,77 @@ fn gc(dry_run: bool, json: bool, ttl: Option<String>) {
     }
 }
 
+fn format_size(bytes: u64) -> String {
+    if bytes < 1024 {
+        format!("{} B", bytes)
+    } else if bytes < 1024 * 1024 {
+        format!("{:.1} KB", bytes as f64 / 1024.0)
+    } else if bytes < 1024 * 1024 * 1024 {
+        format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
+    } else {
+        format!("{:.1} GB", bytes as f64 / (1024.0 * 1024.0 * 1024.0))
+    }
+}
+
+fn compact(json: bool) {
+    let db_path = store_db();
+    if !db_path.exists() {
+        eprintln!("error: store not initialized (run `agent-store init` first)");
+        process::exit(1);
+    }
+
+    let size_before = match fs::metadata(&db_path) {
+        Ok(m) => m.len(),
+        Err(e) => {
+            eprintln!("error: failed to read store size: {e}");
+            process::exit(1);
+        }
+    };
+
+    let conn = open_db();
+
+    if let Err(e) = conn.execute_batch("VACUUM") {
+        eprintln!("error: VACUUM failed: {e}");
+        process::exit(1);
+    }
+
+    if let Err(e) = conn.execute_batch("PRAGMA optimize") {
+        eprintln!("error: PRAGMA optimize failed: {e}");
+        process::exit(1);
+    }
+
+    // Drop connection before re-reading size so WAL is flushed
+    drop(conn);
+
+    let size_after = match fs::metadata(&db_path) {
+        Ok(m) => m.len(),
+        Err(e) => {
+            eprintln!("error: failed to read store size after compaction: {e}");
+            process::exit(1);
+        }
+    };
+
+    let freed = size_before.saturating_sub(size_after);
+
+    if json {
+        println!(
+            "{}",
+            serde_json::json!({
+                "size_before": size_before,
+                "size_after": size_after,
+                "freed": freed
+            })
+        );
+    } else {
+        println!(
+            "{} \u{2192} {} (freed {})",
+            format_size(size_before),
+            format_size(size_after),
+            format_size(freed)
+        );
+    }
+}
+
 fn alias_set(name: &str, args: Vec<String>) {
     let conn = open_db();
     let args_json = serde_json::to_string(&args).unwrap_or_else(|e| {
@@ -3748,6 +3817,7 @@ fn main() {
             data,
         } => history(&label, json, limit, data),
         Command::Gc { dry_run, json, ttl } => gc(dry_run, json, ttl),
+        Command::Compact { json } => compact(json),
         Command::Completions { shell } => {
             let mut cmd = Cli::command();
             clap_complete::generate(shell, &mut cmd, "agent-store", &mut std::io::stdout());
