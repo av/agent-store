@@ -332,8 +332,17 @@ impl Store {
         kind: &str,
         fields: BTreeMap<String, String>,
     ) -> StoreResult<Record> {
+        self.create_record_with_id_generator(kind, fields, generate_id)
+    }
+
+    fn create_record_with_id_generator(
+        &mut self,
+        kind: &str,
+        fields: BTreeMap<String, String>,
+        mut next_id: impl FnMut() -> String,
+    ) -> StoreResult<Record> {
         for _ in 0..ID_RETRIES {
-            let id = generate_id();
+            let id = next_id();
             let tx = self.conn.transaction()?;
             match insert_record(&tx, &id, kind, &fields) {
                 Ok(()) => {
@@ -351,7 +360,7 @@ impl Store {
             }
         }
 
-        Err(StoreError::HookIdCollisionExhausted)
+        Err(StoreError::IdCollisionExhausted)
     }
 
     pub fn get_record(&self, id_prefix: &str) -> StoreResult<Record> {
@@ -1186,13 +1195,81 @@ mod tests {
     use super::*;
 
     #[test]
-    fn generated_ids_are_lowercase_base36() {
+    fn record_id_generation_uses_lowercase_base36() {
         let id = generate_id();
 
         assert_eq!(id.len(), ID_LEN);
         assert!(id
             .chars()
             .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit()));
+    }
+
+    #[test]
+    fn record_id_generation_retries_collisions() {
+        let dir = std::env::temp_dir().join(format!("agent-store-test-{}", generate_id()));
+        fs::create_dir_all(&dir).unwrap();
+        let db_path = dir.join("store.sqlite");
+        let mut store = Store::open(db_path).unwrap();
+        let existing_id = "aaaaaa";
+
+        store
+            .conn
+            .execute(
+                "INSERT INTO records (id, kind, created_at, updated_at) VALUES (?1, 'seed', 'now', 'now')",
+                params![existing_id],
+            )
+            .unwrap();
+
+        let mut ids = [existing_id.to_owned(), "bbbbbb".to_owned()].into_iter();
+        let record = store
+            .create_record_with_id_generator(
+                "task",
+                BTreeMap::from([("title".into(), "write".into())]),
+                || {
+                    ids.next()
+                        .expect("test ID sequence should not be exhausted")
+                },
+            )
+            .unwrap();
+
+        assert_eq!(record.id, "bbbbbb");
+        assert_eq!(
+            store.get_record("bbbbbb").unwrap(),
+            Record {
+                id: "bbbbbb".to_owned(),
+                kind: "task".to_owned(),
+                fields: BTreeMap::from([("title".into(), "write".into())]),
+            }
+        );
+
+        drop(store);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn record_id_generation_reports_collision_exhaustion() {
+        let dir = std::env::temp_dir().join(format!("agent-store-test-{}", generate_id()));
+        fs::create_dir_all(&dir).unwrap();
+        let db_path = dir.join("store.sqlite");
+        let mut store = Store::open(db_path).unwrap();
+        let existing_id = "aaaaaa";
+
+        store
+            .conn
+            .execute(
+                "INSERT INTO records (id, kind, created_at, updated_at) VALUES (?1, 'seed', 'now', 'now')",
+                params![existing_id],
+            )
+            .unwrap();
+
+        let error = store
+            .create_record_with_id_generator("task", BTreeMap::new(), || existing_id.to_owned())
+            .unwrap_err();
+
+        assert!(matches!(error, StoreError::IdCollisionExhausted));
+
+        drop(store);
+        fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

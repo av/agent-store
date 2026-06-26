@@ -291,5 +291,8 @@
   tags: [implemented]
 
 # ids
-- Record IDs are generated as 6-8 character random hash strings and creation retries when a generated ID already exists @draft
+- label: agent-store create generates a 6-8 character lowercase base36 Record ID and retries generation when an inserted ID already exists before reporting collision exhaustion
+  id: lbl
+  command: bash tests/facts/cli_records.sh record_id_generation_contract && cargo test --quiet record_id_generation
+  tags: [implemented]
 - Commands that accept a Record ID require an unambiguous existing short ID and report not-found errors without creating records implicitly @draft

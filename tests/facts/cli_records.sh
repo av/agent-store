@@ -328,6 +328,22 @@ assert fields == {"title": "Write"}, fields
 PY
     ;;
 
+  record_id_generation_contract)
+    cd "$tmp"
+    run_agent_store init >/tmp/agent-store-ids-lbl-init.out
+    ids_file="$tmp/record-ids"
+
+    for n in 1 2 3 4 5 6 7 8; do
+      id="$(run_agent_store create sample seq="$n")"
+      printf "%s\n" "$id" | grep -Eq "^[a-z0-9]{6,8}$"
+      run_agent_store get "$id" >/tmp/agent-store-ids-lbl-get.out
+      printf "%s\n" "$id" >>"$ids_file"
+    done
+
+    unique_count="$(sort -u "$ids_file" | wc -l | tr -d ' ')"
+    test "$unique_count" = "8"
+    ;;
+
   json_output)
     cd "$tmp"
     init_json="$(run_agent_store --json init)"
@@ -413,7 +429,7 @@ PY
     ;;
 
   *)
-    echo "usage: $0 {create_alias_matches_create|find_alias_matches_find|set_updates_fields|unset_removes_fields|find_filters_records|query_boolean_syntax|query_argument_parity|query_typed_values|field_empty_null_unset_semantics|json_output}" >&2
+    echo "usage: $0 {create_alias_matches_create|find_alias_matches_find|set_updates_fields|unset_removes_fields|find_filters_records|query_boolean_syntax|query_argument_parity|query_typed_values|field_empty_null_unset_semantics|record_id_generation_contract|json_output}" >&2
     exit 2
     ;;
 esac
