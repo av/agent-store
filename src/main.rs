@@ -606,11 +606,8 @@ fn run_matching_hooks_after_commit(
             continue;
         }
 
-        let output = Command::new("bash")
-            .arg("-c")
-            .arg(&hook.command)
-            .output()
-            .map_err(|error| format!("hook {} failed to start: {error}", hook.id))?;
+        let stdin_payload = format!("{}\n", format_record(record));
+        let output = run_hook_command(&hook, &stdin_payload)?;
         let exit_status = output.status.code().unwrap_or(1);
         let stdout_summary = String::from_utf8_lossy(&output.stdout).into_owned();
         let stderr_summary = String::from_utf8_lossy(&output.stderr).into_owned();
@@ -628,6 +625,35 @@ fn run_matching_hooks_after_commit(
     }
 
     Ok(())
+}
+
+fn run_hook_command(hook: &Hook, stdin_payload: &str) -> Result<process::Output, String> {
+    let mut child = Command::new("bash")
+        .arg("-c")
+        .arg(&hook.command)
+        .stdin(process::Stdio::piped())
+        .stdout(process::Stdio::piped())
+        .stderr(process::Stdio::piped())
+        .spawn()
+        .map_err(|error| format!("hook {} failed to start: {error}", hook.id))?;
+
+    {
+        let mut stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| format!("hook {} stdin pipe unavailable", hook.id))?;
+        if let Err(error) = stdin.write_all(stdin_payload.as_bytes()) {
+            if error.kind() != io::ErrorKind::BrokenPipe {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(format!("hook {} stdin write failed: {error}", hook.id));
+            }
+        }
+    }
+
+    child
+        .wait_with_output()
+        .map_err(|error| format!("hook {} failed while waiting: {error}", hook.id))
 }
 
 fn hook_query_matches(

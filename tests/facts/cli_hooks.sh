@@ -299,8 +299,75 @@ assert not any(row[0] in skipped for row in rows), rows
 PY
     ;;
 
+  hook_stdin_receives_record_snapshot)
+    cd "$tmp"
+    run_agent_store init >/tmp/agent-store-hook-stdin-9i8-init.out
+
+    cat > hook-stdin.sh <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+payload="$(cat)"
+printf "%s:%s\n" "$1" "$payload" >> hook-stdin.log
+printf "%s" "$1"
+SH
+    chmod +x hook-stdin.sh
+
+    create_hook_id="$(run_agent_store hook add create -- './hook-stdin.sh create')"
+    record_id="$(run_agent_store create task title='Hello world' status=new flag=keep)"
+
+    set_hook_id="$(run_agent_store hook add set -- './hook-stdin.sh set')"
+    run_agent_store set "$record_id" status=done note='needs review' >/tmp/agent-store-hook-stdin-9i8-set.out
+
+    unset_hook_id="$(run_agent_store hook add unset -- './hook-stdin.sh unset')"
+    run_agent_store unset "$record_id" flag >/tmp/agent-store-hook-stdin-9i8-unset.out
+
+    rm_hook_id="$(run_agent_store hook add rm -- './hook-stdin.sh rm')"
+    run_agent_store rm "$record_id" >/tmp/agent-store-hook-stdin-9i8-rm.out
+
+    expected_log="$(
+      printf "create:%s task flag=keep status=new title='Hello world'\n" "$record_id"
+      printf "set:%s task flag=keep note='needs review' status=done title='Hello world'\n" "$record_id"
+      printf "unset:%s task note='needs review' status=done title='Hello world'\n" "$record_id"
+      printf "rm:%s task note='needs review' status=done title='Hello world'\n" "$record_id"
+    )"
+    test "$(cat hook-stdin.log)" = "$expected_log"
+
+    python3 - .agent-store/store.sqlite \
+      "$create_hook_id" \
+      "$set_hook_id" \
+      "$unset_hook_id" \
+      "$rm_hook_id" \
+      "$record_id" <<'PY'
+import sqlite3
+import sys
+
+(
+    db,
+    create_hook_id,
+    set_hook_id,
+    unset_hook_id,
+    rm_hook_id,
+    record_id,
+) = sys.argv[1:]
+con = sqlite3.connect(db)
+rows = con.execute(
+    """
+    select hook_id, event_type, record_id, exit_status, stdout_summary, stderr_summary
+    from hook_runs
+    order by id
+    """
+).fetchall()
+assert rows == [
+    (create_hook_id, "create", record_id, 0, "create", ""),
+    (set_hook_id, "set", record_id, 0, "set", ""),
+    (unset_hook_id, "unset", record_id, 0, "unset", ""),
+    (rm_hook_id, "rm", record_id, 0, "rm", ""),
+], rows
+PY
+    ;;
+
   *)
-    echo "usage: $0 {hook_add_stores_metadata|hook_ls_deterministic|hook_rm_deletes_metadata|hooks_run_after_commit|hook_query_filters_records|hook_query_uses_mutation_snapshot}" >&2
+    echo "usage: $0 {hook_add_stores_metadata|hook_ls_deterministic|hook_rm_deletes_metadata|hooks_run_after_commit|hook_query_filters_records|hook_query_uses_mutation_snapshot|hook_stdin_receives_record_snapshot}" >&2
     exit 2
     ;;
 esac
