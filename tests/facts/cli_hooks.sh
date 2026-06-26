@@ -125,8 +125,52 @@ PY
     grep -Fq "was not found" /tmp/agent-store-hook-rm-nih-again.err
     ;;
 
+  hooks_run_after_commit)
+    cd "$tmp"
+    run_agent_store init >/tmp/agent-store-hook-runtime-w5s-init.out
+
+    cat > agent-store <<SH
+#!/usr/bin/env bash
+exec "$target_dir/debug/agent-store" "\$@"
+SH
+    chmod +x agent-store
+    export PATH="$tmp:$PATH"
+
+    create_hook_id="$(run_agent_store hook add create -- 'agent-store find kind=task > hook-visible.txt; printf hook-stdout')"
+    set_hook_id="$(run_agent_store hook add set -- 'touch failed-set-hook-ran')"
+
+    id="$(run_agent_store create task title=Committed status=open)"
+    visible="$(cat hook-visible.txt)"
+    test "$visible" = "$id task status=open title=Committed"
+
+    if run_agent_store set missing status=done >/tmp/agent-store-hook-runtime-w5s-failed-set.out 2>/tmp/agent-store-hook-runtime-w5s-failed-set.err; then
+      exit 1
+    fi
+    grep -Fq "was not found" /tmp/agent-store-hook-runtime-w5s-failed-set.err
+    test ! -e failed-set-hook-ran
+
+    python3 - .agent-store/store.sqlite "$create_hook_id" "$set_hook_id" "$id" <<'PY'
+import sqlite3
+import sys
+
+db, create_hook_id, set_hook_id, record_id = sys.argv[1:]
+con = sqlite3.connect(db)
+rows = con.execute(
+    """
+    select hook_id, event_type, record_id, exit_status, stdout_summary, stderr_summary
+    from hook_runs
+    order by id
+    """
+).fetchall()
+assert rows == [
+    (create_hook_id, "create", record_id, 0, "hook-stdout", ""),
+], rows
+assert not any(row[0] == set_hook_id for row in rows), rows
+PY
+    ;;
+
   *)
-    echo "usage: $0 {hook_add_stores_metadata|hook_ls_deterministic|hook_rm_deletes_metadata}" >&2
+    echo "usage: $0 {hook_add_stores_metadata|hook_ls_deterministic|hook_rm_deletes_metadata|hooks_run_after_commit}" >&2
     exit 2
     ;;
 esac

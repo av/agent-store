@@ -180,7 +180,10 @@
 - the Rust SQLite crate and async model are chosen based on simple CLI correctness, migration support, and testability rather than background service throughput @draft
 
 # hooks
-- Hooks run only after the triggering Store mutation succeeds and commits to the Store @draft
+- label: Hooks without Query conditions run only after a triggering Store mutation succeeds and commits, can read the committed Record through a nested agent-store command, do not run for failed mutations, and persist one Hook Run per invocation
+  id: w5s
+  command: bash tests/facts/cli_hooks.sh hooks_run_after_commit
+  tags: [implemented]
 - Hook Query conditions use the same boolean field filter language as agent-store find @draft
 - create, set, and unset Hooks evaluate their Query against the Record after the change; rm Hooks evaluate against the pre-delete Record snapshot @draft
 - Hook Bash commands receive the affected Record snapshot on stdin in the default record output format @draft

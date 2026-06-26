@@ -6,7 +6,7 @@ use std::env;
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 use std::path::Path;
-use std::process;
+use std::process::{self, Command};
 
 const GITIGNORE_PATH: &str = ".gitignore";
 const GITIGNORE_RULE: &str = ".agent-store/";
@@ -197,6 +197,7 @@ fn main() {
                     let mut store = open_store_or_exit();
                     match store.create_record(&kind, fields) {
                         Ok(record) => {
+                            run_hooks_or_exit(&mut store, "create", &record.id);
                             if json_output {
                                 print_json(mutation_json("created", &record));
                             } else {
@@ -286,6 +287,7 @@ fn main() {
                     let mut store = open_store_or_exit();
                     match store.set_record(&id, fields) {
                         Ok(record) => {
+                            run_hooks_or_exit(&mut store, "set", &record.id);
                             if json_output {
                                 print_json(mutation_json("updated", &record));
                             } else {
@@ -319,6 +321,7 @@ fn main() {
                     let mut store = open_store_or_exit();
                     match store.unset_record(&id, keys) {
                         Ok(record) => {
+                            run_hooks_or_exit(&mut store, "unset", &record.id);
                             if json_output {
                                 print_json(mutation_json("updated", &record));
                             } else {
@@ -350,6 +353,7 @@ fn main() {
             let mut store = open_store_or_exit();
             match store.delete_record(&id) {
                 Ok(record) => {
+                    run_hooks_or_exit(&mut store, "rm", &record.id);
                     if json_output {
                         print_json(mutation_json("removed", &record));
                     } else {
@@ -374,6 +378,7 @@ fn main() {
             let mut store = open_store_or_exit();
             match store.link_records(&from, &rel, &to) {
                 Ok(link) => {
+                    run_hooks_or_exit(&mut store, "link", &link.from_record_id);
                     if json_output {
                         print_json(link_mutation_json("linked", &link));
                     } else {
@@ -401,6 +406,7 @@ fn main() {
             let mut store = open_store_or_exit();
             match store.unlink_records(&from, &rel, &to) {
                 Ok(link) => {
+                    run_hooks_or_exit(&mut store, "unlink", &link.from_record_id);
                     if json_output {
                         print_json(link_mutation_json("unlinked", &link));
                     } else {
@@ -565,6 +571,50 @@ fn open_store_or_exit() -> Store {
             process::exit(1);
         }
     }
+}
+
+fn run_hooks_or_exit(store: &mut Store, event_type: &str, record_id: &str) {
+    if let Err(error) = run_unconditioned_hooks_after_commit(store, event_type, record_id) {
+        eprintln!("error: failed to run hooks: {error}");
+        process::exit(1);
+    }
+}
+
+fn run_unconditioned_hooks_after_commit(
+    store: &mut Store,
+    event_type: &str,
+    record_id: &str,
+) -> Result<(), String> {
+    let hooks = store
+        .list_hooks()
+        .map_err(|error| format!("failed to list hooks: {error}"))?;
+
+    for hook in hooks
+        .into_iter()
+        .filter(|hook| hook.event == event_type && hook.query.is_none())
+    {
+        let output = Command::new("bash")
+            .arg("-c")
+            .arg(&hook.command)
+            .output()
+            .map_err(|error| format!("hook {} failed to start: {error}", hook.id))?;
+        let exit_status = output.status.code().unwrap_or(1);
+        let stdout_summary = String::from_utf8_lossy(&output.stdout).into_owned();
+        let stderr_summary = String::from_utf8_lossy(&output.stderr).into_owned();
+
+        store
+            .record_hook_run(
+                &hook.id,
+                event_type,
+                record_id,
+                exit_status,
+                &stdout_summary,
+                &stderr_summary,
+            )
+            .map_err(|error| format!("failed to record hook {} run: {error}", hook.id))?;
+    }
+
+    Ok(())
 }
 
 fn parse_fields(args: impl Iterator<Item = String>) -> Result<BTreeMap<String, String>, String> {
