@@ -115,9 +115,18 @@
 - label: a Store is a project-local SQLite-backed database under .agent-store
   command: bash tests/facts/store_schema_migrations.sh store_is_project_local
   tags: [implemented]
-- a Record is a stored item with a generated 6-8 character random hash ID, a kind, and arbitrary named fields @draft
-- a Field is a key-value attribute attached to a Record @draft
-- a Query is a boolean expression over Record fields, typed comparisons, parentheses, and link predicates @draft
+- label: a Record is a stored item with a generated 6-8 character random hash ID, a kind, and arbitrary named Fields
+  id: 6hu
+  command: bash tests/facts/cli_records.sh json_output
+  tags: [implemented]
+- label: a Field is a key-value attribute attached to a Record
+  id: ypj
+  command: bash tests/facts/cli_records.sh field_empty_null_unset_semantics
+  tags: [implemented]
+- label: a Query is a boolean expression over Record kind, Fields, typed comparisons, parentheses, and Link predicates
+  id: wqi
+  command: bash tests/facts/cli_records.sh query_boolean_syntax && bash tests/facts/cli_records.sh query_typed_values && bash tests/facts/cli_links.sh find_filters_links
+  tags: [implemented]
 - label: a Hook is a stored automation rule with a generated 6-8 character random hash ID, supported Store Event name, optional Query condition text, Bash command, and created_at timestamp
   id: u79
   command: bash tests/facts/cli_hooks.sh hook_add_stores_metadata
@@ -134,7 +143,10 @@
   id: w8e
   command: bash tests/facts/cli_context.sh ctx_domain_summary_contract
   tags: [implemented]
-- a Link is a directional typed relation from one Record to another Record @draft
+- label: a Link is a stored directional typed relation from one source Record to one target Record
+  id: cw3
+  command: bash tests/facts/cli_links.sh links_lists_deterministically
+  tags: [implemented]
 - label: one Link table shape represents one-to-one, one-to-many, and many-to-many relations without per-kind schema changes
   command: bash tests/facts/store_schema_migrations.sh record_links_cardinality_shape
   tags: [implemented]
