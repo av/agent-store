@@ -1,4 +1,6 @@
 use crate::store::Record;
+use crate::value::FieldValue;
+use std::cmp::Ordering;
 use std::error::Error;
 use std::fmt;
 
@@ -7,7 +9,7 @@ pub struct Query {
     expression: Expr,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 enum Expr {
     Comparison(Comparison),
     And(Box<Expr>, Box<Expr>),
@@ -15,11 +17,11 @@ enum Expr {
     Not(Box<Expr>),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 struct Comparison {
     field: String,
     op: ComparisonOp,
-    value: String,
+    value: FieldValue,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -113,20 +115,29 @@ impl Comparison {
         match self.op {
             ComparisonOp::Equal => actual == self.value,
             ComparisonOp::NotEqual => actual != self.value,
-            ComparisonOp::Less => actual.as_str() < self.value.as_str(),
-            ComparisonOp::LessOrEqual => actual.as_str() <= self.value.as_str(),
-            ComparisonOp::Greater => actual.as_str() > self.value.as_str(),
-            ComparisonOp::GreaterOrEqual => actual.as_str() >= self.value.as_str(),
+            ComparisonOp::Less => actual.value_ordering(&self.value) == Some(Ordering::Less),
+            ComparisonOp::LessOrEqual => matches!(
+                actual.value_ordering(&self.value),
+                Some(Ordering::Less | Ordering::Equal)
+            ),
+            ComparisonOp::Greater => actual.value_ordering(&self.value) == Some(Ordering::Greater),
+            ComparisonOp::GreaterOrEqual => matches!(
+                actual.value_ordering(&self.value),
+                Some(Ordering::Greater | Ordering::Equal)
+            ),
         }
     }
 }
 
-fn record_value(record: &Record, field: &str) -> Option<String> {
+fn record_value(record: &Record, field: &str) -> Option<FieldValue> {
     if field == "kind" {
-        return Some(record.kind.clone());
+        return Some(FieldValue::Text(record.kind.clone()));
     }
 
-    record.fields.get(field).cloned()
+    record
+        .fields
+        .get(field)
+        .map(|value| FieldValue::parse(value))
 }
 
 struct Parser {
@@ -211,7 +222,7 @@ impl Parser {
                 )));
             }
         };
-        let value = self.expect_word("comparison value")?;
+        let value = FieldValue::parse(&self.expect_word("comparison value")?);
 
         Ok(Comparison { field, op, value })
     }
@@ -361,6 +372,11 @@ mod tests {
             fields: BTreeMap::from([
                 ("status".to_owned(), "open".to_owned()),
                 ("priority".to_owned(), "high".to_owned()),
+                ("score".to_owned(), "10".to_owned()),
+                ("due".to_owned(), "2026-01-02".to_owned()),
+                ("stamp".to_owned(), "2026-01-02T03:04:05Z".to_owned()),
+                ("active".to_owned(), "true".to_owned()),
+                ("missing".to_owned(), "null".to_owned()),
             ]),
         }
     }
@@ -374,7 +390,7 @@ mod tests {
 
     #[test]
     fn missing_fields_do_not_satisfy_inequality() {
-        let query = Query::parse("missing!=done").expect("query should parse");
+        let query = Query::parse("absent!=done").expect("query should parse");
 
         assert!(!query.matches(&record()));
     }
@@ -400,5 +416,37 @@ mod tests {
         let query = Query::parse("priority>=high and priority<=high").expect("query should parse");
 
         assert!(query.matches(&record()));
+    }
+
+    #[test]
+    fn comparisons_use_parsed_field_value_types() {
+        for query in [
+            "score>9",
+            "score<11",
+            "due=2026-01-02",
+            "due>2026-01-01",
+            "stamp>=2026-01-02T03:04:05Z",
+            "active=true",
+            "active>false",
+            "missing=null",
+            "priority>alpha",
+        ] {
+            let query = Query::parse(query).expect("query should parse");
+            assert!(query.matches(&record()));
+        }
+    }
+
+    #[test]
+    fn ordered_comparisons_do_not_fall_back_to_raw_strings_for_mixed_types() {
+        for query in [
+            "score<zzz",
+            "due<zzz",
+            "stamp<zzz",
+            "active<zzz",
+            "missing<zzz",
+        ] {
+            let query = Query::parse(query).expect("query should parse");
+            assert!(!query.matches(&record()));
+        }
     }
 }

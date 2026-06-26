@@ -1,4 +1,5 @@
 use crate::query::Query;
+use crate::value::FieldValue;
 use rand::Rng;
 use rusqlite::{params, Connection, ErrorCode, OptionalExtension, Transaction};
 use serde_json::json;
@@ -424,7 +425,7 @@ fn insert_field(
     key: &str,
     raw_value: &str,
 ) -> Result<(), rusqlite::Error> {
-    let parsed = ParsedFieldValue::parse(raw_value);
+    let parsed = FieldValue::parse(raw_value);
     tx.execute(
         r#"
         INSERT INTO record_fields (
@@ -443,11 +444,11 @@ fn insert_field(
             record_id,
             key,
             raw_value,
-            parsed.text_value.as_deref(),
-            parsed.number_value,
-            parsed.timestamp_value.as_deref(),
-            parsed.boolean_value,
-            parsed.is_null
+            parsed.text_value(),
+            parsed.number_value(),
+            parsed.timestamp_value(),
+            parsed.boolean_value(),
+            parsed.is_null()
         ],
     )?;
     Ok(())
@@ -459,7 +460,7 @@ fn upsert_field(
     key: &str,
     raw_value: &str,
 ) -> Result<(), rusqlite::Error> {
-    let parsed = ParsedFieldValue::parse(raw_value);
+    let parsed = FieldValue::parse(raw_value);
     tx.execute(
         r#"
         INSERT INTO record_fields (
@@ -485,86 +486,14 @@ fn upsert_field(
             record_id,
             key,
             raw_value,
-            parsed.text_value.as_deref(),
-            parsed.number_value,
-            parsed.timestamp_value.as_deref(),
-            parsed.boolean_value,
-            parsed.is_null
+            parsed.text_value(),
+            parsed.number_value(),
+            parsed.timestamp_value(),
+            parsed.boolean_value(),
+            parsed.is_null()
         ],
     )?;
     Ok(())
-}
-
-struct ParsedFieldValue {
-    text_value: Option<String>,
-    number_value: Option<f64>,
-    timestamp_value: Option<String>,
-    boolean_value: Option<i64>,
-    is_null: i64,
-}
-
-impl ParsedFieldValue {
-    fn parse(raw: &str) -> Self {
-        if raw == "null" {
-            return Self {
-                text_value: None,
-                number_value: None,
-                timestamp_value: None,
-                boolean_value: None,
-                is_null: 1,
-            };
-        }
-
-        if raw == "true" || raw == "false" {
-            return Self {
-                text_value: None,
-                number_value: None,
-                timestamp_value: None,
-                boolean_value: Some(i64::from(raw == "true")),
-                is_null: 0,
-            };
-        }
-
-        if looks_like_timestamp(raw) {
-            return Self {
-                text_value: None,
-                number_value: None,
-                timestamp_value: Some(raw.to_owned()),
-                boolean_value: None,
-                is_null: 0,
-            };
-        }
-
-        if let Ok(number) = raw.parse::<f64>() {
-            if number.is_finite() {
-                return Self {
-                    text_value: None,
-                    number_value: Some(number),
-                    timestamp_value: None,
-                    boolean_value: None,
-                    is_null: 0,
-                };
-            }
-        }
-
-        Self {
-            text_value: Some(raw.to_owned()),
-            number_value: None,
-            timestamp_value: None,
-            boolean_value: None,
-            is_null: 0,
-        }
-    }
-}
-
-fn looks_like_timestamp(raw: &str) -> bool {
-    let bytes = raw.as_bytes();
-    bytes.len() >= 10
-        && bytes[0..4].iter().all(u8::is_ascii_digit)
-        && bytes[4] == b'-'
-        && bytes[5..7].iter().all(u8::is_ascii_digit)
-        && bytes[7] == b'-'
-        && bytes[8..10].iter().all(u8::is_ascii_digit)
 }
 
 fn generate_id() -> String {

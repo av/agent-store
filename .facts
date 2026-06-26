@@ -172,7 +172,10 @@
   id: ly7
   command: bash tests/facts/cli_records.sh query_argument_parity
   tags: [implemented]
-- Query evaluation uses parsed Field types so date, timestamp, number, boolean, null, and text comparisons behave by value rather than raw string order @draft
+- label: agent-store find <Query> parses Field values and query literals as null, boolean, date, timestamp, number, or text, uses type-aware equality and inequality, orders only same-typed values, and treats missing Fields as non-matches
+  id: t2s
+  command: bash tests/facts/cli_records.sh query_typed_values
+  tags: [implemented]
 
 # fields
 - Field values preserve their raw input and are parsed in specificity order as null, boolean, date or timestamp, number, then text @draft

@@ -203,6 +203,57 @@ $note note lane=gamma priority=high status=open title=Note"
     test "$multi" = "$quoted"
     ;;
 
+  query_typed_values)
+    cd "$tmp"
+    run_agent_store init >/tmp/agent-store-query-t2s-init.out
+    high="$(run_agent_store create sample title=High score=10 due=2026-01-02 stamp=2026-01-02T12:00:00Z active=true missing=null lane=beta)"
+    low="$(run_agent_store create sample title=Low score=2 due=2026-01-01 stamp=2026-01-02T08:00:00Z active=false missing=value lane=alpha)"
+    text="$(run_agent_store create sample title=Textual missing=value lane=gamma)"
+    sparse="$(run_agent_store create sample title=Sparse lane=delta)"
+
+    high_line="$high sample active=true due=2026-01-02 lane=beta missing=null score=10 stamp=2026-01-02T12:00:00Z title=High"
+    low_line="$low sample active=false due=2026-01-01 lane=alpha missing=value score=2 stamp=2026-01-02T08:00:00Z title=Low"
+    text_line="$text sample lane=gamma missing=value title=Textual"
+
+    got="$(run_agent_store find 'score>9')"
+    test "$got" = "$high_line"
+
+    got="$(run_agent_store find 'score<3')"
+    test "$got" = "$low_line"
+
+    got="$(run_agent_store find 'due>2026-01-01')"
+    test "$got" = "$high_line"
+
+    got="$(run_agent_store find 'stamp>=2026-01-02T09:00:00Z')"
+    test "$got" = "$high_line"
+
+    got="$(run_agent_store find 'active>false')"
+    test "$got" = "$high_line"
+
+    got="$(run_agent_store find 'missing=null')"
+    test "$got" = "$high_line"
+
+    expected="$low_line
+$text_line"
+    got="$(run_agent_store find 'missing!=null')"
+    test "$(printf "%s\n" "$got" | sort)" = "$(printf "%s\n" "$expected" | sort)"
+
+    expected="$high_line
+$text_line"
+    got="$(run_agent_store find 'lane>alpha and lane<zeta and title!=Sparse')"
+    test "$(printf "%s\n" "$got" | sort)" = "$(printf "%s\n" "$expected" | sort)"
+
+    test -z "$(run_agent_store find 'score<zzz')"
+    test -z "$(run_agent_store find 'due<zzz')"
+    test -z "$(run_agent_store find 'stamp<zzz')"
+    test -z "$(run_agent_store find 'active<zzz')"
+    test -z "$(run_agent_store find 'missing<zzz and missing=null')"
+    test -z "$(run_agent_store find 'absent!=value')"
+
+    sparse_line="$(run_agent_store get "$sparse")"
+    test "$sparse_line" = "$sparse sample lane=delta title=Sparse"
+    ;;
+
   field_empty_null_unset_semantics)
     cd "$tmp"
     run_agent_store init >/tmp/agent-store-fields-6pq-init.out
@@ -233,7 +284,7 @@ PY
     ;;
 
   *)
-    echo "usage: $0 {set_updates_fields|unset_removes_fields|find_filters_records|query_boolean_syntax|query_argument_parity|field_empty_null_unset_semantics}" >&2
+    echo "usage: $0 {set_updates_fields|unset_removes_fields|find_filters_records|query_boolean_syntax|query_argument_parity|query_typed_values|field_empty_null_unset_semantics}" >&2
     exit 2
     ;;
 esac

@@ -1,5 +1,6 @@
 mod query;
 mod store;
+mod value;
 
 use query::Query;
 use std::collections::BTreeMap;
