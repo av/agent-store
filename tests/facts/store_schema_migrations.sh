@@ -308,8 +308,10 @@ rows = con.execute(
     """
     select event_type, record_id, record_snapshot, created_at
     from store_events
+    where event_type = 'rm' and record_id = ?
     order by id
-    """
+    """,
+    (victim,),
 ).fetchall()
 assert len(rows) == 1, rows
 event_type, record_id, record_snapshot, created_at = rows[0]
@@ -371,6 +373,8 @@ records = con.execute("select id, kind from records order by id").fetchall()
 assert records == [(seed, "seed")], records
 fields = con.execute("select record_id, key, raw_value from record_fields order by record_id, key").fetchall()
 assert fields == [(seed, "title", "existing")], fields
+events = con.execute("select event_type, record_id from store_events order by id").fetchall()
+assert events == [("create", seed)], events
 con.execute("drop trigger rollback_create_after_record")
 con.commit()
 PY
@@ -408,7 +412,10 @@ import sys
 db, victim = sys.argv[1:]
 con = sqlite3.connect(db)
 assert con.execute("select count(*) from records where id = ?", (victim,)).fetchone()[0] == 1
-assert con.execute("select count(*) from store_events").fetchone()[0] == 0
+assert con.execute(
+    "select count(*) from store_events where event_type = 'rm' and record_id = ?",
+    (victim,),
+).fetchone()[0] == 0
 PY
     ;;
 

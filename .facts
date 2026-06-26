@@ -104,7 +104,10 @@
 - a Field is a key-value attribute attached to a Record @draft
 - a Query is a boolean expression over Record fields, typed comparisons, parentheses, and link predicates @draft
 - a Hook is a stored automation rule that pairs a Store Event, an optional Query condition, and a Bash command @draft
-- a Store Event is a successful create, set, unset, rm, link, or unlink operation on stored data @draft
+- label: each successful create, set, unset, rm, link, and unlink mutation writes one Store Event with event_type equal to the mutation name, record_id set to the affected Record ID, and link/unlink using the source Record as the affected Record
+  id: rc5
+  command: bash tests/facts/store_events.sh mutation_events
+  tags: [implemented]
 - a Hook Run is a stored execution result for one Hook invocation, including the event, affected Record ID, exit status, and captured output summary @draft
 - a Quick Context is a bounded Store summary intended to orient an agent before it chooses specific retrieval commands @draft
 - a Link is a directional typed relation from one Record to another Record @draft

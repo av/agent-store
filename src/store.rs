@@ -244,8 +244,14 @@ impl Store {
             let tx = self.conn.transaction()?;
             match insert_record(&tx, &id, kind, &fields) {
                 Ok(()) => {
+                    let record = Record {
+                        id,
+                        kind: kind.to_owned(),
+                        fields,
+                    };
+                    insert_store_event(&tx, "create", &record)?;
                     tx.commit()?;
-                    return self.get_record(&id);
+                    return Ok(record);
                 }
                 Err(error) if is_constraint_violation(&error) => continue,
                 Err(error) => return Err(StoreError::Sql(error)),
@@ -301,9 +307,11 @@ impl Store {
             "UPDATE records SET updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?1",
             params![&id],
         )?;
+        let record = get_record_by_id(&tx, &id)?;
+        insert_store_event(&tx, "set", &record)?;
         tx.commit()?;
 
-        get_record_by_id(&self.conn, &id)
+        Ok(record)
     }
 
     pub fn unset_record(&mut self, id_prefix: &str, keys: Vec<String>) -> StoreResult<Record> {
@@ -321,9 +329,11 @@ impl Store {
             "UPDATE records SET updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?1",
             params![&id],
         )?;
+        let record = get_record_by_id(&tx, &id)?;
+        insert_store_event(&tx, "unset", &record)?;
         tx.commit()?;
 
-        get_record_by_id(&self.conn, &id)
+        Ok(record)
     }
 
     pub fn delete_record(&mut self, id_prefix: &str) -> StoreResult<Record> {
@@ -331,15 +341,8 @@ impl Store {
         let tx = self.conn.transaction()?;
         let id = resolve_id(&tx, id_prefix)?;
         let record = get_record_by_id(&tx, &id)?;
-        let snapshot = record_snapshot_json(&record)?;
 
-        tx.execute(
-            r#"
-            INSERT INTO store_events (event_type, record_id, record_snapshot)
-            VALUES ('rm', ?1, ?2)
-            "#,
-            params![&record.id, &snapshot],
-        )?;
+        insert_store_event(&tx, "rm", &record)?;
         tx.execute("DELETE FROM records WHERE id = ?1", params![&record.id])?;
         tx.commit()?;
 
@@ -366,6 +369,8 @@ impl Store {
             "#,
             params![&from_id, rel, &to_id],
         )?;
+        let source = get_record_by_id(&tx, &from_id)?;
+        insert_store_event(&tx, "link", &source)?;
         tx.commit()?;
 
         Ok(Link {
@@ -395,6 +400,8 @@ impl Store {
             "#,
             params![&from_id, rel, &to_id],
         )?;
+        let source = get_record_by_id(&tx, &from_id)?;
+        insert_store_event(&tx, "unlink", &source)?;
         tx.commit()?;
 
         Ok(Link {
@@ -502,6 +509,18 @@ fn record_snapshot_json(record: &Record) -> StoreResult<String> {
         "kind": record.kind,
         "fields": record.fields,
     }))?)
+}
+
+fn insert_store_event(tx: &Transaction<'_>, event_type: &str, record: &Record) -> StoreResult<()> {
+    let snapshot = record_snapshot_json(record)?;
+    tx.execute(
+        r#"
+        INSERT INTO store_events (event_type, record_id, record_snapshot)
+        VALUES (?1, ?2, ?3)
+        "#,
+        params![event_type, &record.id, &snapshot],
+    )?;
+    Ok(())
 }
 
 fn run_migrations(conn: &mut Connection) -> StoreResult<()> {
