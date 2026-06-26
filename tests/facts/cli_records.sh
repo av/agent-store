@@ -134,6 +134,35 @@ PY
     test "$got" = "$id task empty='' note=keep title=Write zzz_fail_after_note=bad"
     ;;
 
+  find_filters_records)
+    cd "$tmp"
+    run_agent_store init >/tmp/agent-store-find-m2b-init.out
+    open_task="$(run_agent_store create task title=Write status=open priority=high)"
+    run_agent_store create task title=Ship status=done priority=low >/tmp/agent-store-find-m2b-done.out
+    run_agent_store create note title=Write status=open priority=high >/tmp/agent-store-find-m2b-note.out
+
+    expected="$open_task task priority=high status=open title=Write"
+    quoted="$(run_agent_store find 'kind=task and status=open')"
+    test "$quoted" = "$expected"
+
+    multi="$(run_agent_store find kind=task and status=open)"
+    test "$multi" = "$quoted"
+
+    not_done="$(run_agent_store find kind=task and status!=done)"
+    test "$not_done" = "$expected"
+
+    field_and_kind="$(run_agent_store find priority=high and kind!=note)"
+    test "$field_and_kind" = "$expected"
+
+    none="$(run_agent_store find kind=task and status=missing)"
+    test -z "$none"
+
+    if run_agent_store find >/tmp/agent-store-find-m2b-empty.out 2>/tmp/agent-store-find-m2b-empty.err; then
+      exit 1
+    fi
+    grep -Fq "find requires a query" /tmp/agent-store-find-m2b-empty.err
+    ;;
+
   field_empty_null_unset_semantics)
     cd "$tmp"
     run_agent_store init >/tmp/agent-store-fields-6pq-init.out
@@ -164,7 +193,7 @@ PY
     ;;
 
   *)
-    echo "usage: $0 {set_updates_fields|unset_removes_fields|field_empty_null_unset_semantics}" >&2
+    echo "usage: $0 {set_updates_fields|unset_removes_fields|find_filters_records|field_empty_null_unset_semantics}" >&2
     exit 2
     ;;
 esac

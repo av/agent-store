@@ -1,5 +1,7 @@
+mod query;
 mod store;
 
+use query::Query;
 use std::collections::BTreeMap;
 use std::env;
 use std::fs::{self, OpenOptions};
@@ -142,6 +144,7 @@ Options:
 Commands:
   init          Initialize a project-local store
   create        Create a record
+  find          Find records by query
   get           Print a record by ID
   set           Update fields on a record by ID
   unset         Remove fields from a record by ID
@@ -209,6 +212,33 @@ fn main() {
                 Ok(record) => println!("{}", format_record(&record)),
                 Err(error) => {
                     eprintln!("error: failed to get record: {error}");
+                    process::exit(1);
+                }
+            }
+        }
+        Some("find") => {
+            let query_text = args.collect::<Vec<_>>().join(" ");
+            if query_text.trim().is_empty() {
+                eprintln!("error: find requires a query");
+                process::exit(2);
+            }
+
+            let query = match Query::parse(&query_text) {
+                Ok(query) => query,
+                Err(error) => {
+                    eprintln!("error: invalid query: {error}");
+                    process::exit(2);
+                }
+            };
+            let store = open_store_or_exit();
+            match store.find_records(&query) {
+                Ok(records) => {
+                    for record in records {
+                        println!("{}", format_record(&record));
+                    }
+                }
+                Err(error) => {
+                    eprintln!("error: failed to find records: {error}");
                     process::exit(1);
                 }
             }

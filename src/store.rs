@@ -1,3 +1,4 @@
+use crate::query::Query;
 use rand::Rng;
 use rusqlite::{params, Connection, ErrorCode, OptionalExtension, Transaction};
 use serde_json::json;
@@ -215,6 +216,22 @@ impl Store {
         validate_id_prefix(id_prefix)?;
         let id = self.resolve_id(id_prefix)?;
         get_record_by_id(&self.conn, &id)
+    }
+
+    pub fn find_records(&self, query: &Query) -> StoreResult<Vec<Record>> {
+        let mut stmt = self.conn.prepare("SELECT id FROM records ORDER BY id")?;
+        let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+        let ids: Vec<String> = rows.collect::<Result<_, _>>()?;
+        let mut records = Vec::new();
+
+        for id in ids {
+            let record = get_record_by_id(&self.conn, &id)?;
+            if query.matches(&record) {
+                records.push(record);
+            }
+        }
+
+        Ok(records)
     }
 
     pub fn set_record(
