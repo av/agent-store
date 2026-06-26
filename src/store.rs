@@ -145,6 +145,18 @@ pub struct Hook {
     pub command: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HookRun {
+    pub id: i64,
+    pub hook_id: String,
+    pub event_type: String,
+    pub record_id: String,
+    pub exit_status: i32,
+    pub stdout_summary: String,
+    pub stderr_summary: String,
+    pub created_at: String,
+}
+
 pub struct Store {
     conn: Connection,
 }
@@ -511,6 +523,62 @@ impl Store {
         Ok(hook)
     }
 
+    pub fn record_hook_run(
+        &mut self,
+        hook_id: &str,
+        event_type: &str,
+        record_id: &str,
+        exit_status: i32,
+        stdout_summary: &str,
+        stderr_summary: &str,
+    ) -> StoreResult<HookRun> {
+        validate_hook_id_prefix(hook_id)?;
+        validate_hook_event(event_type)?;
+        validate_id_prefix(record_id)?;
+
+        let tx = self.conn.transaction()?;
+        get_hook_by_id(&tx, hook_id)?;
+        tx.execute(
+            r#"
+            INSERT INTO hook_runs (
+                hook_id,
+                event_type,
+                record_id,
+                exit_status,
+                stdout_summary,
+                stderr_summary
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            "#,
+            params![
+                hook_id,
+                event_type,
+                record_id,
+                exit_status,
+                stdout_summary,
+                stderr_summary
+            ],
+        )?;
+        let id = tx.last_insert_rowid();
+        let run = get_hook_run_by_id(&tx, id)?;
+        tx.commit()?;
+
+        Ok(run)
+    }
+
+    pub fn list_hook_runs(&self) -> StoreResult<Vec<HookRun>> {
+        let mut stmt = self.conn.prepare(
+            r#"
+            SELECT id, hook_id, event_type, record_id, exit_status, stdout_summary, stderr_summary, created_at
+            FROM hook_runs
+            ORDER BY id
+            "#,
+        )?;
+        let rows = stmt.query_map([], hook_run_from_row)?;
+
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
     fn resolve_id(&self, id_prefix: &str) -> StoreResult<String> {
         resolve_id(&self.conn, id_prefix)
     }
@@ -534,6 +602,32 @@ fn get_hook_by_id(conn: &Connection, id: &str) -> StoreResult<Hook> {
         },
     )
     .map_err(StoreError::from)
+}
+
+fn get_hook_run_by_id(conn: &Connection, id: i64) -> StoreResult<HookRun> {
+    conn.query_row(
+        r#"
+        SELECT id, hook_id, event_type, record_id, exit_status, stdout_summary, stderr_summary, created_at
+        FROM hook_runs
+        WHERE id = ?1
+        "#,
+        params![id],
+        hook_run_from_row,
+    )
+    .map_err(StoreError::from)
+}
+
+fn hook_run_from_row(row: &rusqlite::Row<'_>) -> Result<HookRun, rusqlite::Error> {
+    Ok(HookRun {
+        id: row.get(0)?,
+        hook_id: row.get(1)?,
+        event_type: row.get(2)?,
+        record_id: row.get(3)?,
+        exit_status: row.get(4)?,
+        stdout_summary: row.get(5)?,
+        stderr_summary: row.get(6)?,
+        created_at: row.get(7)?,
+    })
 }
 
 fn get_record_by_id(conn: &Connection, id: &str) -> StoreResult<Record> {
@@ -899,5 +993,47 @@ mod tests {
         assert!(id
             .chars()
             .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit()));
+    }
+
+    #[test]
+    fn hook_runs_persist_invocation_results() {
+        let dir = std::env::temp_dir().join(format!("agent-store-test-{}", generate_id()));
+        fs::create_dir_all(&dir).unwrap();
+        let db_path = dir.join("store.sqlite");
+
+        let run = {
+            let mut store = Store::open(db_path.clone()).unwrap();
+            let hook = store
+                .add_hook("create", None, "printf 'hook ran\\n'")
+                .unwrap();
+            let record = store
+                .create_record("task", BTreeMap::from([("title".into(), "write".into())]))
+                .unwrap();
+
+            let run = store
+                .record_hook_run(
+                    &hook.id,
+                    "create",
+                    &record.id,
+                    7,
+                    "stdout summary",
+                    "stderr summary",
+                )
+                .unwrap();
+
+            assert_eq!(run.hook_id, hook.id);
+            assert_eq!(run.event_type, "create");
+            assert_eq!(run.record_id, record.id);
+            assert_eq!(run.exit_status, 7);
+            assert_eq!(run.stdout_summary, "stdout summary");
+            assert_eq!(run.stderr_summary, "stderr summary");
+            assert!(!run.created_at.is_empty());
+            assert_eq!(store.list_hook_runs().unwrap(), vec![run.clone()]);
+            run
+        };
+
+        let reopened = Store::open(db_path).unwrap();
+        assert_eq!(reopened.list_hook_runs().unwrap(), vec![run]);
+        fs::remove_dir_all(dir).unwrap();
     }
 }

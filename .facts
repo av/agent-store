@@ -120,7 +120,10 @@
   id: rc5
   command: bash tests/facts/store_events.sh mutation_events
   tags: [implemented]
-- a Hook Run is a stored execution result for one Hook invocation, including the event, affected Record ID, exit status, and captured output summary @draft
+- label: a Hook Run persists one Hook invocation result with Hook ID, Store Event name, affected Record ID, exit status, stdout summary, stderr summary, and creation timestamp
+  id: ra7
+  command: CARGO_TARGET_DIR=target/facts-ra7 cargo test hook_runs_persist_invocation_results
+  tags: [implemented]
 - a Quick Context is a bounded Store summary intended to orient an agent before it chooses specific retrieval commands @draft
 - a Link is a directional typed relation from one Record to another Record @draft
 - label: one Link table shape represents one-to-one, one-to-many, and many-to-many relations without per-kind schema changes

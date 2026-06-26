@@ -1,8 +1,5 @@
-mod query;
-mod store;
-mod value;
-
-use query::Query;
+use agent_store::query::Query;
+use agent_store::store::{Hook, Link, LinkEdge, Record, Store, STORE_DIR};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::env;
@@ -10,7 +7,6 @@ use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 use std::path::Path;
 use std::process;
-use store::{Hook, Link, LinkEdge, Record, Store, STORE_DIR};
 
 const GITIGNORE_PATH: &str = ".gitignore";
 const GITIGNORE_RULE: &str = ".agent-store/";
