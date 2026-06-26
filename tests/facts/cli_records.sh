@@ -163,6 +163,46 @@ PY
     grep -Fq "find requires a query" /tmp/agent-store-find-m2b-empty.err
     ;;
 
+  query_boolean_syntax)
+    cd "$tmp"
+    run_agent_store init >/tmp/agent-store-query-s5i-init.out
+    open_task="$(run_agent_store create task title=Write status=open priority=high lane=beta)"
+    done_task="$(run_agent_store create task title=Ship status=done priority=low lane=alpha)"
+    note="$(run_agent_store create note title=Note status=open priority=high lane=gamma)"
+    bug="$(run_agent_store create bug title=Bug status=open priority=medium lane=delta)"
+
+    expected="$open_task task lane=beta priority=high status=open title=Write
+$note note lane=gamma priority=high status=open title=Note"
+
+    got="$(run_agent_store find 'kind=note or kind=task and not status=done')"
+    test "$(printf "%s\n" "$got" | sort)" = "$(printf "%s\n" "$expected" | sort)"
+
+    got="$(run_agent_store find '(kind=note or kind=task) and priority=high')"
+    test "$(printf "%s\n" "$got" | sort)" = "$(printf "%s\n" "$expected" | sort)"
+
+    got="$(run_agent_store find 'lane>=beta and lane<gamma and priority!=medium')"
+    test "$got" = "$open_task task lane=beta priority=high status=open title=Write"
+
+    got="$(run_agent_store find 'lane<=alpha')"
+    test "$got" = "$done_task task lane=alpha priority=low status=done title=Ship"
+
+    got="$(run_agent_store find 'lane>delta')"
+    test "$got" = "$note note lane=gamma priority=high status=open title=Note"
+    ;;
+
+  query_argument_parity)
+    cd "$tmp"
+    run_agent_store init >/tmp/agent-store-query-ly7-init.out
+    run_agent_store create task title=Write status=open priority=high lane=beta >/tmp/agent-store-query-ly7-open.out
+    run_agent_store create task title=Ship status=done priority=low lane=alpha >/tmp/agent-store-query-ly7-done.out
+    run_agent_store create note title=Note status=open priority=high lane=gamma >/tmp/agent-store-query-ly7-note.out
+    run_agent_store create bug title=Bug status=open priority=medium lane=delta >/tmp/agent-store-query-ly7-bug.out
+
+    quoted="$(run_agent_store find '(kind=note or kind=task) and lane>=beta and lane<delta and not status=done')"
+    multi="$(run_agent_store find '(' kind=note or kind=task ')' and 'lane>=beta' and 'lane<delta' and not status=done)"
+    test "$multi" = "$quoted"
+    ;;
+
   field_empty_null_unset_semantics)
     cd "$tmp"
     run_agent_store init >/tmp/agent-store-fields-6pq-init.out
@@ -193,7 +233,7 @@ PY
     ;;
 
   *)
-    echo "usage: $0 {set_updates_fields|unset_removes_fields|find_filters_records|field_empty_null_unset_semantics}" >&2
+    echo "usage: $0 {set_updates_fields|unset_removes_fields|find_filters_records|query_boolean_syntax|query_argument_parity|field_empty_null_unset_semantics}" >&2
     exit 2
     ;;
 esac

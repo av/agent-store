@@ -4,7 +4,15 @@ use std::fmt;
 
 #[derive(Debug, Clone)]
 pub struct Query {
-    comparisons: Vec<Comparison>,
+    expression: Expr,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Expr {
+    Comparison(Comparison),
+    And(Box<Expr>, Box<Expr>),
+    Or(Box<Expr>, Box<Expr>),
+    Not(Box<Expr>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -18,6 +26,10 @@ struct Comparison {
 enum ComparisonOp {
     Equal,
     NotEqual,
+    Less,
+    LessOrEqual,
+    Greater,
+    GreaterOrEqual,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -25,6 +37,12 @@ enum Token {
     Word(String),
     Equal,
     NotEqual,
+    Less,
+    LessOrEqual,
+    Greater,
+    GreaterOrEqual,
+    LeftParen,
+    RightParen,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -56,20 +74,33 @@ impl Query {
         }
 
         let mut parser = Parser::new(tokens);
-        let mut comparisons = vec![parser.parse_comparison()?];
-
-        while !parser.is_finished() {
-            parser.expect_keyword("and")?;
-            comparisons.push(parser.parse_comparison()?);
+        let expression = parser.parse_expression()?;
+        if !parser.is_finished() {
+            let token = parser
+                .peek()
+                .expect("unfinished parser should have a token");
+            return Err(QueryError::new(format!(
+                "unexpected token {}",
+                describe_token(token)
+            )));
         }
 
-        Ok(Self { comparisons })
+        Ok(Self { expression })
     }
 
     pub fn matches(&self, record: &Record) -> bool {
-        self.comparisons
-            .iter()
-            .all(|comparison| comparison.matches(record))
+        self.expression.matches(record)
+    }
+}
+
+impl Expr {
+    fn matches(&self, record: &Record) -> bool {
+        match self {
+            Self::Comparison(comparison) => comparison.matches(record),
+            Self::And(left, right) => left.matches(record) && right.matches(record),
+            Self::Or(left, right) => left.matches(record) || right.matches(record),
+            Self::Not(expression) => !expression.matches(record),
+        }
     }
 }
 
@@ -82,6 +113,10 @@ impl Comparison {
         match self.op {
             ComparisonOp::Equal => actual == self.value,
             ComparisonOp::NotEqual => actual != self.value,
+            ComparisonOp::Less => actual.as_str() < self.value.as_str(),
+            ComparisonOp::LessOrEqual => actual.as_str() <= self.value.as_str(),
+            ComparisonOp::Greater => actual.as_str() > self.value.as_str(),
+            ComparisonOp::GreaterOrEqual => actual.as_str() >= self.value.as_str(),
         }
     }
 }
@@ -111,11 +146,59 @@ impl Parser {
         self.position >= self.tokens.len()
     }
 
+    fn parse_expression(&mut self) -> Result<Expr, QueryError> {
+        self.parse_or()
+    }
+
+    fn parse_or(&mut self) -> Result<Expr, QueryError> {
+        let mut expression = self.parse_and()?;
+
+        while self.consume_keyword("or") {
+            let right = self.parse_and()?;
+            expression = Expr::Or(Box::new(expression), Box::new(right));
+        }
+
+        Ok(expression)
+    }
+
+    fn parse_and(&mut self) -> Result<Expr, QueryError> {
+        let mut expression = self.parse_not()?;
+
+        while self.consume_keyword("and") {
+            let right = self.parse_not()?;
+            expression = Expr::And(Box::new(expression), Box::new(right));
+        }
+
+        Ok(expression)
+    }
+
+    fn parse_not(&mut self) -> Result<Expr, QueryError> {
+        if self.consume_keyword("not") {
+            return Ok(Expr::Not(Box::new(self.parse_not()?)));
+        }
+
+        self.parse_primary()
+    }
+
+    fn parse_primary(&mut self) -> Result<Expr, QueryError> {
+        if self.consume_token(&Token::LeftParen) {
+            let expression = self.parse_expression()?;
+            self.expect_token(Token::RightParen)?;
+            return Ok(expression);
+        }
+
+        Ok(Expr::Comparison(self.parse_comparison()?))
+    }
+
     fn parse_comparison(&mut self) -> Result<Comparison, QueryError> {
         let field = self.expect_word("field name")?;
         let op = match self.next() {
             Some(Token::Equal) => ComparisonOp::Equal,
             Some(Token::NotEqual) => ComparisonOp::NotEqual,
+            Some(Token::Less) => ComparisonOp::Less,
+            Some(Token::LessOrEqual) => ComparisonOp::LessOrEqual,
+            Some(Token::Greater) => ComparisonOp::Greater,
+            Some(Token::GreaterOrEqual) => ComparisonOp::GreaterOrEqual,
             Some(token) => {
                 return Err(QueryError::new(format!(
                     "expected comparison operator after '{field}', found {}",
@@ -133,17 +216,6 @@ impl Parser {
         Ok(Comparison { field, op, value })
     }
 
-    fn expect_keyword(&mut self, keyword: &str) -> Result<(), QueryError> {
-        match self.next() {
-            Some(Token::Word(word)) if word == keyword => Ok(()),
-            Some(token) => Err(QueryError::new(format!(
-                "expected '{keyword}', found {}",
-                describe_token(&token)
-            ))),
-            None => Err(QueryError::new(format!("expected '{keyword}'"))),
-        }
-    }
-
     fn expect_word(&mut self, label: &str) -> Result<String, QueryError> {
         match self.next() {
             Some(Token::Word(word)) => Ok(word),
@@ -153,6 +225,43 @@ impl Parser {
             ))),
             None => Err(QueryError::new(format!("expected {label}"))),
         }
+    }
+
+    fn expect_token(&mut self, expected: Token) -> Result<(), QueryError> {
+        match self.next() {
+            Some(token) if token == expected => Ok(()),
+            Some(token) => Err(QueryError::new(format!(
+                "expected {}, found {}",
+                describe_token(&expected),
+                describe_token(&token)
+            ))),
+            None => Err(QueryError::new(format!(
+                "expected {}",
+                describe_token(&expected)
+            ))),
+        }
+    }
+
+    fn consume_keyword(&mut self, keyword: &str) -> bool {
+        match self.peek() {
+            Some(Token::Word(word)) if word == keyword => {
+                self.position += 1;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn consume_token(&mut self, expected: &Token) -> bool {
+        if self.peek() == Some(expected) {
+            self.position += 1;
+            return true;
+        }
+        false
+    }
+
+    fn peek(&self) -> Option<&Token> {
+        self.tokens.get(self.position)
     }
 
     fn next(&mut self) -> Option<Token> {
@@ -184,11 +293,37 @@ fn tokenize(input: &str) -> Result<Vec<Token>, QueryError> {
                     return Err(QueryError::new("expected '=' after '!'"));
                 }
             }
+            b'<' => {
+                if bytes.get(index + 1) == Some(&b'=') {
+                    tokens.push(Token::LessOrEqual);
+                    index += 2;
+                } else {
+                    tokens.push(Token::Less);
+                    index += 1;
+                }
+            }
+            b'>' => {
+                if bytes.get(index + 1) == Some(&b'=') {
+                    tokens.push(Token::GreaterOrEqual);
+                    index += 2;
+                } else {
+                    tokens.push(Token::Greater);
+                    index += 1;
+                }
+            }
+            b'(' => {
+                tokens.push(Token::LeftParen);
+                index += 1;
+            }
+            b')' => {
+                tokens.push(Token::RightParen);
+                index += 1;
+            }
             _ => {
                 let start = index;
                 while index < bytes.len()
                     && !bytes[index].is_ascii_whitespace()
-                    && !matches!(bytes[index], b'=' | b'!')
+                    && !matches!(bytes[index], b'=' | b'!' | b'<' | b'>' | b'(' | b')')
                 {
                     index += 1;
                 }
@@ -205,6 +340,12 @@ fn describe_token(token: &Token) -> String {
         Token::Word(word) => format!("'{word}'"),
         Token::Equal => "'='".to_owned(),
         Token::NotEqual => "'!='".to_owned(),
+        Token::Less => "'<'".to_owned(),
+        Token::LessOrEqual => "'<='".to_owned(),
+        Token::Greater => "'>'".to_owned(),
+        Token::GreaterOrEqual => "'>='".to_owned(),
+        Token::LeftParen => "'('".to_owned(),
+        Token::RightParen => "')'".to_owned(),
     }
 }
 
@@ -236,5 +377,28 @@ mod tests {
         let query = Query::parse("missing!=done").expect("query should parse");
 
         assert!(!query.matches(&record()));
+    }
+
+    #[test]
+    fn boolean_operators_follow_precedence() {
+        let query =
+            Query::parse("kind=note or kind=task and not status=done").expect("query should parse");
+
+        assert!(query.matches(&record()));
+    }
+
+    #[test]
+    fn parentheses_override_boolean_precedence() {
+        let query = Query::parse("(kind=note or kind=task) and priority<medium")
+            .expect("query should parse");
+
+        assert!(query.matches(&record()));
+    }
+
+    #[test]
+    fn range_comparison_operators_compare_text_values() {
+        let query = Query::parse("priority>=high and priority<=high").expect("query should parse");
+
+        assert!(query.matches(&record()));
     }
 }

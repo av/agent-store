@@ -164,8 +164,14 @@
 - Quick Context output includes Link count and relation-name counts when Links exist @draft
 
 # query
-- Query syntax supports and, or, not, parentheses, and comparison operators =, !=, <, <=, >, and >= @draft
-- Query parsing treats multiple unquoted query arguments the same as one quoted query string @draft
+- label: agent-store find <Query> supports boolean expressions with and, or, not, parentheses, and comparison operators =, !=, <, <=, >, and >= over Record kind and Field text values
+  id: s5i
+  command: bash tests/facts/cli_records.sh query_boolean_syntax
+  tags: [implemented]
+- label: agent-store find <Query> uses the same parser for one quoted query argument and multiple query arguments, so boolean, parenthesized, and range queries return identical results in both forms
+  id: ly7
+  command: bash tests/facts/cli_records.sh query_argument_parity
+  tags: [implemented]
 - Query evaluation uses parsed Field types so date, timestamp, number, boolean, null, and text comparisons behave by value rather than raw string order @draft
 
 # fields
