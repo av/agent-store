@@ -38,7 +38,10 @@
   id: zaj
   command: sh -c 'set -eu; repo=$PWD; tmp=$(mktemp -d); trap "rm -rf \"$tmp\"" EXIT; cd "$tmp"; CARGO_TARGET_DIR="$repo/target/facts-zaj" cargo run --quiet --manifest-path "$repo/Cargo.toml" -- init >/tmp/agent-store-output-zaj-init.out; id=$(CARGO_TARGET_DIR="$repo/target/facts-zaj" cargo run --quiet --manifest-path "$repo/Cargo.toml" -- create note title="hello world" status=open empty=); out=$(CARGO_TARGET_DIR="$repo/target/facts-zaj" cargo run --quiet --manifest-path "$repo/Cargo.toml" -- get "$id"); test "$out" = "$id note empty='\'''\'' status=open title='\''hello world'\''"'
   tags: [implemented]
-- all commands that emit records, summaries, or mutation results support --json for structured machine-readable output @draft
+- label: agent-store init, create/cr, get, find/ls, set, unset, and rm accept --json and print valid structured JSON with record objects or mutation/summary objects instead of prose
+  id: jjy
+  command: bash tests/facts/cli_records.sh json_output
+  tags: [implemented]
 
 ## init
 - label: agent-store init creates .agent-store/ in the current directory and adds a .agent-store/ ignore rule to .gitignore

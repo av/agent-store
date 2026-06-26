@@ -3,6 +3,7 @@ mod store;
 mod value;
 
 use query::Query;
+use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::env;
 use std::fs::{self, OpenOptions};
@@ -141,6 +142,7 @@ A project-local store for agent-facing records, links, hooks, and context.
 Options:
   -h, --help    Print help
   -V, --version Print version
+      --json    Print structured JSON for command output
 
 Commands:
   init          Initialize a project-local store
@@ -153,7 +155,9 @@ Commands:
 ";
 
 fn main() {
-    let mut args = env::args().skip(1);
+    let mut raw_args: Vec<String> = env::args().skip(1).collect();
+    let json_output = take_json_flag(&mut raw_args);
+    let mut args = raw_args.into_iter();
 
     match args.next().as_deref() {
         Some("-h") | Some("--help") => {
@@ -173,7 +177,14 @@ fn main() {
                 process::exit(1);
             }
 
-            println!("Initialized {STORE_DIR}/");
+            if json_output {
+                print_json(json!({
+                    "status": "initialized",
+                    "store_dir": STORE_DIR,
+                }));
+            } else {
+                println!("Initialized {STORE_DIR}/");
+            }
         }
         Some("create") | Some("cr") => {
             let Some(kind) = args.next() else {
@@ -185,7 +196,13 @@ fn main() {
                 Ok(fields) => {
                     let mut store = open_store_or_exit();
                     match store.create_record(&kind, fields) {
-                        Ok(record) => println!("{}", record.id),
+                        Ok(record) => {
+                            if json_output {
+                                print_json(mutation_json("created", &record));
+                            } else {
+                                println!("{}", record.id);
+                            }
+                        }
                         Err(error) => {
                             eprintln!("error: failed to create record: {error}");
                             process::exit(1);
@@ -210,7 +227,13 @@ fn main() {
 
             let store = open_store_or_exit();
             match store.get_record(&id) {
-                Ok(record) => println!("{}", format_record(&record)),
+                Ok(record) => {
+                    if json_output {
+                        print_json(single_record_json(&record));
+                    } else {
+                        println!("{}", format_record(&record));
+                    }
+                }
                 Err(error) => {
                     eprintln!("error: failed to get record: {error}");
                     process::exit(1);
@@ -234,8 +257,12 @@ fn main() {
             let store = open_store_or_exit();
             match store.find_records(&query) {
                 Ok(records) => {
-                    for record in records {
-                        println!("{}", format_record(&record));
+                    if json_output {
+                        print_json(records_json(&records));
+                    } else {
+                        for record in records {
+                            println!("{}", format_record(&record));
+                        }
                     }
                 }
                 Err(error) => {
@@ -258,7 +285,13 @@ fn main() {
                 Ok(fields) => {
                     let mut store = open_store_or_exit();
                     match store.set_record(&id, fields) {
-                        Ok(record) => println!("Updated {}", record.id),
+                        Ok(record) => {
+                            if json_output {
+                                print_json(mutation_json("updated", &record));
+                            } else {
+                                println!("Updated {}", record.id);
+                            }
+                        }
                         Err(error) => {
                             eprintln!("error: failed to set record: {error}");
                             process::exit(1);
@@ -285,7 +318,13 @@ fn main() {
                 Ok(keys) => {
                     let mut store = open_store_or_exit();
                     match store.unset_record(&id, keys) {
-                        Ok(record) => println!("Updated {}", record.id),
+                        Ok(record) => {
+                            if json_output {
+                                print_json(mutation_json("updated", &record));
+                            } else {
+                                println!("Updated {}", record.id);
+                            }
+                        }
                         Err(error) => {
                             eprintln!("error: failed to unset record: {error}");
                             process::exit(1);
@@ -310,7 +349,13 @@ fn main() {
 
             let mut store = open_store_or_exit();
             match store.delete_record(&id) {
-                Ok(record) => println!("Removed {}", record.id),
+                Ok(record) => {
+                    if json_output {
+                        print_json(mutation_json("removed", &record));
+                    } else {
+                        println!("Removed {}", record.id);
+                    }
+                }
                 Err(error) => {
                     eprintln!("error: failed to remove record: {error}");
                     process::exit(1);
@@ -327,6 +372,19 @@ fn main() {
             print!("{USAGE}");
         }
     }
+}
+
+fn take_json_flag(args: &mut Vec<String>) -> bool {
+    let mut json_output = false;
+    args.retain(|arg| {
+        if arg == "--json" {
+            json_output = true;
+            false
+        } else {
+            true
+        }
+    });
+    json_output
 }
 
 fn init_store() -> io::Result<()> {
@@ -384,6 +442,37 @@ fn parse_field_keys(args: impl Iterator<Item = String>) -> Result<Vec<String>, S
     }
 
     Ok(keys)
+}
+
+fn print_json(value: Value) {
+    println!("{value}");
+}
+
+fn single_record_json(record: &Record) -> Value {
+    json!({
+        "record": record_json(record),
+    })
+}
+
+fn records_json(records: &[Record]) -> Value {
+    json!({
+        "records": records.iter().map(record_json).collect::<Vec<_>>(),
+    })
+}
+
+fn mutation_json(status: &str, record: &Record) -> Value {
+    json!({
+        "status": status,
+        "record": record_json(record),
+    })
+}
+
+fn record_json(record: &Record) -> Value {
+    json!({
+        "id": &record.id,
+        "kind": &record.kind,
+        "fields": &record.fields,
+    })
 }
 
 fn format_record(record: &Record) -> String {

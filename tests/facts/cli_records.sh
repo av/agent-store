@@ -328,8 +328,92 @@ assert fields == {"title": "Write"}, fields
 PY
     ;;
 
+  json_output)
+    cd "$tmp"
+    init_json="$(run_agent_store --json init)"
+    python3 - "$init_json" <<'PY'
+import json
+import sys
+
+data = json.loads(sys.argv[1])
+assert data == {"status": "initialized", "store_dir": ".agent-store"}, data
+PY
+
+    create_json="$(run_agent_store create task title=Write status=open empty= --json)"
+    id="$(
+      python3 - "$create_json" <<'PY'
+import json
+import re
+import sys
+
+data = json.loads(sys.argv[1])
+assert data["status"] == "created", data
+record = data["record"]
+assert re.fullmatch(r"[a-z0-9]{6,8}", record["id"]), record
+assert record["kind"] == "task", record
+assert record["fields"] == {"empty": "", "status": "open", "title": "Write"}, record
+print(record["id"])
+PY
+    )"
+
+    cr_json="$(run_agent_store --json cr note title=Alias status=open)"
+    python3 - "$cr_json" <<'PY'
+import json
+import re
+import sys
+
+data = json.loads(sys.argv[1])
+assert data["status"] == "created", data
+record = data["record"]
+assert re.fullmatch(r"[a-z0-9]{6,8}", record["id"]), record
+assert record["kind"] == "note", record
+assert record["fields"] == {"status": "open", "title": "Alias"}, record
+PY
+
+    get_json="$(run_agent_store get "$id" --json)"
+    find_json="$(run_agent_store find kind=task and status=open --json)"
+    ls_json="$(run_agent_store --json ls kind=task and status=open)"
+    set_json="$(run_agent_store set "$id" status=done --json)"
+    unset_json="$(run_agent_store unset "$id" empty --json)"
+    rm_json="$(run_agent_store rm "$id" --json)"
+
+    python3 - "$id" "$get_json" "$find_json" "$ls_json" "$set_json" "$unset_json" "$rm_json" <<'PY'
+import json
+import sys
+
+record_id = sys.argv[1]
+get_data, find_data, ls_data, set_data, unset_data, rm_data = [
+    json.loads(raw) for raw in sys.argv[2:]
+]
+
+expected_open = {
+    "id": record_id,
+    "kind": "task",
+    "fields": {"empty": "", "status": "open", "title": "Write"},
+}
+assert get_data == {"record": expected_open}, get_data
+assert find_data == {"records": [expected_open]}, find_data
+assert ls_data == find_data, ls_data
+
+expected_set = {
+    "id": record_id,
+    "kind": "task",
+    "fields": {"empty": "", "status": "done", "title": "Write"},
+}
+assert set_data == {"status": "updated", "record": expected_set}, set_data
+
+expected_unset = {
+    "id": record_id,
+    "kind": "task",
+    "fields": {"status": "done", "title": "Write"},
+}
+assert unset_data == {"status": "updated", "record": expected_unset}, unset_data
+assert rm_data == {"status": "removed", "record": expected_unset}, rm_data
+PY
+    ;;
+
   *)
-    echo "usage: $0 {create_alias_matches_create|find_alias_matches_find|set_updates_fields|unset_removes_fields|find_filters_records|query_boolean_syntax|query_argument_parity|query_typed_values|field_empty_null_unset_semantics}" >&2
+    echo "usage: $0 {create_alias_matches_create|find_alias_matches_find|set_updates_fields|unset_removes_fields|find_filters_records|query_boolean_syntax|query_argument_parity|query_typed_values|field_empty_null_unset_semantics|json_output}" >&2
     exit 2
     ;;
 esac
