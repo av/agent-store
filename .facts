@@ -253,7 +253,10 @@
   id: k7a
   command: bash tests/facts/cli_context.sh ctx_empty_store
   tags: [implemented]
-- Quick Context output includes Link count and relation-name counts when Links exist @draft
+- label: Quick Context output includes the total Link count and per-relation Link counts sorted by relation when Links exist
+  id: pev
+  command: bash tests/facts/cli_context.sh ctx_link_summaries
+  tags: [implemented]
 
 # query
 - label: agent-store find <Query> supports boolean expressions with and, or, not, parentheses, and comparison operators =, !=, <, <=, >, and >= over Record kind and Field text values

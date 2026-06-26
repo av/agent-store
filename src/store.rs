@@ -164,6 +164,8 @@ pub struct QuickContextSummary {
     pub fields_by_kind: BTreeMap<String, Vec<String>>,
     pub status_counts_by_kind: BTreeMap<String, BTreeMap<String, i64>>,
     pub date_windows_by_kind: BTreeMap<String, BTreeMap<String, DateWindow>>,
+    pub link_count: i64,
+    pub links_by_relation: BTreeMap<String, i64>,
     pub hook_count: i64,
     pub latest_activity_at: Option<String>,
 }
@@ -481,6 +483,26 @@ impl Store {
                 .insert(field, window);
         }
 
+        let link_count = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM record_links", [], |row| row.get(0))?;
+        let mut links_by_relation = BTreeMap::new();
+        let mut stmt = self.conn.prepare(
+            r#"
+            SELECT rel, COUNT(*)
+            FROM record_links
+            GROUP BY rel
+            ORDER BY rel
+            "#,
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+        })?;
+        for row in rows {
+            let (rel, count) = row?;
+            links_by_relation.insert(rel, count);
+        }
+
         let hook_count = self
             .conn
             .query_row("SELECT COUNT(*) FROM hooks", [], |row| row.get(0))?;
@@ -499,6 +521,8 @@ impl Store {
             fields_by_kind,
             status_counts_by_kind,
             date_windows_by_kind,
+            link_count,
+            links_by_relation,
             hook_count,
             latest_activity_at,
         })

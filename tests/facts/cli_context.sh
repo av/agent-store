@@ -188,6 +188,47 @@ Latest activity: $latest"
     test "$got" = "$expected"
     ;;
 
+  ctx_link_summaries)
+    cd "$tmp"
+    run_agent_store init >/tmp/agent-store-ctx-pev-init.out
+    task_one="$(run_agent_store create task title=Write)"
+    task_two="$(run_agent_store create task title=Ship)"
+    bug="$(run_agent_store create bug title=Fix)"
+    milestone="$(run_agent_store create milestone title=Launch)"
+    task_one_id="${task_one%% *}"
+    task_two_id="${task_two%% *}"
+    bug_id="${bug%% *}"
+    milestone_id="${milestone%% *}"
+
+    run_agent_store link "$task_one_id" blocks "$task_two_id" >/tmp/agent-store-ctx-pev-link-1.out
+    run_agent_store link "$task_one_id" blocks "$bug_id" >/tmp/agent-store-ctx-pev-link-2.out
+    run_agent_store link "$task_two_id" relates_to "$bug_id" >/tmp/agent-store-ctx-pev-link-3.out
+    run_agent_store link "$bug_id" tracks "$milestone_id" >/tmp/agent-store-ctx-pev-link-4.out
+
+    latest="$(latest_activity)"
+    expected="Quick Context
+Records: 4
+Record kinds:
+  bug: 1
+    fields: title
+  milestone: 1
+    fields: title
+  task: 2
+    fields: title
+Links: 4
+  blocks: 2
+  relates_to: 1
+  tracks: 1
+Hooks: 0
+Latest activity: $latest"
+    got="$(run_agent_store ctx)"
+    test "$got" = "$expected"
+
+    case "$got" in
+      *"$task_one_id"*|*"$task_two_id"*|*"$bug_id"*|*"$milestone_id"*) exit 1 ;;
+    esac
+    ;;
+
   ctx_output_byte_limit)
     cd "$tmp"
     run_agent_store --help | grep -Fq "Quick Context output is capped at 8192 bytes."
@@ -206,7 +247,7 @@ Latest activity: $latest"
     ;;
 
   *)
-    echo "unknown cli_context case: $case_name" >&2
+    echo "usage: $0 {ctx_summary_default|ctx_summary_counts|ctx_domain_summary_contract|context_alias_matches_ctx|ctx_empty_store|ctx_fields_by_kind|ctx_status_date_summaries|ctx_link_summaries|ctx_output_byte_limit}" >&2
     exit 2
     ;;
 esac

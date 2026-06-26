@@ -1130,6 +1130,13 @@ fn format_quick_context(summary: &QuickContextSummary) -> String {
         }
     }
 
+    if summary.link_count > 0 {
+        lines.push(format!("Links: {}", summary.link_count));
+        for (rel, count) in &summary.links_by_relation {
+            lines.push(format!("  {rel}: {count}"));
+        }
+    }
+
     lines.push(format!("Hooks: {}", summary.hook_count));
     lines.push(format!(
         "Latest activity: {}",
@@ -1356,13 +1363,18 @@ mod tests {
                     },
                 )]),
             )]),
+            link_count: 3,
+            links_by_relation: BTreeMap::from([
+                ("blocks".to_owned(), 2),
+                ("depends_on".to_owned(), 1),
+            ]),
             hook_count: 1,
             latest_activity_at: Some("2026-06-26T12:34:56.789Z".to_owned()),
         };
 
         assert_eq!(
             format_quick_context(&summary),
-            "Quick Context\nRecords: 3\nRecord kinds:\n  note: 1\n    fields: title\n  task: 2\n    fields: due, status, title\n    status: open=2\n    due: 2026-06-26..2026-06-30\nHooks: 1\nLatest activity: 2026-06-26T12:34:56.789Z"
+            "Quick Context\nRecords: 3\nRecord kinds:\n  note: 1\n    fields: title\n  task: 2\n    fields: due, status, title\n    status: open=2\n    due: 2026-06-26..2026-06-30\nLinks: 3\n  blocks: 2\n  depends_on: 1\nHooks: 1\nLatest activity: 2026-06-26T12:34:56.789Z"
         );
     }
 
@@ -1377,6 +1389,8 @@ mod tests {
             )]),
             status_counts_by_kind: BTreeMap::new(),
             date_windows_by_kind: BTreeMap::new(),
+            link_count: 0,
+            links_by_relation: BTreeMap::new(),
             hook_count: 0,
             latest_activity_at: None,
         };
