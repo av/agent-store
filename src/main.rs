@@ -622,6 +622,13 @@ fn run_matching_hooks_after_commit(
                 &stderr_summary,
             )
             .map_err(|error| format!("failed to record hook {} run: {error}", hook.id))?;
+
+        if !output.status.success() {
+            return Err(format!(
+                "hook {} command '{}' failed with exit status {}; stderr: {}",
+                hook.id, hook.command, exit_status, stderr_summary
+            ));
+        }
     }
 
     Ok(())

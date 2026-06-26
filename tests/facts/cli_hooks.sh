@@ -366,8 +366,48 @@ assert rows == [
 PY
     ;;
 
+  hook_failure_reports_details)
+    cd "$tmp"
+    run_agent_store init >/tmp/agent-store-hook-failure-hxt-init.out
+
+    hook_command='printf hook-stdout; printf hook-stderr >&2; exit 17'
+    hook_id="$(run_agent_store hook add create -- "$hook_command")"
+
+    if run_agent_store create task title=Failure >/tmp/agent-store-hook-failure-hxt.out 2>/tmp/agent-store-hook-failure-hxt.err; then
+      exit 1
+    fi
+
+    grep -Fq "hook $hook_id" /tmp/agent-store-hook-failure-hxt.err
+    grep -Fq -- "$hook_command" /tmp/agent-store-hook-failure-hxt.err
+    grep -Fq "exit status 17" /tmp/agent-store-hook-failure-hxt.err
+    grep -Fq "hook-stderr" /tmp/agent-store-hook-failure-hxt.err
+
+    python3 - .agent-store/store.sqlite "$hook_id" <<'PY'
+import sqlite3
+import sys
+
+db, hook_id = sys.argv[1:]
+con = sqlite3.connect(db)
+records = con.execute("select id, kind from records").fetchall()
+assert len(records) == 1, records
+record_id, kind = records[0]
+assert kind == "task", records
+
+rows = con.execute(
+    """
+    select hook_id, event_type, record_id, exit_status, stdout_summary, stderr_summary
+    from hook_runs
+    order by id
+    """
+).fetchall()
+assert rows == [
+    (hook_id, "create", record_id, 17, "hook-stdout", "hook-stderr"),
+], rows
+PY
+    ;;
+
   *)
-    echo "usage: $0 {hook_add_stores_metadata|hook_ls_deterministic|hook_rm_deletes_metadata|hooks_run_after_commit|hook_query_filters_records|hook_query_uses_mutation_snapshot|hook_stdin_receives_record_snapshot}" >&2
+    echo "usage: $0 {hook_add_stores_metadata|hook_ls_deterministic|hook_rm_deletes_metadata|hooks_run_after_commit|hook_query_filters_records|hook_query_uses_mutation_snapshot|hook_stdin_receives_record_snapshot|hook_failure_reports_details}" >&2
     exit 2
     ;;
 esac

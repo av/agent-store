@@ -195,7 +195,10 @@
   id: 9i8
   command: bash tests/facts/cli_hooks.sh hook_stdin_receives_record_snapshot
   tags: [implemented]
-- Hook command failures are reported to the caller without silently hiding the failed command, exit status, or captured stderr summary @draft
+- label: A matching Hook that exits non-zero persists a Hook Run with its exit status and stderr summary, then the triggering CLI reports the Hook ID, Bash command, exit status, and stderr summary to the caller
+  id: hxt
+  command: bash tests/facts/cli_hooks.sh hook_failure_reports_details
+  tags: [implemented]
 - Hooks run sequentially after the triggering mutation commits, from the project root, with a 30 second default timeout @draft
 - Hook Bash commands receive AGENT_STORE_EVENT, AGENT_STORE_ID, AGENT_STORE_KIND, and AGENT_STORE_REL when applicable @draft
 - a Hook timeout or non-zero exit makes the triggering CLI command exit non-zero after reporting that the Store mutation already committed @draft
