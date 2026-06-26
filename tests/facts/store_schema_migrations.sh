@@ -335,6 +335,83 @@ assert con.execute(
 PY
     ;;
 
+  record_mutations_transactional)
+    cd "$tmp"
+    seed="$(create_record seed title=existing)"
+    python3 - .agent-store/store.sqlite "$seed" <<'PY'
+import sqlite3
+import sys
+
+db, seed = sys.argv[1:]
+con = sqlite3.connect(db)
+con.execute(
+    """
+    create trigger rollback_create_after_record
+    before insert on record_fields
+    when new.key = 'fail_after_record'
+    begin
+        select raise(abort, 'forced create rollback');
+    end
+    """
+)
+con.commit()
+assert con.execute("select count(*) from records where id = ?", (seed,)).fetchone()[0] == 1
+PY
+    if run_agent_store create task fail_after_record=bad title=partial >/tmp/agent-store-create-0uf.out 2>/tmp/agent-store-create-0uf.err; then
+      exit 1
+    fi
+    grep -Fq "failed to create record" /tmp/agent-store-create-0uf.err
+    python3 - .agent-store/store.sqlite "$seed" <<'PY'
+import sqlite3
+import sys
+
+db, seed = sys.argv[1:]
+con = sqlite3.connect(db)
+records = con.execute("select id, kind from records order by id").fetchall()
+assert records == [(seed, "seed")], records
+fields = con.execute("select record_id, key, raw_value from record_fields order by record_id, key").fetchall()
+assert fields == [(seed, "title", "existing")], fields
+con.execute("drop trigger rollback_create_after_record")
+con.commit()
+PY
+
+    victim="$(create_record task title=victim status=open)"
+    python3 - .agent-store/store.sqlite "$victim" <<'PY'
+import sqlite3
+import sys
+
+db, victim = sys.argv[1:]
+con = sqlite3.connect(db)
+assert victim.replace("'", "") == victim
+con.execute(
+    f"""
+    create trigger rollback_rm_after_event
+    before delete on records
+    when old.id = '{victim}'
+    begin
+        select raise(abort, 'forced rm rollback');
+    end
+    """
+)
+con.commit()
+PY
+    if run_agent_store rm "$victim" >/tmp/agent-store-rm-0uf.out 2>/tmp/agent-store-rm-0uf.err; then
+      exit 1
+    fi
+    grep -Fq "forced rm rollback" /tmp/agent-store-rm-0uf.err
+    out="$(run_agent_store get "$victim")"
+    test "$out" = "$victim task status=open title=victim"
+    python3 - .agent-store/store.sqlite "$victim" <<'PY'
+import sqlite3
+import sys
+
+db, victim = sys.argv[1:]
+con = sqlite3.connect(db)
+assert con.execute("select count(*) from records where id = ?", (victim,)).fetchone()[0] == 1
+assert con.execute("select count(*) from store_events").fetchone()[0] == 0
+PY
+    ;;
+
   migration_checksum_mismatch)
     cd "$tmp"
     mkdir .agent-store
@@ -368,7 +445,7 @@ PY
     ;;
 
   *)
-    echo "usage: $0 {store_is_project_local|migrations_apply_on_open|initial_schema_tables|records_columns|record_fields_typed_columns|record_links_cardinality_shape|record_links_columns_unique|record_delete_cascades_links|hard_delete_store_event_snapshot|migration_checksum_mismatch}" >&2
+    echo "usage: $0 {store_is_project_local|migrations_apply_on_open|initial_schema_tables|records_columns|record_fields_typed_columns|record_links_cardinality_shape|record_links_columns_unique|record_delete_cascades_links|hard_delete_store_event_snapshot|record_mutations_transactional|migration_checksum_mismatch}" >&2
     exit 2
     ;;
 esac

@@ -116,7 +116,10 @@
 
 ## concurrency
 - SQLite connections enable foreign keys, WAL mode, and a busy timeout so multiple concurrent agent-store processes can read and write safely @implemented
-- each create, set, unset, rm, link, unlink, hook add, and hook rm command applies its Store mutation in a transaction @draft
+- label: agent-store create and rm either commit all Store writes for the mutation or roll them back when a later write fails
+  id: 0uf
+  command: bash tests/facts/store_schema_migrations.sh record_mutations_transactional
+  tags: [implemented]
 
 # architecture
 - the crate exposes a narrow persistence interface so command behavior can be tested without depending on sqlite file layout @draft
