@@ -169,8 +169,63 @@ assert not any(row[0] == set_hook_id for row in rows), rows
 PY
     ;;
 
+  hook_query_filters_records)
+    cd "$tmp"
+    run_agent_store init >/tmp/agent-store-hook-query-mlq-init.out
+
+    source_id="$(run_agent_store create task title=Source status=open score=11)"
+    target_id="$(run_agent_store create note title=Target status=open)"
+
+    create_hook_id="$(run_agent_store hook add create '(kind=task and status=open) or score>=10' -- 'printf "create-match\n" >> hook-log.txt; printf create-stdout')"
+    skipped_create_hook_id="$(run_agent_store hook add create 'kind=bug or score<0' -- 'printf "create-skip\n" >> hook-log.txt; printf create-skip')"
+    link_hook_id="$(run_agent_store hook add link 'kind=task and status=open' -- 'printf "link-match\n" >> hook-log.txt; printf link-stdout')"
+    skipped_link_hook_id="$(run_agent_store hook add link 'kind=note' -- 'printf "link-skip\n" >> hook-log.txt; printf link-skip')"
+
+    matched_id="$(run_agent_store create task title=Matched status=open score=12)"
+    run_agent_store create task title=Closed status=done score=2 >/tmp/agent-store-hook-query-mlq-closed.out
+    run_agent_store link "$source_id" blocks "$target_id" >/tmp/agent-store-hook-query-mlq-link.out
+
+    expected_log="$(printf "create-match\nlink-match\n")"
+    test "$(cat hook-log.txt)" = "$expected_log"
+
+    python3 - .agent-store/store.sqlite \
+      "$create_hook_id" \
+      "$skipped_create_hook_id" \
+      "$link_hook_id" \
+      "$skipped_link_hook_id" \
+      "$matched_id" \
+      "$source_id" <<'PY'
+import sqlite3
+import sys
+
+(
+    db,
+    create_hook_id,
+    skipped_create_hook_id,
+    link_hook_id,
+    skipped_link_hook_id,
+    matched_id,
+    source_id,
+) = sys.argv[1:]
+con = sqlite3.connect(db)
+rows = con.execute(
+    """
+    select hook_id, event_type, record_id, exit_status, stdout_summary, stderr_summary
+    from hook_runs
+    order by id
+    """
+).fetchall()
+assert rows == [
+    (create_hook_id, "create", matched_id, 0, "create-stdout", ""),
+    (link_hook_id, "link", source_id, 0, "link-stdout", ""),
+], rows
+skipped = {skipped_create_hook_id, skipped_link_hook_id}
+assert not any(row[0] in skipped for row in rows), rows
+PY
+    ;;
+
   *)
-    echo "usage: $0 {hook_add_stores_metadata|hook_ls_deterministic|hook_rm_deletes_metadata|hooks_run_after_commit}" >&2
+    echo "usage: $0 {hook_add_stores_metadata|hook_ls_deterministic|hook_rm_deletes_metadata|hooks_run_after_commit|hook_query_filters_records}" >&2
     exit 2
     ;;
 esac

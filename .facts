@@ -184,7 +184,10 @@
   id: w5s
   command: bash tests/facts/cli_hooks.sh hooks_run_after_commit
   tags: [implemented]
-- Hook Query conditions use the same boolean field filter language as agent-store find @draft
+- label: Hook Query conditions are evaluated with the same boolean kind-and-Field Query language as agent-store find; matching Hooks run and persist Hook Runs, while non-matching Hooks are skipped without Hook Runs
+  id: mlq
+  command: bash tests/facts/cli_hooks.sh hook_query_filters_records
+  tags: [implemented]
 - create, set, and unset Hooks evaluate their Query against the Record after the change; rm Hooks evaluate against the pre-delete Record snapshot @draft
 - Hook Bash commands receive the affected Record snapshot on stdin in the default record output format @draft
 - Hook command failures are reported to the caller without silently hiding the failed command, exit status, or captured stderr summary @draft

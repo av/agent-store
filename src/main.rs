@@ -197,7 +197,7 @@ fn main() {
                     let mut store = open_store_or_exit();
                     match store.create_record(&kind, fields) {
                         Ok(record) => {
-                            run_hooks_or_exit(&mut store, "create", &record.id);
+                            run_hooks_or_exit(&mut store, "create", &record);
                             if json_output {
                                 print_json(mutation_json("created", &record));
                             } else {
@@ -287,7 +287,7 @@ fn main() {
                     let mut store = open_store_or_exit();
                     match store.set_record(&id, fields) {
                         Ok(record) => {
-                            run_hooks_or_exit(&mut store, "set", &record.id);
+                            run_hooks_or_exit(&mut store, "set", &record);
                             if json_output {
                                 print_json(mutation_json("updated", &record));
                             } else {
@@ -321,7 +321,7 @@ fn main() {
                     let mut store = open_store_or_exit();
                     match store.unset_record(&id, keys) {
                         Ok(record) => {
-                            run_hooks_or_exit(&mut store, "unset", &record.id);
+                            run_hooks_or_exit(&mut store, "unset", &record);
                             if json_output {
                                 print_json(mutation_json("updated", &record));
                             } else {
@@ -353,7 +353,7 @@ fn main() {
             let mut store = open_store_or_exit();
             match store.delete_record(&id) {
                 Ok(record) => {
-                    run_hooks_or_exit(&mut store, "rm", &record.id);
+                    run_hooks_or_exit(&mut store, "rm", &record);
                     if json_output {
                         print_json(mutation_json("removed", &record));
                     } else {
@@ -378,7 +378,8 @@ fn main() {
             let mut store = open_store_or_exit();
             match store.link_records(&from, &rel, &to) {
                 Ok(link) => {
-                    run_hooks_or_exit(&mut store, "link", &link.from_record_id);
+                    let source = record_for_link_hook_or_exit(&store, "link", &link);
+                    run_hooks_or_exit(&mut store, "link", &source);
                     if json_output {
                         print_json(link_mutation_json("linked", &link));
                     } else {
@@ -406,7 +407,8 @@ fn main() {
             let mut store = open_store_or_exit();
             match store.unlink_records(&from, &rel, &to) {
                 Ok(link) => {
-                    run_hooks_or_exit(&mut store, "unlink", &link.from_record_id);
+                    let source = record_for_link_hook_or_exit(&store, "unlink", &link);
+                    run_hooks_or_exit(&mut store, "unlink", &source);
                     if json_output {
                         print_json(link_mutation_json("unlinked", &link));
                     } else {
@@ -573,26 +575,37 @@ fn open_store_or_exit() -> Store {
     }
 }
 
-fn run_hooks_or_exit(store: &mut Store, event_type: &str, record_id: &str) {
-    if let Err(error) = run_unconditioned_hooks_after_commit(store, event_type, record_id) {
+fn record_for_link_hook_or_exit(store: &Store, event_type: &str, link: &Link) -> Record {
+    match store.get_record(&link.from_record_id) {
+        Ok(record) => record,
+        Err(error) => {
+            eprintln!("error: failed to load {event_type} hook record: {error}");
+            process::exit(1);
+        }
+    }
+}
+
+fn run_hooks_or_exit(store: &mut Store, event_type: &str, record: &Record) {
+    if let Err(error) = run_matching_hooks_after_commit(store, event_type, record) {
         eprintln!("error: failed to run hooks: {error}");
         process::exit(1);
     }
 }
 
-fn run_unconditioned_hooks_after_commit(
+fn run_matching_hooks_after_commit(
     store: &mut Store,
     event_type: &str,
-    record_id: &str,
+    record: &Record,
 ) -> Result<(), String> {
     let hooks = store
         .list_hooks()
         .map_err(|error| format!("failed to list hooks: {error}"))?;
 
-    for hook in hooks
-        .into_iter()
-        .filter(|hook| hook.event == event_type && hook.query.is_none())
-    {
+    for hook in hooks.into_iter().filter(|hook| hook.event == event_type) {
+        if !hook_query_matches(store, event_type, &hook, record)? {
+            continue;
+        }
+
         let output = Command::new("bash")
             .arg("-c")
             .arg(&hook.command)
@@ -606,7 +619,7 @@ fn run_unconditioned_hooks_after_commit(
             .record_hook_run(
                 &hook.id,
                 event_type,
-                record_id,
+                &record.id,
                 exit_status,
                 &stdout_summary,
                 &stderr_summary,
@@ -615,6 +628,34 @@ fn run_unconditioned_hooks_after_commit(
     }
 
     Ok(())
+}
+
+fn hook_query_matches(
+    store: &Store,
+    event_type: &str,
+    hook: &Hook,
+    record: &Record,
+) -> Result<bool, String> {
+    let Some(query_text) = hook.query.as_deref() else {
+        return Ok(true);
+    };
+
+    let query = Query::parse(query_text)
+        .map_err(|error| format!("hook {} has invalid query: {error}", hook.id))?;
+    if !query.uses_links() {
+        return Ok(query.matches(record));
+    }
+
+    let links = if event_type == "rm" {
+        Vec::new()
+    } else {
+        store
+            .links_for_record(&record.id)
+            .map_err(|error| format!("failed to load hook {} link context: {error}", hook.id))?
+            .links
+    };
+
+    Ok(query.matches_with_links(record, &links))
 }
 
 fn parse_fields(args: impl Iterator<Item = String>) -> Result<BTreeMap<String, String>, String> {
