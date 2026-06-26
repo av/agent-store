@@ -184,7 +184,15 @@ pub struct Store {
 #[derive(Debug)]
 pub enum StoreError {
     Io(std::io::Error),
+    StoreDirectory {
+        path: PathBuf,
+        source: std::io::Error,
+    },
     Sql(rusqlite::Error),
+    OpenStore {
+        path: PathBuf,
+        source: Box<StoreError>,
+    },
     Json(serde_json::Error),
     MigrationChecksum {
         version: i64,
@@ -209,7 +217,21 @@ impl fmt::Display for StoreError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Io(error) => write!(f, "{error}"),
+            Self::StoreDirectory { path, source } => {
+                write!(
+                    f,
+                    "could not create store directory at {}: {source}",
+                    path.display()
+                )
+            }
             Self::Sql(error) => write!(f, "{error}"),
+            Self::OpenStore { path, source } => {
+                write!(
+                    f,
+                    "could not open SQLite store at {}: {source}",
+                    path.display()
+                )
+            }
             Self::Json(error) => write!(f, "{error}"),
             Self::MigrationChecksum {
                 version,
@@ -249,9 +271,20 @@ impl Error for StoreError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::Io(error) => Some(error),
+            Self::StoreDirectory { source, .. } => Some(source),
             Self::Sql(error) => Some(error),
+            Self::OpenStore { source, .. } => Some(source.as_ref()),
             Self::Json(error) => Some(error),
             _ => None,
+        }
+    }
+}
+
+impl StoreError {
+    fn open_store_context(path: &Path, source: StoreError) -> Self {
+        Self::OpenStore {
+            path: path.to_path_buf(),
+            source: Box::new(source),
         }
     }
 }
@@ -287,7 +320,11 @@ impl Store {
     pub fn open_project() -> StoreResult<Self> {
         let current_dir = std::env::current_dir()?;
         let project_root = find_project_root(&current_dir).unwrap_or(current_dir);
-        fs::create_dir_all(project_root.join(STORE_DIR))?;
+        let store_dir = project_root.join(STORE_DIR);
+        fs::create_dir_all(&store_dir).map_err(|source| StoreError::StoreDirectory {
+            path: store_dir,
+            source,
+        })?;
         Self::open_at(project_root)
     }
 
@@ -315,11 +352,16 @@ impl Store {
     }
 
     fn open_db(path: PathBuf, project_root: PathBuf) -> StoreResult<Self> {
-        let mut conn = Connection::open(path)?;
-        conn.busy_timeout(Duration::from_secs(5))?;
-        conn.pragma_update(None, "foreign_keys", "ON")?;
-        conn.pragma_update(None, "journal_mode", "WAL")?;
-        run_migrations(&mut conn)?;
+        let mut conn = Connection::open(&path)
+            .map_err(|source| StoreError::open_store_context(&path, StoreError::Sql(source)))?;
+        conn.busy_timeout(Duration::from_secs(5))
+            .map_err(|source| StoreError::open_store_context(&path, StoreError::Sql(source)))?;
+        conn.pragma_update(None, "foreign_keys", "ON")
+            .map_err(|source| StoreError::open_store_context(&path, StoreError::Sql(source)))?;
+        conn.pragma_update(None, "journal_mode", "WAL")
+            .map_err(|source| StoreError::open_store_context(&path, StoreError::Sql(source)))?;
+        run_migrations(&mut conn)
+            .map_err(|source| StoreError::open_store_context(&path, source))?;
         Ok(Self { conn, project_root })
     }
 

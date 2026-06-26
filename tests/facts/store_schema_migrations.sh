@@ -419,6 +419,23 @@ assert con.execute(
 PY
     ;;
 
+  persistence_open_errors_actionable)
+    cd "$tmp"
+    mkdir .agent-store
+    printf 'not a sqlite database\n' > .agent-store/store.sqlite
+
+    if run_agent_store find kind=task >"$tmp/persistence-open.out" 2>"$tmp/persistence-open.err"; then
+      exit 1
+    fi
+    test ! -s "$tmp/persistence-open.out"
+    grep -Fq "failed to open store" "$tmp/persistence-open.err"
+    grep -Fq ".agent-store/store.sqlite" "$tmp/persistence-open.err"
+    grep -Eiq "not a database|malformed|file is not a database" "$tmp/persistence-open.err"
+    if grep -Eiq "panicked at|thread 'main' panicked" "$tmp/persistence-open.err"; then
+      exit 1
+    fi
+    ;;
+
   migration_checksum_mismatch)
     cd "$tmp"
     mkdir .agent-store
@@ -452,7 +469,7 @@ PY
     ;;
 
   *)
-    echo "usage: $0 {store_is_project_local|migrations_apply_on_open|initial_schema_tables|records_columns|record_fields_typed_columns|record_links_cardinality_shape|record_links_columns_unique|record_delete_cascades_links|hard_delete_store_event_snapshot|record_mutations_transactional|migration_checksum_mismatch}" >&2
+    echo "usage: $0 {store_is_project_local|migrations_apply_on_open|initial_schema_tables|records_columns|record_fields_typed_columns|record_links_cardinality_shape|record_links_columns_unique|record_delete_cascades_links|hard_delete_store_event_snapshot|record_mutations_transactional|persistence_open_errors_actionable|migration_checksum_mismatch}" >&2
     exit 2
     ;;
 esac

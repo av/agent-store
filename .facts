@@ -155,7 +155,10 @@
 - label: SQLite schema changes are applied through migrations when a Store is opened
   command: bash tests/facts/store_schema_migrations.sh migrations_apply_on_open
   tags: [implemented]
-- persistence errors preserve enough context for the CLI to print actionable failures without panics @draft
+- label: when the SQLite store cannot be opened or migrated, the CLI exits non-zero, reports the store path and underlying cause, and does not print a Rust panic
+  id: 0hn
+  command: bash tests/facts/store_schema_migrations.sh persistence_open_errors_actionable
+  tags: [implemented]
 - Record storage supports querying arbitrary Field values without requiring a Rust code change for each new field name @draft
 
 ## schema
