@@ -66,7 +66,9 @@
 - agent-store find supports filtering Records by incoming and outgoing Links, relation names, and linked Record IDs in the first link-enabled release @draft
 
 # domain
-- a Store is a project-local SQLite-backed database under .agent-store @draft
+- label: a Store is a project-local SQLite-backed database under .agent-store
+  command: bash tests/facts/store_schema_migrations.sh store_is_project_local
+  tags: [implemented]
 - a Record is a stored item with a generated 6-8 character random hash ID, a kind, and arbitrary named fields @draft
 - a Field is a key-value attribute attached to a Record @draft
 - a Query is a boolean expression over Record fields, typed comparisons, parentheses, and link predicates @draft
@@ -78,24 +80,34 @@
 - one Link table shape represents one-to-one, one-to-many, and many-to-many relations without per-kind schema changes @draft
 
 # persistence
-- SQLite schema changes are applied through migrations when a Store is opened @draft
+- label: SQLite schema changes are applied through migrations when a Store is opened
+  command: bash tests/facts/store_schema_migrations.sh migrations_apply_on_open
+  tags: [implemented]
 - persistence errors preserve enough context for the CLI to print actionable failures without panics @draft
 - Record storage supports querying arbitrary Field values without requiring a Rust code change for each new field name @draft
 
 ## schema
-- the initial SQLite schema stores Records, Fields, Links, Store Events, Hooks, Hook Runs, and schema migrations in separate normalized tables @draft
-- the records table stores id, kind, created_at, and updated_at as first-class columns @draft
-- the record_fields table stores one row per Field with raw value plus typed columns for text, number, timestamp, boolean, and null-aware comparisons @draft
+- label: the initial SQLite schema stores Records, Fields, Links, Store Events, Hooks, Hook Runs, and schema migrations in separate normalized tables
+  command: bash tests/facts/store_schema_migrations.sh initial_schema_tables
+  tags: [implemented]
+- label: the records table stores id, kind, created_at, and updated_at as first-class columns
+  command: bash tests/facts/store_schema_migrations.sh records_columns
+  tags: [implemented]
+- label: the record_fields table stores one row per Field with raw value plus typed columns for text, number, timestamp, boolean, and null-aware comparisons
+  command: bash tests/facts/store_schema_migrations.sh record_fields_typed_columns
+  tags: [implemented]
 - the record_links table stores from_record_id, rel, to_record_id, and created_at with a unique key over from_record_id, rel, and to_record_id @draft
 - deleting a Record cascades to its Fields and Links but does not delete other Records linked to it @draft
 - hard deletes write a Store Event with a pre-delete Record snapshot before removing the active Record row @draft
 
 ## migrations
-- schema migrations are embedded in the Rust binary and run inside transactions when a Store is opened @draft
-- applied migrations are recorded with version, name, checksum, and applied_at, and checksum mismatches stop the command with an actionable error @draft
+- schema migrations are embedded in the Rust binary and run inside transactions when a Store is opened @implemented
+- label: applied migrations are recorded with version, name, checksum, and applied_at, and checksum mismatches stop the command with an actionable error
+  command: bash tests/facts/store_schema_migrations.sh migration_checksum_mismatch
+  tags: [implemented]
 
 ## concurrency
-- SQLite connections enable foreign keys, WAL mode, and a busy timeout so multiple concurrent agent-store processes can read and write safely @draft
+- SQLite connections enable foreign keys, WAL mode, and a busy timeout so multiple concurrent agent-store processes can read and write safely @implemented
 - each create, set, unset, rm, link, unlink, hook add, and hook rm command applies its Store mutation in a transaction @draft
 
 # architecture
