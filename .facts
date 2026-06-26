@@ -21,7 +21,10 @@
   id: rzr
   command: sh -c 'set -eu; repo=$PWD; tmp=$(mktemp -d); trap "rm -rf \"$tmp\"" EXIT; cd "$tmp"; CARGO_TARGET_DIR="$repo/target/facts-rzr" cargo run --quiet --manifest-path "$repo/Cargo.toml" -- init >/tmp/agent-store-get-rzr-init.out; id=$(CARGO_TARGET_DIR="$repo/target/facts-rzr" cargo run --quiet --manifest-path "$repo/Cargo.toml" -- create decision choice=sqlite area=persistence); out=$(CARGO_TARGET_DIR="$repo/target/facts-rzr" cargo run --quiet --manifest-path "$repo/Cargo.toml" -- get "$id"); test "$out" = "$id decision area=persistence choice=sqlite"'
   tags: [implemented]
-- agent-store set <ID> key=value... updates supplied Fields on an existing Record, accepts empty and null values, and leaves unspecified Fields unchanged @draft
+- label: agent-store set <ID> key=value... resolves an unambiguous short Record ID, atomically updates supplied Fields on the existing Record, accepts empty and null values, leaves unspecified Fields unchanged, and prints Updated <resolved-id>
+  id: 1b1
+  command: bash tests/facts/cli_records.sh set_updates_fields
+  tags: [implemented]
 - agent-store unset <ID> key... removes the supplied Fields from an existing Record without deleting the Record @draft
 
 ## output

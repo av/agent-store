@@ -217,6 +217,27 @@ impl Store {
         get_record_by_id(&self.conn, &id)
     }
 
+    pub fn set_record(
+        &mut self,
+        id_prefix: &str,
+        fields: BTreeMap<String, String>,
+    ) -> StoreResult<Record> {
+        validate_id_prefix(id_prefix)?;
+        let tx = self.conn.transaction()?;
+        let id = resolve_id(&tx, id_prefix)?;
+
+        for (key, value) in &fields {
+            upsert_field(&tx, &id, key, value)?;
+        }
+        tx.execute(
+            "UPDATE records SET updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?1",
+            params![&id],
+        )?;
+        tx.commit()?;
+
+        get_record_by_id(&self.conn, &id)
+    }
+
     pub fn delete_record(&mut self, id_prefix: &str) -> StoreResult<Record> {
         validate_id_prefix(id_prefix)?;
         let tx = self.conn.transaction()?;
@@ -380,6 +401,48 @@ fn insert_field(
             is_null
         )
         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+        "#,
+        params![
+            record_id,
+            key,
+            raw_value,
+            parsed.text_value.as_deref(),
+            parsed.number_value,
+            parsed.timestamp_value.as_deref(),
+            parsed.boolean_value,
+            parsed.is_null
+        ],
+    )?;
+    Ok(())
+}
+
+fn upsert_field(
+    tx: &Transaction<'_>,
+    record_id: &str,
+    key: &str,
+    raw_value: &str,
+) -> Result<(), rusqlite::Error> {
+    let parsed = ParsedFieldValue::parse(raw_value);
+    tx.execute(
+        r#"
+        INSERT INTO record_fields (
+            record_id,
+            key,
+            raw_value,
+            text_value,
+            number_value,
+            timestamp_value,
+            boolean_value,
+            is_null
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+        ON CONFLICT(record_id, key) DO UPDATE SET
+            raw_value = excluded.raw_value,
+            text_value = excluded.text_value,
+            number_value = excluded.number_value,
+            timestamp_value = excluded.timestamp_value,
+            boolean_value = excluded.boolean_value,
+            is_null = excluded.is_null
         "#,
         params![
             record_id,

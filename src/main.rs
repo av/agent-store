@@ -143,6 +143,7 @@ Commands:
   init          Initialize a project-local store
   create        Create a record
   get           Print a record by ID
+  set           Update fields on a record by ID
   rm            Delete a record by ID
 ";
 
@@ -208,6 +209,33 @@ fn main() {
                 Err(error) => {
                     eprintln!("error: failed to get record: {error}");
                     process::exit(1);
+                }
+            }
+        }
+        Some("set") => {
+            let Some(id) = args.next() else {
+                eprintln!("error: set requires a record ID");
+                process::exit(2);
+            };
+
+            match parse_fields(args) {
+                Ok(fields) if fields.is_empty() => {
+                    eprintln!("error: set requires at least one key=value field");
+                    process::exit(2);
+                }
+                Ok(fields) => {
+                    let mut store = open_store_or_exit();
+                    match store.set_record(&id, fields) {
+                        Ok(record) => println!("Updated {}", record.id),
+                        Err(error) => {
+                            eprintln!("error: failed to set record: {error}");
+                            process::exit(1);
+                        }
+                    }
+                }
+                Err(error) => {
+                    eprintln!("error: {error}");
+                    process::exit(2);
                 }
             }
         }
