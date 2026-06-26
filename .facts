@@ -79,9 +79,18 @@
 - agent-store context is a readable alias for ctx with identical behavior and output @draft
 
 ## links
-- agent-store link <from> <rel> <to> creates an idempotent directional Link between two Records @draft
-- agent-store unlink <from> <rel> <to> removes a directional Link and succeeds without side effects when the Link is already absent @draft
-- agent-store links <ID> prints incoming and outgoing Links for the Record in a compact deterministic format @draft
+- label: agent-store link <from> <rel> <to> resolves unambiguous short Record IDs, idempotently creates one directional Link, prints Linked <from-id> <rel> <to-id>, and does not duplicate the Link when repeated
+  id: q59
+  command: bash tests/facts/cli_links.sh link_adds_idempotently
+  tags: [implemented]
+- label: agent-store unlink <from> <rel> <to> resolves unambiguous short Record IDs, removes that directional Link, prints Unlinked <from-id> <rel> <to-id>, and exits successfully without changing other Links when repeated
+  id: 80k
+  command: bash tests/facts/cli_links.sh unlink_removes_idempotently
+  tags: [implemented]
+- label: agent-store links <ID> resolves an unambiguous short Record ID and prints outgoing Links as out <rel> <to-id> lines followed by incoming Links as in <rel> <from-id> lines, each sorted by relation and peer Record ID
+  id: cav
+  command: bash tests/facts/cli_links.sh links_lists_deterministically
+  tags: [implemented]
 - agent-store find supports filtering Records by incoming and outgoing Links, relation names, and linked Record IDs in the first link-enabled release @draft
 
 # domain

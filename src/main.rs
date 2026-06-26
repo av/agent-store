@@ -10,7 +10,7 @@ use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 use std::path::Path;
 use std::process;
-use store::{Record, Store, STORE_DIR};
+use store::{Link, LinkEdge, Record, Store, STORE_DIR};
 
 const GITIGNORE_PATH: &str = ".gitignore";
 const GITIGNORE_RULE: &str = ".agent-store/";
@@ -152,6 +152,9 @@ Commands:
   set           Update fields on a record by ID
   unset         Remove fields from a record by ID
   rm            Delete a record by ID
+  link          Create a directional link between records
+  unlink        Remove a directional link between records
+  links         Print incoming and outgoing links for a record
 ";
 
 fn main() {
@@ -362,6 +365,95 @@ fn main() {
                 }
             }
         }
+        Some("link") => {
+            let (from, rel, to) = match parse_link_args(args, "link") {
+                Ok(args) => args,
+                Err(error) => {
+                    eprintln!("error: {error}");
+                    process::exit(2);
+                }
+            };
+
+            let mut store = open_store_or_exit();
+            match store.link_records(&from, &rel, &to) {
+                Ok(link) => {
+                    if json_output {
+                        print_json(link_mutation_json("linked", &link));
+                    } else {
+                        println!(
+                            "Linked {} {} {}",
+                            link.from_record_id, link.rel, link.to_record_id
+                        );
+                    }
+                }
+                Err(error) => {
+                    eprintln!("error: failed to link records: {error}");
+                    process::exit(1);
+                }
+            }
+        }
+        Some("unlink") => {
+            let (from, rel, to) = match parse_link_args(args, "unlink") {
+                Ok(args) => args,
+                Err(error) => {
+                    eprintln!("error: {error}");
+                    process::exit(2);
+                }
+            };
+
+            let mut store = open_store_or_exit();
+            match store.unlink_records(&from, &rel, &to) {
+                Ok(link) => {
+                    if json_output {
+                        print_json(link_mutation_json("unlinked", &link));
+                    } else {
+                        println!(
+                            "Unlinked {} {} {}",
+                            link.from_record_id, link.rel, link.to_record_id
+                        );
+                    }
+                }
+                Err(error) => {
+                    eprintln!("error: failed to unlink records: {error}");
+                    process::exit(1);
+                }
+            }
+        }
+        Some("links") => {
+            let Some(id) = args.next() else {
+                eprintln!("error: links requires a record ID");
+                process::exit(2);
+            };
+            if let Some(extra) = args.next() {
+                eprintln!("error: links does not accept argument '{extra}'");
+                process::exit(2);
+            }
+
+            let store = open_store_or_exit();
+            match store.links_for_record(&id) {
+                Ok(record_links) => {
+                    if json_output {
+                        print_json(record_links_json(
+                            &record_links.record_id,
+                            &record_links.links,
+                        ));
+                    } else {
+                        for link in record_links.links {
+                            println!(
+                                "{} {} {}",
+                                link.direction.as_str(),
+                                link.rel,
+                                link.peer_record_id
+                            );
+                        }
+                    }
+                }
+                Err(error) => {
+                    eprintln!("error: failed to list links: {error}");
+                    process::exit(1);
+                }
+            }
+        }
         Some(command) => {
             eprintln!("error: unrecognized command '{command}'");
             eprintln!();
@@ -444,6 +536,26 @@ fn parse_field_keys(args: impl Iterator<Item = String>) -> Result<Vec<String>, S
     Ok(keys)
 }
 
+fn parse_link_args(
+    mut args: impl Iterator<Item = String>,
+    command: &str,
+) -> Result<(String, String, String), String> {
+    let Some(from) = args.next() else {
+        return Err(format!("{command} requires <from> <rel> <to>"));
+    };
+    let Some(rel) = args.next() else {
+        return Err(format!("{command} requires <from> <rel> <to>"));
+    };
+    let Some(to) = args.next() else {
+        return Err(format!("{command} requires <from> <rel> <to>"));
+    };
+    if let Some(extra) = args.next() {
+        return Err(format!("{command} does not accept argument '{extra}'"));
+    }
+
+    Ok((from, rel, to))
+}
+
 fn print_json(value: Value) {
     println!("{value}");
 }
@@ -467,11 +579,41 @@ fn mutation_json(status: &str, record: &Record) -> Value {
     })
 }
 
+fn link_mutation_json(status: &str, link: &Link) -> Value {
+    json!({
+        "status": status,
+        "link": link_json(link),
+    })
+}
+
 fn record_json(record: &Record) -> Value {
     json!({
         "id": &record.id,
         "kind": &record.kind,
         "fields": &record.fields,
+    })
+}
+
+fn link_json(link: &Link) -> Value {
+    json!({
+        "from_record_id": &link.from_record_id,
+        "rel": &link.rel,
+        "to_record_id": &link.to_record_id,
+    })
+}
+
+fn record_links_json(record_id: &str, links: &[LinkEdge]) -> Value {
+    json!({
+        "record_id": record_id,
+        "links": links.iter().map(link_edge_json).collect::<Vec<_>>(),
+    })
+}
+
+fn link_edge_json(link: &LinkEdge) -> Value {
+    json!({
+        "direction": link.direction.as_str(),
+        "rel": &link.rel,
+        "record_id": &link.peer_record_id,
     })
 }
 

@@ -102,6 +102,41 @@ pub struct Record {
     pub fields: BTreeMap<String, String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Link {
+    pub from_record_id: String,
+    pub rel: String,
+    pub to_record_id: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LinkDirection {
+    Out,
+    In,
+}
+
+impl LinkDirection {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Out => "out",
+            Self::In => "in",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LinkEdge {
+    pub direction: LinkDirection,
+    pub rel: String,
+    pub peer_record_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecordLinks {
+    pub record_id: String,
+    pub links: Vec<LinkEdge>,
+}
+
 pub struct Store {
     conn: Connection,
 }
@@ -119,6 +154,7 @@ pub enum StoreError {
     },
     IdCollisionExhausted,
     InvalidId(String),
+    InvalidRelation(String),
     NotFound(String),
     AmbiguousId(String),
 }
@@ -140,6 +176,12 @@ impl fmt::Display for StoreError {
             ),
             Self::IdCollisionExhausted => write!(f, "could not generate a unique record ID"),
             Self::InvalidId(id) => write!(f, "'{id}' is not a valid record ID prefix"),
+            Self::InvalidRelation(rel) if rel.is_empty() => {
+                write!(f, "link relation cannot be empty")
+            }
+            Self::InvalidRelation(rel) => {
+                write!(f, "link relation '{rel}' cannot contain whitespace")
+            }
             Self::NotFound(id) => write!(f, "record '{id}' was not found"),
             Self::AmbiguousId(id) => write!(f, "record ID prefix '{id}' matches multiple records"),
         }
@@ -294,6 +336,108 @@ impl Store {
         tx.commit()?;
 
         Ok(record)
+    }
+
+    pub fn link_records(
+        &mut self,
+        from_prefix: &str,
+        rel: &str,
+        to_prefix: &str,
+    ) -> StoreResult<Link> {
+        validate_id_prefix(from_prefix)?;
+        validate_id_prefix(to_prefix)?;
+        validate_relation(rel)?;
+
+        let tx = self.conn.transaction()?;
+        let from_id = resolve_id(&tx, from_prefix)?;
+        let to_id = resolve_id(&tx, to_prefix)?;
+        tx.execute(
+            r#"
+            INSERT OR IGNORE INTO record_links (from_record_id, rel, to_record_id)
+            VALUES (?1, ?2, ?3)
+            "#,
+            params![&from_id, rel, &to_id],
+        )?;
+        tx.commit()?;
+
+        Ok(Link {
+            from_record_id: from_id,
+            rel: rel.to_owned(),
+            to_record_id: to_id,
+        })
+    }
+
+    pub fn unlink_records(
+        &mut self,
+        from_prefix: &str,
+        rel: &str,
+        to_prefix: &str,
+    ) -> StoreResult<Link> {
+        validate_id_prefix(from_prefix)?;
+        validate_id_prefix(to_prefix)?;
+        validate_relation(rel)?;
+
+        let tx = self.conn.transaction()?;
+        let from_id = resolve_id(&tx, from_prefix)?;
+        let to_id = resolve_id(&tx, to_prefix)?;
+        tx.execute(
+            r#"
+            DELETE FROM record_links
+            WHERE from_record_id = ?1 AND rel = ?2 AND to_record_id = ?3
+            "#,
+            params![&from_id, rel, &to_id],
+        )?;
+        tx.commit()?;
+
+        Ok(Link {
+            from_record_id: from_id,
+            rel: rel.to_owned(),
+            to_record_id: to_id,
+        })
+    }
+
+    pub fn links_for_record(&self, id_prefix: &str) -> StoreResult<RecordLinks> {
+        validate_id_prefix(id_prefix)?;
+        let record_id = self.resolve_id(id_prefix)?;
+        let mut stmt = self.conn.prepare(
+            r#"
+            SELECT direction, rel, peer_record_id
+            FROM (
+                SELECT
+                    0 AS direction_order,
+                    'out' AS direction,
+                    rel,
+                    to_record_id AS peer_record_id
+                FROM record_links
+                WHERE from_record_id = ?1
+                UNION ALL
+                SELECT
+                    1 AS direction_order,
+                    'in' AS direction,
+                    rel,
+                    from_record_id AS peer_record_id
+                FROM record_links
+                WHERE to_record_id = ?1
+            )
+            ORDER BY direction_order, rel, peer_record_id
+            "#,
+        )?;
+        let rows = stmt.query_map(params![&record_id], |row| {
+            let direction_text: String = row.get(0)?;
+            let direction = match direction_text.as_str() {
+                "out" => LinkDirection::Out,
+                "in" => LinkDirection::In,
+                _ => unreachable!("record link query returns only known directions"),
+            };
+            Ok(LinkEdge {
+                direction,
+                rel: row.get(1)?,
+                peer_record_id: row.get(2)?,
+            })
+        })?;
+        let links = rows.collect::<Result<_, _>>()?;
+
+        Ok(RecordLinks { record_id, links })
     }
 
     fn resolve_id(&self, id_prefix: &str) -> StoreResult<String> {
@@ -514,6 +658,13 @@ fn validate_id_prefix(id_prefix: &str) -> StoreResult<()> {
             .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit())
     {
         return Err(StoreError::InvalidId(id_prefix.to_owned()));
+    }
+    Ok(())
+}
+
+fn validate_relation(rel: &str) -> StoreResult<()> {
+    if rel.is_empty() || rel.chars().any(char::is_whitespace) {
+        return Err(StoreError::InvalidRelation(rel.to_owned()));
     }
     Ok(())
 }
