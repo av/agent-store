@@ -84,8 +84,14 @@
   tags: [implemented]
 
 ## context
-- agent-store ctx prints a compact deterministic Quick Context summary without printing individual Records by default @draft
-- agent-store context is a readable alias for ctx with identical behavior and output @draft
+- label: agent-store ctx prints a compact deterministic Quick Context summary by default and does not print individual Record IDs or Field key-value pairs
+  id: wpx
+  command: bash tests/facts/cli_context.sh ctx_summary_default
+  tags: [implemented]
+- label: agent-store context is a readable alias for ctx with identical behavior and byte-for-byte identical output
+  id: i3l
+  command: bash tests/facts/cli_context.sh context_alias_matches_ctx
+  tags: [implemented]
 
 ## links
 - label: agent-store link <from> <rel> <to> resolves unambiguous short Record IDs, idempotently creates one directional Link, prints Linked <from-id> <rel> <to-id>, and does not duplicate the Link when repeated
@@ -224,11 +230,17 @@
   tags: [implemented]
 
 # context
-- Quick Context output includes total Record count, counts by kind, Hook count, and the most recent Store activity timestamp when available @draft
+- label: Quick Context output includes total Record count, per-kind Record counts sorted by kind, Hook count, and the most recent Store activity timestamp when available
+  id: raf
+  command: bash tests/facts/cli_context.sh ctx_summary_counts
+  tags: [implemented]
 - Quick Context output lists common Field names separately for each Record kind rather than as one global field list @draft
 - Quick Context output summarizes common per-kind status values and date windows when fields such as status, due, or start exist @draft
 - Quick Context output remains bounded by a documented byte limit regardless of Store size @draft
-- agent-store ctx exits successfully for an initialized empty Store and prints zero counts instead of an error @draft
+- label: agent-store ctx exits successfully for an initialized empty Store and prints Records: 0, Record kinds: none, Hooks: 0, and Latest activity: none
+  id: k7a
+  command: bash tests/facts/cli_context.sh ctx_empty_store
+  tags: [implemented]
 - Quick Context output includes Link count and relation-name counts when Links exist @draft
 
 # query

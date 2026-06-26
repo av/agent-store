@@ -157,6 +157,14 @@ pub struct HookRun {
     pub created_at: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QuickContextSummary {
+    pub record_count: i64,
+    pub records_by_kind: BTreeMap<String, i64>,
+    pub hook_count: i64,
+    pub latest_activity_at: Option<String>,
+}
+
 pub struct Store {
     conn: Connection,
     project_root: PathBuf,
@@ -363,6 +371,48 @@ impl Store {
         }
 
         Ok(records)
+    }
+
+    pub fn quick_context_summary(&self) -> StoreResult<QuickContextSummary> {
+        let record_count = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM records", [], |row| row.get(0))?;
+
+        let mut records_by_kind = BTreeMap::new();
+        let mut stmt = self.conn.prepare(
+            r#"
+            SELECT kind, COUNT(*)
+            FROM records
+            GROUP BY kind
+            ORDER BY kind
+            "#,
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+        })?;
+        for row in rows {
+            let (kind, count) = row?;
+            records_by_kind.insert(kind, count);
+        }
+
+        let hook_count = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM hooks", [], |row| row.get(0))?;
+        let latest_activity_at = self
+            .conn
+            .query_row(
+                "SELECT created_at FROM store_events ORDER BY id DESC LIMIT 1",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?;
+
+        Ok(QuickContextSummary {
+            record_count,
+            records_by_kind,
+            hook_count,
+            latest_activity_at,
+        })
     }
 
     pub fn set_record(

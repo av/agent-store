@@ -1,5 +1,5 @@
 use agent_store::query::Query;
-use agent_store::store::{Hook, Link, LinkEdge, Record, Store, STORE_DIR};
+use agent_store::store::{Hook, Link, LinkEdge, QuickContextSummary, Record, Store, STORE_DIR};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::env;
@@ -165,6 +165,7 @@ Commands:
   link          Create a directional link between records
   unlink        Remove a directional link between records
   links         Print incoming and outgoing links for a record
+  ctx, context  Print a compact Quick Context summary
   hook          Manage stored hooks
 
 Hook stdout and stderr captures are capped at 8192 bytes each.
@@ -471,6 +472,23 @@ fn main() {
                 }
                 Err(error) => {
                     eprintln!("error: failed to list links: {error}");
+                    process::exit(1);
+                }
+            }
+        }
+        Some(command @ ("ctx" | "context")) => {
+            if let Some(extra) = args.next() {
+                eprintln!("error: {command} does not accept argument '{extra}'");
+                process::exit(2);
+            }
+
+            let store = open_store_or_exit();
+            match store.quick_context_summary() {
+                Ok(summary) => {
+                    println!("{}", format_quick_context(&summary));
+                }
+                Err(error) => {
+                    eprintln!("error: failed to build Quick Context: {error}");
                     process::exit(1);
                 }
             }
@@ -1062,6 +1080,29 @@ fn format_record(record: &Record) -> String {
     output
 }
 
+fn format_quick_context(summary: &QuickContextSummary) -> String {
+    let mut lines = vec![
+        "Quick Context".to_owned(),
+        format!("Records: {}", summary.record_count),
+    ];
+
+    if summary.records_by_kind.is_empty() {
+        lines.push("Record kinds: none".to_owned());
+    } else {
+        lines.push("Record kinds:".to_owned());
+        for (kind, count) in &summary.records_by_kind {
+            lines.push(format!("  {kind}: {count}"));
+        }
+    }
+
+    lines.push(format!("Hooks: {}", summary.hook_count));
+    lines.push(format!(
+        "Latest activity: {}",
+        summary.latest_activity_at.as_deref().unwrap_or("none")
+    ));
+    lines.join("\n")
+}
+
 fn shell_quote_value(value: &str) -> String {
     if !value.is_empty() && value.bytes().all(is_shell_safe_byte) {
         return value.to_owned();
@@ -1228,5 +1269,20 @@ mod tests {
     #[test]
     fn shell_quote_escapes_single_quotes() {
         assert_eq!(shell_quote_value("can't"), "'can'\"'\"'t'");
+    }
+
+    #[test]
+    fn quick_context_output_is_stable() {
+        let summary = QuickContextSummary {
+            record_count: 3,
+            records_by_kind: BTreeMap::from([("note".to_owned(), 1), ("task".to_owned(), 2)]),
+            hook_count: 1,
+            latest_activity_at: Some("2026-06-26T12:34:56.789Z".to_owned()),
+        };
+
+        assert_eq!(
+            format_quick_context(&summary),
+            "Quick Context\nRecords: 3\nRecord kinds:\n  note: 1\n  task: 2\nHooks: 1\nLatest activity: 2026-06-26T12:34:56.789Z"
+        );
     }
 }
