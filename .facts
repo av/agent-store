@@ -1,0 +1,121 @@
+# agent-store
+- label: agent-store builds a Rust CLI binary named agent-store that exits 0 for --help and prints usage
+  id: 28o
+  command: sh -c 'cargo run --quiet -- --help > /tmp/agent-store-help-28o.txt && grep -Fq "Usage: agent-store" /tmp/agent-store-help-28o.txt'
+  tags: [implemented]
+- agent-store keeps command parsing, command behavior, persistence, and output formatting separated behind small internal boundaries @draft
+
+# CLI
+
+## records
+- agent-store create <kind> key=value... creates a Record, stores <kind> as its queryable kind, stores each key=value Field, and prints the Record ID @draft
+- agent-store find accepts a Query as either one quoted argument or multiple unquoted arguments joined with spaces, then prints matching Records @draft
+- agent-store rm <ID> hard-deletes the Record with that short ID and reports whether a record was removed @draft
+- agent-store get <ID> prints the Record with that short ID in the default record output format @draft
+- agent-store set <ID> key=value... updates supplied Fields on an existing Record, accepts empty and null values, and leaves unspecified Fields unchanged @draft
+- agent-store unset <ID> key... removes the supplied Fields from an existing Record without deleting the Record @draft
+
+## output
+- agent-store prints Records one per line as <id> <kind> key=value... with stable field ordering and shell-quoted values when needed @draft
+- all commands that emit records, summaries, or mutation results support --json for structured machine-readable output @draft
+
+## init
+- agent-store init creates .agent-store for local data and ensures .agent-store is ignored by git @draft
+- agent-store init installs builtin skills into .agents/skills and .claude/skills @draft
+- agent-store init adds agent-store usage instructions to AGENTS.md and CLAUDE.md when those files exist @draft
+- agent-store init can be run repeatedly without duplicating instructions or overwriting user-authored skill files @draft
+
+## aliases
+- agent-store cr is a short alias for create with identical arguments, behavior, and output @draft
+- agent-store ls is a short alias for find with identical query behavior and output @draft
+
+## hooks
+- agent-store hook add <event> [<Query>] -- <bash command> creates a Hook and prints the Hook ID @draft
+- agent-store hook ls prints configured Hooks in a compact deterministic format @draft
+- agent-store hook rm <ID> deletes the Hook with that short ID and reports whether a hook was removed @draft
+
+## context
+- agent-store ctx prints a compact deterministic Quick Context summary without printing individual Records by default @draft
+- agent-store context is a readable alias for ctx with identical behavior and output @draft
+
+## links
+- agent-store link <from> <rel> <to> creates an idempotent directional Link between two Records @draft
+- agent-store unlink <from> <rel> <to> removes a directional Link and succeeds without side effects when the Link is already absent @draft
+- agent-store links <ID> prints incoming and outgoing Links for the Record in a compact deterministic format @draft
+- agent-store find supports filtering Records by incoming and outgoing Links, relation names, and linked Record IDs in the first link-enabled release @draft
+
+# domain
+- a Store is a project-local SQLite-backed database under .agent-store @draft
+- a Record is a stored item with a generated 6-8 character random hash ID, a kind, and arbitrary named fields @draft
+- a Field is a key-value attribute attached to a Record @draft
+- a Query is a boolean expression over Record fields, typed comparisons, parentheses, and link predicates @draft
+- a Hook is a stored automation rule that pairs a Store Event, an optional Query condition, and a Bash command @draft
+- a Store Event is a successful create, set, unset, rm, link, or unlink operation on stored data @draft
+- a Hook Run is a stored execution result for one Hook invocation, including the event, affected Record ID, exit status, and captured output summary @draft
+- a Quick Context is a bounded Store summary intended to orient an agent before it chooses specific retrieval commands @draft
+- a Link is a directional typed relation from one Record to another Record @draft
+- one Link table shape represents one-to-one, one-to-many, and many-to-many relations without per-kind schema changes @draft
+
+# persistence
+- SQLite schema changes are applied through migrations when a Store is opened @draft
+- persistence errors preserve enough context for the CLI to print actionable failures without panics @draft
+- Record storage supports querying arbitrary Field values without requiring a Rust code change for each new field name @draft
+
+## schema
+- the initial SQLite schema stores Records, Fields, Links, Store Events, Hooks, Hook Runs, and schema migrations in separate normalized tables @draft
+- the records table stores id, kind, created_at, and updated_at as first-class columns @draft
+- the record_fields table stores one row per Field with raw value plus typed columns for text, number, timestamp, boolean, and null-aware comparisons @draft
+- the record_links table stores from_record_id, rel, to_record_id, and created_at with a unique key over from_record_id, rel, and to_record_id @draft
+- deleting a Record cascades to its Fields and Links but does not delete other Records linked to it @draft
+- hard deletes write a Store Event with a pre-delete Record snapshot before removing the active Record row @draft
+
+## migrations
+- schema migrations are embedded in the Rust binary and run inside transactions when a Store is opened @draft
+- applied migrations are recorded with version, name, checksum, and applied_at, and checksum mismatches stop the command with an actionable error @draft
+
+## concurrency
+- SQLite connections enable foreign keys, WAL mode, and a busy timeout so multiple concurrent agent-store processes can read and write safely @draft
+- each create, set, unset, rm, link, unlink, hook add, and hook rm command applies its Store mutation in a transaction @draft
+
+# architecture
+- the crate exposes a narrow persistence interface so command behavior can be tested without depending on sqlite file layout @draft
+
+# decisions
+
+## open
+- token-efficient agent usage uses generic CRUD commands plus short aliases instead of type-specific task or calendar subcommands @draft
+- the Rust SQLite crate and async model are chosen based on simple CLI correctness, migration support, and testability rather than background service throughput @draft
+
+# hooks
+- Hooks run only after the triggering Store mutation succeeds and commits to the Store @draft
+- Hook Query conditions use the same boolean field filter language as agent-store find @draft
+- create, set, and unset Hooks evaluate their Query against the Record after the change; rm Hooks evaluate against the pre-delete Record snapshot @draft
+- Hook Bash commands receive the affected Record snapshot on stdin in the default record output format @draft
+- Hook command failures are reported to the caller without silently hiding the failed command, exit status, or captured stderr summary @draft
+- Hooks run sequentially after the triggering mutation commits, from the project root, with a 30 second default timeout @draft
+- Hook Bash commands receive AGENT_STORE_EVENT, AGENT_STORE_ID, AGENT_STORE_KIND, and AGENT_STORE_REL when applicable @draft
+- a Hook timeout or non-zero exit makes the triggering CLI command exit non-zero after reporting that the Store mutation already committed @draft
+- Hook stdout and stderr capture are capped at 8192 bytes each and the cap values are documented in command help @draft
+- link and unlink Hooks evaluate their Query against the source Record and expose the relation and target Record ID through environment variables @draft
+- Hook Bash commands receive AGENT_STORE_TARGET_ID for link and unlink events @draft
+
+# context
+- Quick Context output includes total Record count, counts by kind, Hook count, and the most recent Store activity timestamp when available @draft
+- Quick Context output lists common Field names separately for each Record kind rather than as one global field list @draft
+- Quick Context output summarizes common per-kind status values and date windows when fields such as status, due, or start exist @draft
+- Quick Context output remains bounded by a documented byte limit regardless of Store size @draft
+- agent-store ctx exits successfully for an initialized empty Store and prints zero counts instead of an error @draft
+- Quick Context output includes Link count and relation-name counts when Links exist @draft
+
+# query
+- Query syntax supports and, or, not, parentheses, and comparison operators =, !=, <, <=, >, and >= @draft
+- Query parsing treats multiple unquoted query arguments the same as one quoted query string @draft
+- Query evaluation uses parsed Field types so date, timestamp, number, boolean, null, and text comparisons behave by value rather than raw string order @draft
+
+# fields
+- Field values preserve their raw input and are parsed in specificity order as null, boolean, date or timestamp, number, then text @draft
+- key= stores an empty string Field value, key=null stores a null Field value, and agent-store unset removes a Field entirely @draft
+
+# ids
+- Record IDs are generated as 6-8 character random hash strings and creation retries when a generated ID already exists @draft
+- Commands that accept a Record ID require an unambiguous existing short ID and report not-found errors without creating records implicitly @draft
