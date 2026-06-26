@@ -77,7 +77,9 @@
 - a Hook Run is a stored execution result for one Hook invocation, including the event, affected Record ID, exit status, and captured output summary @draft
 - a Quick Context is a bounded Store summary intended to orient an agent before it chooses specific retrieval commands @draft
 - a Link is a directional typed relation from one Record to another Record @draft
-- one Link table shape represents one-to-one, one-to-many, and many-to-many relations without per-kind schema changes @draft
+- label: one Link table shape represents one-to-one, one-to-many, and many-to-many relations without per-kind schema changes
+  command: bash tests/facts/store_schema_migrations.sh record_links_cardinality_shape
+  tags: [implemented]
 
 # persistence
 - label: SQLite schema changes are applied through migrations when a Store is opened
@@ -96,8 +98,12 @@
 - label: the record_fields table stores one row per Field with raw value plus typed columns for text, number, timestamp, boolean, and null-aware comparisons
   command: bash tests/facts/store_schema_migrations.sh record_fields_typed_columns
   tags: [implemented]
-- the record_links table stores from_record_id, rel, to_record_id, and created_at with a unique key over from_record_id, rel, and to_record_id @draft
-- deleting a Record cascades to its Fields and Links but does not delete other Records linked to it @draft
+- label: the record_links table stores from_record_id, rel, to_record_id, and created_at with a unique key over from_record_id, rel, and to_record_id
+  command: bash tests/facts/store_schema_migrations.sh record_links_columns_unique
+  tags: [implemented]
+- label: deleting a Record cascades to its Fields and Links but does not delete other Records linked to it
+  command: bash tests/facts/store_schema_migrations.sh record_delete_cascades_links
+  tags: [implemented]
 - hard deletes write a Store Event with a pre-delete Record snapshot before removing the active Record row @draft
 
 ## migrations
