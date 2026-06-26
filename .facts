@@ -234,7 +234,10 @@
   id: raf
   command: bash tests/facts/cli_context.sh ctx_summary_counts
   tags: [implemented]
-- Quick Context output lists common Field names separately for each Record kind rather than as one global field list @draft
+- label: Quick Context output lists distinct Field names under each Record kind, sorted by kind and Field name, without printing Field values
+  id: 261
+  command: bash tests/facts/cli_context.sh ctx_fields_by_kind
+  tags: [implemented]
 - Quick Context output summarizes common per-kind status values and date windows when fields such as status, due, or start exist @draft
 - Quick Context output remains bounded by a documented byte limit regardless of Store size @draft
 - label: agent-store ctx exits successfully for an initialized empty Store and prints Records: 0, Record kinds: none, Hooks: 0, and Latest activity: none

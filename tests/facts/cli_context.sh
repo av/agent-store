@@ -38,7 +38,9 @@ case "$case_name" in
 Records: 3
 Record kinds:
   note: 1
+    fields: status, title
   task: 2
+    fields: status, title
 Hooks: 1
 Latest activity: $latest"
     got="$(run_agent_store ctx)"
@@ -62,7 +64,9 @@ Latest activity: $latest"
 Records: 3
 Record kinds:
   bug: 1
+    fields: title
   task: 2
+    fields: title
 Hooks: 1
 Latest activity: $latest"
     got="$(run_agent_store ctx)"
@@ -95,6 +99,31 @@ Hooks: 0
 Latest activity: none"
     got="$(run_agent_store ctx)"
     test "$got" = "$expected"
+    ;;
+
+  ctx_fields_by_kind)
+    cd "$tmp"
+    run_agent_store init >/tmp/agent-store-ctx-261-init.out
+    run_agent_store create task title=Write status=open due=2026-06-30 task_only=yes >/tmp/agent-store-ctx-261-task-1.out
+    run_agent_store create task title=Ship priority=high >/tmp/agent-store-ctx-261-task-2.out
+    run_agent_store create note title=Plan topic=agents note_only=yes >/tmp/agent-store-ctx-261-note.out
+
+    latest="$(latest_activity)"
+    expected="Quick Context
+Records: 3
+Record kinds:
+  note: 1
+    fields: note_only, title, topic
+  task: 2
+    fields: due, priority, status, task_only, title
+Hooks: 0
+Latest activity: $latest"
+    got="$(run_agent_store ctx)"
+    test "$got" = "$expected"
+
+    case "$got" in
+      *"Fields:"*|*"Write"*|*"open"*|*"2026-06-30"*|*"agents"*|*"high"*|*"yes"*) exit 1 ;;
+    esac
     ;;
 
   *)

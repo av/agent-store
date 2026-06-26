@@ -161,6 +161,7 @@ pub struct HookRun {
 pub struct QuickContextSummary {
     pub record_count: i64,
     pub records_by_kind: BTreeMap<String, i64>,
+    pub fields_by_kind: BTreeMap<String, Vec<String>>,
     pub hook_count: i64,
     pub latest_activity_at: Option<String>,
 }
@@ -395,6 +396,27 @@ impl Store {
             records_by_kind.insert(kind, count);
         }
 
+        let mut fields_by_kind = records_by_kind
+            .keys()
+            .map(|kind| (kind.clone(), Vec::new()))
+            .collect::<BTreeMap<_, _>>();
+        let mut stmt = self.conn.prepare(
+            r#"
+            SELECT records.kind, record_fields.key
+            FROM records
+            JOIN record_fields ON record_fields.record_id = records.id
+            GROUP BY records.kind, record_fields.key
+            ORDER BY records.kind, record_fields.key
+            "#,
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        for row in rows {
+            let (kind, field_name) = row?;
+            fields_by_kind.entry(kind).or_default().push(field_name);
+        }
+
         let hook_count = self
             .conn
             .query_row("SELECT COUNT(*) FROM hooks", [], |row| row.get(0))?;
@@ -410,6 +432,7 @@ impl Store {
         Ok(QuickContextSummary {
             record_count,
             records_by_kind,
+            fields_by_kind,
             hook_count,
             latest_activity_at,
         })

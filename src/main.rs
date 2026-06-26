@@ -1092,6 +1092,16 @@ fn format_quick_context(summary: &QuickContextSummary) -> String {
         lines.push("Record kinds:".to_owned());
         for (kind, count) in &summary.records_by_kind {
             lines.push(format!("  {kind}: {count}"));
+            let fields = summary
+                .fields_by_kind
+                .get(kind)
+                .map(Vec::as_slice)
+                .unwrap_or(&[]);
+            if fields.is_empty() {
+                lines.push("    fields: none".to_owned());
+            } else {
+                lines.push(format!("    fields: {}", fields.join(", ")));
+            }
         }
     }
 
@@ -1276,13 +1286,20 @@ mod tests {
         let summary = QuickContextSummary {
             record_count: 3,
             records_by_kind: BTreeMap::from([("note".to_owned(), 1), ("task".to_owned(), 2)]),
+            fields_by_kind: BTreeMap::from([
+                ("note".to_owned(), vec!["title".to_owned()]),
+                (
+                    "task".to_owned(),
+                    vec!["status".to_owned(), "title".to_owned()],
+                ),
+            ]),
             hook_count: 1,
             latest_activity_at: Some("2026-06-26T12:34:56.789Z".to_owned()),
         };
 
         assert_eq!(
             format_quick_context(&summary),
-            "Quick Context\nRecords: 3\nRecord kinds:\n  note: 1\n  task: 2\nHooks: 1\nLatest activity: 2026-06-26T12:34:56.789Z"
+            "Quick Context\nRecords: 3\nRecord kinds:\n  note: 1\n    fields: title\n  task: 2\n    fields: status, title\nHooks: 1\nLatest activity: 2026-06-26T12:34:56.789Z"
         );
     }
 }
