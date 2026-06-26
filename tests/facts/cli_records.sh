@@ -299,6 +299,61 @@ $text_line"
     test "$sparse_line" = "$sparse sample lane=delta title=Sparse"
     ;;
 
+  field_value_parsing_semantics)
+    cd "$tmp"
+    run_agent_store init >/tmp/agent-store-fields-om5-init.out
+    id="$(run_agent_store create sample initial=seed active=true due=2026-06-26 stamp=2026-06-26T12:34:56Z score=001.50 missing=null text=hello empty=)"
+    got="$(run_agent_store get "$id")"
+    test "$got" = "$id sample active=true due=2026-06-26 empty='' initial=seed missing=null score=001.50 stamp=2026-06-26T12:34:56Z text=hello"
+
+    out="$(run_agent_store set "$id" set_active=false set_due=2026-07-01 set_stamp=2026-07-01T00:00:00Z set_score=0002.75 set_missing=null set_text=world)"
+    test "$out" = "Updated $id"
+    got="$(run_agent_store get "$id")"
+    test "$got" = "$id sample active=true due=2026-06-26 empty='' initial=seed missing=null score=001.50 set_active=false set_due=2026-07-01 set_missing=null set_score=0002.75 set_stamp=2026-07-01T00:00:00Z set_text=world stamp=2026-06-26T12:34:56Z text=hello"
+
+    python3 - .agent-store/store.sqlite "$id" <<'PY'
+import sqlite3
+import sys
+
+db, record_id = sys.argv[1:]
+con = sqlite3.connect(db)
+rows = {
+    row[0]: row[1:]
+    for row in con.execute(
+        """
+        select key, raw_value, text_value, number_value, timestamp_value, boolean_value, is_null
+        from record_fields
+        where record_id = ?
+        """,
+        (record_id,),
+    )
+}
+
+def assert_row(key, raw, text, number, timestamp, boolean, is_null):
+    actual = rows[key]
+    assert actual[0] == raw, (key, actual)
+    assert actual[1] == text, (key, actual)
+    if number is None:
+        assert actual[2] is None, (key, actual)
+    else:
+        assert abs(actual[2] - number) < 0.000001, (key, actual)
+    assert actual[3] == timestamp, (key, actual)
+    assert actual[4] == boolean, (key, actual)
+    assert actual[5] == is_null, (key, actual)
+
+assert_row("missing", "null", None, None, None, None, 1)
+assert_row("set_missing", "null", None, None, None, None, 1)
+assert_row("active", "true", None, None, None, 1, 0)
+assert_row("set_active", "false", None, None, None, 0, 0)
+assert_row("due", "2026-06-26", None, None, "2026-06-26", None, 0)
+assert_row("stamp", "2026-06-26T12:34:56Z", None, None, "2026-06-26T12:34:56Z", None, 0)
+assert_row("score", "001.50", None, 1.5, None, None, 0)
+assert_row("set_score", "0002.75", None, 2.75, None, None, 0)
+assert_row("text", "hello", "hello", None, None, None, 0)
+assert_row("empty", "", "", None, None, None, 0)
+PY
+    ;;
+
   field_empty_null_unset_semantics)
     cd "$tmp"
     run_agent_store init >/tmp/agent-store-fields-6pq-init.out

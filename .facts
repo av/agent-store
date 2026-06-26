@@ -285,7 +285,10 @@
   tags: [implemented]
 
 # fields
-- Field values preserve their raw input and are parsed in specificity order as null, boolean, date or timestamp, number, then text @draft
+- label: Field values written by create and set preserve exact raw input and populate typed storage as null, boolean, date/timestamp, number, then text
+  id: om5
+  command: bash tests/facts/cli_records.sh field_value_parsing_semantics
+  tags: [implemented]
 - label: key= stores an empty string Field value, key=null stores a null Field value, and agent-store unset removes a Field entirely
   command: bash tests/facts/cli_records.sh field_empty_null_unset_semantics
   tags: [implemented]
