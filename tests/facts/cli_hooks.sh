@@ -224,8 +224,83 @@ assert not any(row[0] in skipped for row in rows), rows
 PY
     ;;
 
+  hook_query_uses_mutation_snapshot)
+    cd "$tmp"
+    run_agent_store init >/tmp/agent-store-hook-query-887-init.out
+
+    cat > hook-log.sh <<'SH'
+#!/usr/bin/env bash
+printf "%s\n" "$1" >> hook-log.txt
+printf "%s" "$1"
+SH
+    chmod +x hook-log.sh
+
+    create_after_id="$(run_agent_store hook add create 'kind=task and status=new' -- './hook-log.sh create-after')"
+    create_skip_id="$(run_agent_store hook add create 'status=done' -- './hook-log.sh create-skip')"
+
+    record_id="$(run_agent_store create task title=Snapshot status=new flag=keep)"
+
+    set_after_id="$(run_agent_store hook add set 'status=done' -- './hook-log.sh set-after')"
+    set_before_id="$(run_agent_store hook add set 'status=new' -- './hook-log.sh set-before')"
+    run_agent_store set "$record_id" status=done >/tmp/agent-store-hook-query-887-set.out
+
+    unset_after_id="$(run_agent_store hook add unset 'not flag=keep' -- './hook-log.sh unset-after')"
+    unset_before_id="$(run_agent_store hook add unset 'flag=keep' -- './hook-log.sh unset-before')"
+    run_agent_store unset "$record_id" flag >/tmp/agent-store-hook-query-887-unset.out
+
+    rm_pre_id="$(run_agent_store hook add rm 'status=done' -- './hook-log.sh rm-pre')"
+    rm_after_id="$(run_agent_store hook add rm 'not status=done' -- './hook-log.sh rm-after')"
+    run_agent_store rm "$record_id" >/tmp/agent-store-hook-query-887-rm.out
+
+    expected_log="$(printf "create-after\nset-after\nunset-after\nrm-pre\n")"
+    test "$(cat hook-log.txt)" = "$expected_log"
+
+    python3 - .agent-store/store.sqlite \
+      "$create_after_id" \
+      "$create_skip_id" \
+      "$set_after_id" \
+      "$set_before_id" \
+      "$unset_after_id" \
+      "$unset_before_id" \
+      "$rm_pre_id" \
+      "$rm_after_id" \
+      "$record_id" <<'PY'
+import sqlite3
+import sys
+
+(
+    db,
+    create_after_id,
+    create_skip_id,
+    set_after_id,
+    set_before_id,
+    unset_after_id,
+    unset_before_id,
+    rm_pre_id,
+    rm_after_id,
+    record_id,
+) = sys.argv[1:]
+con = sqlite3.connect(db)
+rows = con.execute(
+    """
+    select hook_id, event_type, record_id, exit_status, stdout_summary, stderr_summary
+    from hook_runs
+    order by id
+    """
+).fetchall()
+assert rows == [
+    (create_after_id, "create", record_id, 0, "create-after", ""),
+    (set_after_id, "set", record_id, 0, "set-after", ""),
+    (unset_after_id, "unset", record_id, 0, "unset-after", ""),
+    (rm_pre_id, "rm", record_id, 0, "rm-pre", ""),
+], rows
+skipped = {create_skip_id, set_before_id, unset_before_id, rm_after_id}
+assert not any(row[0] in skipped for row in rows), rows
+PY
+    ;;
+
   *)
-    echo "usage: $0 {hook_add_stores_metadata|hook_ls_deterministic|hook_rm_deletes_metadata|hooks_run_after_commit|hook_query_filters_records}" >&2
+    echo "usage: $0 {hook_add_stores_metadata|hook_ls_deterministic|hook_rm_deletes_metadata|hooks_run_after_commit|hook_query_filters_records|hook_query_uses_mutation_snapshot}" >&2
     exit 2
     ;;
 esac

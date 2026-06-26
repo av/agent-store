@@ -188,7 +188,9 @@
   id: mlq
   command: bash tests/facts/cli_hooks.sh hook_query_filters_records
   tags: [implemented]
-- create, set, and unset Hooks evaluate their Query against the Record after the change; rm Hooks evaluate against the pre-delete Record snapshot @draft
+- label: create, set, and unset Hooks evaluate their Query against the Record after the change; rm Hooks evaluate against the pre-delete Record snapshot
+  command: bash tests/facts/cli_hooks.sh hook_query_uses_mutation_snapshot
+  tags: [implemented]
 - Hook Bash commands receive the affected Record snapshot on stdin in the default record output format @draft
 - Hook command failures are reported to the caller without silently hiding the failed command, exit status, or captured stderr summary @draft
 - Hooks run sequentially after the triggering mutation commits, from the project root, with a 30 second default timeout @draft
