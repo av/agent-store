@@ -548,8 +548,75 @@ assert "timed out after 30 seconds" in stderr_summary, rows
 PY
     ;;
 
+  hook_env_vars_for_record_events)
+    cd "$tmp"
+    run_agent_store init >/tmp/agent-store-hook-env-vun-init.out
+
+    cat > hook-env.sh <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+label="$1"
+printf "%s:%s:%s:%s\n" "$label" "$AGENT_STORE_EVENT" "$AGENT_STORE_ID" "$AGENT_STORE_KIND" >> hook-env.log
+printf "%s" "$label"
+SH
+    chmod +x hook-env.sh
+
+    create_hook_id="$(run_agent_store hook add create -- './hook-env.sh create')"
+    record_id="$(run_agent_store create task title=Env status=new flag=keep)"
+
+    set_hook_id="$(run_agent_store hook add set -- './hook-env.sh set')"
+    run_agent_store set "$record_id" status=done >/tmp/agent-store-hook-env-vun-set.out
+
+    unset_hook_id="$(run_agent_store hook add unset -- './hook-env.sh unset')"
+    run_agent_store unset "$record_id" flag >/tmp/agent-store-hook-env-vun-unset.out
+
+    rm_hook_id="$(run_agent_store hook add rm -- './hook-env.sh rm')"
+    run_agent_store rm "$record_id" >/tmp/agent-store-hook-env-vun-rm.out
+
+    expected_log="$(
+      printf "create:create:%s:task\n" "$record_id"
+      printf "set:set:%s:task\n" "$record_id"
+      printf "unset:unset:%s:task\n" "$record_id"
+      printf "rm:rm:%s:task\n" "$record_id"
+    )"
+    test "$(cat hook-env.log)" = "$expected_log"
+
+    python3 - .agent-store/store.sqlite \
+      "$create_hook_id" \
+      "$set_hook_id" \
+      "$unset_hook_id" \
+      "$rm_hook_id" \
+      "$record_id" <<'PY'
+import sqlite3
+import sys
+
+(
+    db,
+    create_hook_id,
+    set_hook_id,
+    unset_hook_id,
+    rm_hook_id,
+    record_id,
+) = sys.argv[1:]
+con = sqlite3.connect(db)
+rows = con.execute(
+    """
+    select hook_id, event_type, record_id, exit_status, stdout_summary, stderr_summary
+    from hook_runs
+    order by id
+    """
+).fetchall()
+assert rows == [
+    (create_hook_id, "create", record_id, 0, "create", ""),
+    (set_hook_id, "set", record_id, 0, "set", ""),
+    (unset_hook_id, "unset", record_id, 0, "unset", ""),
+    (rm_hook_id, "rm", record_id, 0, "rm", ""),
+], rows
+PY
+    ;;
+
   *)
-    echo "usage: $0 {hook_add_stores_metadata|hook_ls_deterministic|hook_rm_deletes_metadata|hooks_run_after_commit|hook_query_filters_records|hook_query_uses_mutation_snapshot|hook_stdin_receives_record_snapshot|hook_failure_reports_details|hooks_run_sequentially_from_project_root_with_timeout}" >&2
+    echo "usage: $0 {hook_add_stores_metadata|hook_ls_deterministic|hook_rm_deletes_metadata|hooks_run_after_commit|hook_query_filters_records|hook_query_uses_mutation_snapshot|hook_stdin_receives_record_snapshot|hook_failure_reports_details|hooks_run_sequentially_from_project_root_with_timeout|hook_env_vars_for_record_events}" >&2
     exit 2
     ;;
 esac

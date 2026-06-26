@@ -20,6 +20,13 @@ const INSTRUCTION_FILES: &[&str] = &["AGENTS.md", "CLAUDE.md"];
 const INSTRUCTIONS_START: &str = "<!-- agent-store:start -->";
 const DEFAULT_HOOK_TIMEOUT: Duration = Duration::from_secs(30);
 const HOOK_TIMEOUT_EXIT_STATUS: i32 = -1;
+const HOOK_ENV_KEYS: &[&str] = &[
+    "AGENT_STORE_EVENT",
+    "AGENT_STORE_ID",
+    "AGENT_STORE_KIND",
+    "AGENT_STORE_REL",
+    "AGENT_STORE_TARGET_ID",
+];
 const INSTRUCTIONS_BLOCK: &str = "\
 <!-- agent-store:start -->
 ## agent-store
@@ -614,7 +621,14 @@ fn run_matching_hooks_after_commit(
         }
 
         let stdin_payload = format!("{}\n", format_record(record));
-        let output = run_hook_command(&hook, &stdin_payload, &project_root, DEFAULT_HOOK_TIMEOUT)?;
+        let env_vars = hook_env_vars(event_type, record);
+        let output = run_hook_command(
+            &hook,
+            &stdin_payload,
+            &project_root,
+            DEFAULT_HOOK_TIMEOUT,
+            &env_vars,
+        )?;
         let exit_status = if output.timed_out {
             HOOK_TIMEOUT_EXIT_STATUS
         } else {
@@ -676,6 +690,7 @@ fn run_hook_command(
     stdin_payload: &str,
     project_root: &Path,
     timeout: Duration,
+    env_vars: &[(&'static str, String)],
 ) -> Result<HookCommandOutput, String> {
     let mut command = Command::new("bash");
     command
@@ -685,6 +700,12 @@ fn run_hook_command(
         .stdin(process::Stdio::piped())
         .stdout(process::Stdio::piped())
         .stderr(process::Stdio::piped());
+    for key in HOOK_ENV_KEYS {
+        command.env_remove(key);
+    }
+    for (key, value) in env_vars {
+        command.env(key, value);
+    }
 
     #[cfg(unix)]
     command.process_group(0);
@@ -735,6 +756,14 @@ fn run_hook_command(
         stderr,
         timed_out,
     })
+}
+
+fn hook_env_vars(event_type: &str, record: &Record) -> [(&'static str, String); 3] {
+    [
+        ("AGENT_STORE_EVENT", event_type.to_owned()),
+        ("AGENT_STORE_ID", record.id.clone()),
+        ("AGENT_STORE_KIND", record.kind.clone()),
+    ]
 }
 
 fn read_hook_pipe<R>(mut pipe: R) -> thread::JoinHandle<io::Result<Vec<u8>>>
