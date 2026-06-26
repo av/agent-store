@@ -344,6 +344,93 @@ PY
     test "$unique_count" = "8"
     ;;
 
+  record_id_resolution_errors)
+    cd "$tmp"
+    run_agent_store init >"$tmp/init.out"
+    run_agent_store create seed title=seed >"$tmp/seed.out"
+
+    python3 - .agent-store/store.sqlite <<'PY'
+import sqlite3
+import sys
+
+db = sys.argv[1]
+con = sqlite3.connect(db)
+for table in ("record_links", "record_fields", "records", "store_events"):
+    con.execute(f"delete from {table}")
+con.executemany(
+    "insert into records (id, kind) values (?, ?)",
+    [
+        ("abc123", "task"),
+        ("abc456", "task"),
+        ("def789", "note"),
+    ],
+)
+con.commit()
+PY
+
+    expect_failure() {
+      local expected="$1"
+      shift
+      local label
+      label="$(printf "%s" "$*" | tr -cs '[:alnum:]' '-')"
+      set +e
+      run_agent_store "$@" >"$tmp/$label.out" 2>"$tmp/$label.err"
+      local status=$?
+      set -e
+      test "$status" -ne 0
+      test ! -s "$tmp/$label.out"
+      grep -Fq "$expected" "$tmp/$label.err"
+    }
+
+    assert_store_unchanged_after_failures() {
+      python3 - .agent-store/store.sqlite <<'PY'
+import sqlite3
+import sys
+
+db = sys.argv[1]
+con = sqlite3.connect(db)
+ids = [row[0] for row in con.execute("select id from records order by id")]
+assert ids == ["abc123", "abc456", "def789"], ids
+assert con.execute("select count(*) from record_links").fetchone()[0] == 0
+PY
+    }
+
+    got="$(run_agent_store get abc1)"
+    test "$got" = "abc123 task"
+    out="$(run_agent_store set abc1 status=done)"
+    test "$out" = "Updated abc123"
+    out="$(run_agent_store unset abc1 status)"
+    test "$out" = "Updated abc123"
+    out="$(run_agent_store link abc1 blocks def7)"
+    test "$out" = "Linked abc123 blocks def789"
+    links="$(run_agent_store links abc1)"
+    test "$links" = "out blocks def789"
+    out="$(run_agent_store unlink abc1 blocks def7)"
+    test "$out" = "Unlinked abc123 blocks def789"
+
+    expect_failure "matches multiple records" get abc
+    expect_failure "matches multiple records" set abc status=blocked
+    expect_failure "matches multiple records" unset abc status
+    expect_failure "matches multiple records" rm abc
+    expect_failure "matches multiple records" links abc
+    expect_failure "matches multiple records" link abc relates def7
+    expect_failure "matches multiple records" link def7 relates abc
+    expect_failure "matches multiple records" unlink abc relates def7
+    expect_failure "matches multiple records" unlink def7 relates abc
+
+    expect_failure "was not found" get zzzzzz
+    expect_failure "was not found" set zzzzzz status=blocked
+    expect_failure "was not found" unset zzzzzz status
+    expect_failure "was not found" rm zzzzzz
+    expect_failure "was not found" links zzzzzz
+    expect_failure "was not found" link zzzzzz relates def7
+    expect_failure "was not found" link def7 relates zzzzzz
+    expect_failure "was not found" unlink zzzzzz relates def7
+    expect_failure "was not found" unlink def7 relates zzzzzz
+
+    assert_store_unchanged_after_failures
+    ;;
+
   json_output)
     cd "$tmp"
     init_json="$(run_agent_store --json init)"
@@ -429,7 +516,7 @@ PY
     ;;
 
   *)
-    echo "usage: $0 {create_alias_matches_create|find_alias_matches_find|set_updates_fields|unset_removes_fields|find_filters_records|query_boolean_syntax|query_argument_parity|query_typed_values|field_empty_null_unset_semantics|record_id_generation_contract|json_output}" >&2
+    echo "usage: $0 {create_alias_matches_create|find_alias_matches_find|set_updates_fields|unset_removes_fields|find_filters_records|query_boolean_syntax|query_argument_parity|query_typed_values|field_empty_null_unset_semantics|record_id_generation_contract|record_id_resolution_errors|json_output}" >&2
     exit 2
     ;;
 esac

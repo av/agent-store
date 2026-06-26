@@ -295,4 +295,7 @@
   id: lbl
   command: bash tests/facts/cli_records.sh record_id_generation_contract && cargo test --quiet record_id_generation
   tags: [implemented]
-- Commands that accept a Record ID require an unambiguous existing short ID and report not-found errors without creating records implicitly @draft
+- label: agent-store get, set, unset, rm, link, unlink, and links require unambiguous existing short Record ID prefixes, report ambiguous and not-found prefixes as non-zero errors, and do not create Records or Links on those failures
+  id: r03
+  command: bash tests/facts/cli_records.sh record_id_resolution_errors
+  tags: [implemented]
