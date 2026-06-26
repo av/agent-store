@@ -73,8 +73,98 @@ assert fields == {
 PY
     ;;
 
+  unset_removes_fields)
+    cd "$tmp"
+    run_agent_store init >/tmp/agent-store-unset-d77-init.out
+    id="$(run_agent_store create task title=Write status=open note=keep missing=null empty=)"
+    prefix="$(printf "%s" "$id" | cut -c1-4)"
+
+    out="$(run_agent_store unset "$prefix" status missing)"
+    test "$out" = "Updated $id"
+    got="$(run_agent_store get "$id")"
+    test "$got" = "$id task empty='' note=keep title=Write"
+
+    python3 - .agent-store/store.sqlite "$id" <<'PY'
+import sqlite3
+import sys
+
+db, record_id = sys.argv[1:]
+con = sqlite3.connect(db)
+fields = {
+    row[0]: row[1]
+    for row in con.execute(
+        "select key, raw_value from record_fields where record_id = ?",
+        (record_id,),
+    )
+}
+assert fields == {
+    "empty": "",
+    "note": "keep",
+    "title": "Write",
+}, fields
+assert con.execute("select count(*) from records where id = ?", (record_id,)).fetchone()[0] == 1
+PY
+
+    run_agent_store set "$id" note=keep zzz_fail_after_note=bad >/tmp/agent-store-unset-d77-set.out
+    python3 - .agent-store/store.sqlite <<'PY'
+import sqlite3
+import sys
+
+db = sys.argv[1]
+con = sqlite3.connect(db)
+con.execute(
+    """
+    create trigger rollback_unset_after_first_field
+    before delete on record_fields
+    when old.key = 'zzz_fail_after_note'
+    begin
+        select raise(abort, 'forced unset rollback');
+    end
+    """
+)
+con.commit()
+PY
+
+    if run_agent_store unset "$id" note zzz_fail_after_note >/tmp/agent-store-unset-d77-rollback.out 2>/tmp/agent-store-unset-d77-rollback.err; then
+      exit 1
+    fi
+    grep -Fq "failed to unset record" /tmp/agent-store-unset-d77-rollback.err
+    grep -Fq "forced unset rollback" /tmp/agent-store-unset-d77-rollback.err
+    got="$(run_agent_store get "$id")"
+    test "$got" = "$id task empty='' note=keep title=Write zzz_fail_after_note=bad"
+    ;;
+
+  field_empty_null_unset_semantics)
+    cd "$tmp"
+    run_agent_store init >/tmp/agent-store-fields-6pq-init.out
+    id="$(run_agent_store create task title=Write empty= missing=null)"
+    got="$(run_agent_store get "$id")"
+    test "$got" = "$id task empty='' missing=null title=Write"
+
+    out="$(run_agent_store unset "$id" empty missing)"
+    test "$out" = "Updated $id"
+    got="$(run_agent_store get "$id")"
+    test "$got" = "$id task title=Write"
+
+    python3 - .agent-store/store.sqlite "$id" <<'PY'
+import sqlite3
+import sys
+
+db, record_id = sys.argv[1:]
+con = sqlite3.connect(db)
+fields = {
+    row[0]: row[1]
+    for row in con.execute(
+        "select key, raw_value from record_fields where record_id = ?",
+        (record_id,),
+    )
+}
+assert fields == {"title": "Write"}, fields
+PY
+    ;;
+
   *)
-    echo "usage: $0 {set_updates_fields}" >&2
+    echo "usage: $0 {set_updates_fields|unset_removes_fields|field_empty_null_unset_semantics}" >&2
     exit 2
     ;;
 esac

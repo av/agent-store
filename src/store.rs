@@ -238,6 +238,26 @@ impl Store {
         get_record_by_id(&self.conn, &id)
     }
 
+    pub fn unset_record(&mut self, id_prefix: &str, keys: Vec<String>) -> StoreResult<Record> {
+        validate_id_prefix(id_prefix)?;
+        let tx = self.conn.transaction()?;
+        let id = resolve_id(&tx, id_prefix)?;
+
+        for key in keys {
+            tx.execute(
+                "DELETE FROM record_fields WHERE record_id = ?1 AND key = ?2",
+                params![&id, &key],
+            )?;
+        }
+        tx.execute(
+            "UPDATE records SET updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?1",
+            params![&id],
+        )?;
+        tx.commit()?;
+
+        get_record_by_id(&self.conn, &id)
+    }
+
     pub fn delete_record(&mut self, id_prefix: &str) -> StoreResult<Record> {
         validate_id_prefix(id_prefix)?;
         let tx = self.conn.transaction()?;

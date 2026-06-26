@@ -144,6 +144,7 @@ Commands:
   create        Create a record
   get           Print a record by ID
   set           Update fields on a record by ID
+  unset         Remove fields from a record by ID
   rm            Delete a record by ID
 ";
 
@@ -239,6 +240,33 @@ fn main() {
                 }
             }
         }
+        Some("unset") => {
+            let Some(id) = args.next() else {
+                eprintln!("error: unset requires a record ID");
+                process::exit(2);
+            };
+
+            match parse_field_keys(args) {
+                Ok(keys) if keys.is_empty() => {
+                    eprintln!("error: unset requires at least one field name");
+                    process::exit(2);
+                }
+                Ok(keys) => {
+                    let mut store = open_store_or_exit();
+                    match store.unset_record(&id, keys) {
+                        Ok(record) => println!("Updated {}", record.id),
+                        Err(error) => {
+                            eprintln!("error: failed to unset record: {error}");
+                            process::exit(1);
+                        }
+                    }
+                }
+                Err(error) => {
+                    eprintln!("error: {error}");
+                    process::exit(2);
+                }
+            }
+        }
         Some("rm") => {
             let Some(id) = args.next() else {
                 eprintln!("error: rm requires a record ID");
@@ -306,6 +334,25 @@ fn parse_fields(args: impl Iterator<Item = String>) -> Result<BTreeMap<String, S
     }
 
     Ok(fields)
+}
+
+fn parse_field_keys(args: impl Iterator<Item = String>) -> Result<Vec<String>, String> {
+    let mut keys = Vec::new();
+
+    for arg in args {
+        if arg.is_empty() {
+            return Err("field names cannot be empty".to_owned());
+        }
+        if arg.contains('=') {
+            return Err(format!(
+                "field argument '{arg}' must be a field name, not key=value"
+            ));
+        }
+
+        keys.push(arg);
+    }
+
+    Ok(keys)
 }
 
 fn format_record(record: &Record) -> String {

@@ -25,7 +25,10 @@
   id: 1b1
   command: bash tests/facts/cli_records.sh set_updates_fields
   tags: [implemented]
-- agent-store unset <ID> key... removes the supplied Fields from an existing Record without deleting the Record @draft
+- label: agent-store unset <ID> key... resolves an unambiguous short Record ID, atomically removes the supplied Fields from the existing Record, leaves other Fields unchanged, keeps the Record, and prints Updated <resolved-id>
+  id: d77
+  command: bash tests/facts/cli_records.sh unset_removes_fields
+  tags: [implemented]
 
 ## output
 - label: agent-store prints Records one per line as <id> <kind> key=value... with stable field ordering and shell-quoted values when needed
@@ -164,7 +167,9 @@
 
 # fields
 - Field values preserve their raw input and are parsed in specificity order as null, boolean, date or timestamp, number, then text @draft
-- key= stores an empty string Field value, key=null stores a null Field value, and agent-store unset removes a Field entirely @draft
+- label: key= stores an empty string Field value, key=null stores a null Field value, and agent-store unset removes a Field entirely
+  command: bash tests/facts/cli_records.sh field_empty_null_unset_semantics
+  tags: [implemented]
 
 # ids
 - Record IDs are generated as 6-8 character random hash strings and creation retries when a generated ID already exists @draft
