@@ -600,7 +600,10 @@ fn record_for_link_hook_or_exit(store: &Store, event_type: &str, link: &Link) ->
 
 fn run_hooks_or_exit(store: &mut Store, event_type: &str, record: &Record) {
     if let Err(error) = run_matching_hooks_after_commit(store, event_type, record) {
-        eprintln!("error: failed to run hooks: {error}");
+        eprintln!(
+            "error: failed to run hooks after Store mutation already committed for {event_type} {}: {error}",
+            record.id
+        );
         process::exit(1);
     }
 }

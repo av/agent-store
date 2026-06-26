@@ -406,6 +406,88 @@ assert rows == [
 PY
     ;;
 
+  hook_failure_or_timeout_reports_committed_mutation)
+    cd "$tmp"
+    run_agent_store init >/tmp/agent-store-hook-committed-fgg-init.out
+
+    failure_command='printf failure-stdout; printf failure-stderr >&2; exit 23'
+    failure_hook_id="$(run_agent_store hook add create title=CommittedFailure -- "$failure_command")"
+
+    if run_agent_store create task title=CommittedFailure >/tmp/agent-store-hook-committed-fgg-failure.out 2>/tmp/agent-store-hook-committed-fgg-failure.err; then
+      exit 1
+    fi
+
+    grep -Fq "Store mutation already committed" /tmp/agent-store-hook-committed-fgg-failure.err
+    grep -Fq "exit status 23" /tmp/agent-store-hook-committed-fgg-failure.err
+    grep -Fq "failure-stderr" /tmp/agent-store-hook-committed-fgg-failure.err
+
+    timeout_command='printf timeout-stderr >&2; while :; do sleep 1; done'
+    timeout_hook_id="$(run_agent_store hook add create title=CommittedTimeout -- "$timeout_command")"
+
+    set +e
+    timeout 40s "$target_dir/debug/agent-store" create task title=CommittedTimeout >/tmp/agent-store-hook-committed-fgg-timeout.out 2>/tmp/agent-store-hook-committed-fgg-timeout.err
+    timeout_status=$?
+    set -e
+
+    test "$timeout_status" -ne 0
+    test "$timeout_status" -ne 124
+    grep -Fq "Store mutation already committed" /tmp/agent-store-hook-committed-fgg-timeout.err
+    grep -Fq "timed out after 30 seconds" /tmp/agent-store-hook-committed-fgg-timeout.err
+    grep -Fq "timeout-stderr" /tmp/agent-store-hook-committed-fgg-timeout.err
+
+    python3 - .agent-store/store.sqlite "$failure_hook_id" "$timeout_hook_id" <<'PY'
+import sqlite3
+import sys
+
+db, failure_hook_id, timeout_hook_id = sys.argv[1:]
+con = sqlite3.connect(db)
+records = {
+    row[1]: row[0]
+    for row in con.execute(
+        """
+        select records.id, record_fields.raw_value
+        from records
+        join record_fields on record_fields.record_id = records.id
+        where records.kind = 'task'
+          and record_fields.key = 'title'
+          and record_fields.raw_value in ('CommittedFailure', 'CommittedTimeout')
+        """
+    )
+}
+assert set(records) == {"CommittedFailure", "CommittedTimeout"}, records
+
+rows = con.execute(
+    """
+    select hook_id, event_type, record_id, exit_status, stdout_summary, stderr_summary
+    from hook_runs
+    where hook_id in (?, ?)
+    order by id
+    """,
+    (failure_hook_id, timeout_hook_id),
+).fetchall()
+assert len(rows) == 2, rows
+
+by_hook = {row[0]: row[1:] for row in rows}
+assert by_hook[failure_hook_id] == (
+    "create",
+    records["CommittedFailure"],
+    23,
+    "failure-stdout",
+    "failure-stderr",
+), by_hook[failure_hook_id]
+
+timeout_row = by_hook[timeout_hook_id]
+assert timeout_row[:4] == (
+    "create",
+    records["CommittedTimeout"],
+    -1,
+    "",
+), timeout_row
+assert "timeout-stderr" in timeout_row[4], timeout_row
+assert "timed out after 30 seconds" in timeout_row[4], timeout_row
+PY
+    ;;
+
   hooks_run_sequentially_from_project_root_with_timeout)
     cd "$tmp"
     run_agent_store init >/tmp/agent-store-hook-runtime-4as-init.out
@@ -616,7 +698,7 @@ PY
     ;;
 
   *)
-    echo "usage: $0 {hook_add_stores_metadata|hook_ls_deterministic|hook_rm_deletes_metadata|hooks_run_after_commit|hook_query_filters_records|hook_query_uses_mutation_snapshot|hook_stdin_receives_record_snapshot|hook_failure_reports_details|hooks_run_sequentially_from_project_root_with_timeout|hook_env_vars_for_record_events}" >&2
+    echo "usage: $0 {hook_add_stores_metadata|hook_ls_deterministic|hook_rm_deletes_metadata|hooks_run_after_commit|hook_query_filters_records|hook_query_uses_mutation_snapshot|hook_stdin_receives_record_snapshot|hook_failure_reports_details|hook_failure_or_timeout_reports_committed_mutation|hooks_run_sequentially_from_project_root_with_timeout|hook_env_vars_for_record_events}" >&2
     exit 2
     ;;
 esac

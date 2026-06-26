@@ -207,7 +207,10 @@
   id: vun
   command: bash tests/facts/cli_hooks.sh hook_env_vars_for_record_events
   tags: [implemented]
-- a Hook timeout or non-zero exit makes the triggering CLI command exit non-zero after reporting that the Store mutation already committed @draft
+- label: A Hook timeout or non-zero exit makes the triggering CLI command exit non-zero, reports that the Store mutation already committed, and leaves the committed Record and Hook Run persisted
+  id: fgg
+  command: bash tests/facts/cli_hooks.sh hook_failure_or_timeout_reports_committed_mutation
+  tags: [implemented]
 - Hook stdout and stderr capture are capped at 8192 bytes each and the cap values are documented in command help @draft
 - link and unlink Hooks evaluate their Query against the source Record and expose the relation and target Record ID through environment variables @draft
 - Hook Bash commands receive AGENT_STORE_TARGET_ID for link and unlink events @draft
