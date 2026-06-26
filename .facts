@@ -130,7 +130,10 @@
   id: ra7
   command: CARGO_TARGET_DIR=target/facts-ra7 cargo test hook_runs_persist_invocation_results
   tags: [implemented]
-- a Quick Context is a bounded Store summary intended to orient an agent before it chooses specific retrieval commands @draft
+- label: a Quick Context is an at-most-8192-byte Store summary that reports aggregate counts, Field names, status counts, and due/start windows while omitting Record IDs, Hook IDs, Hook queries, Hook commands, and other Field values
+  id: w8e
+  command: bash tests/facts/cli_context.sh ctx_domain_summary_contract
+  tags: [implemented]
 - a Link is a directional typed relation from one Record to another Record @draft
 - label: one Link table shape represents one-to-one, one-to-many, and many-to-many relations without per-kind schema changes
   command: bash tests/facts/store_schema_migrations.sh record_links_cardinality_shape

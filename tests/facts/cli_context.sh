@@ -75,6 +75,38 @@ Latest activity: $latest"
     test "$got" = "$expected"
     ;;
 
+  ctx_domain_summary_contract)
+    cd "$tmp"
+    run_agent_store init >init.out
+    task="$(run_agent_store create task title='Secret Plan' status=open due=2026-07-20 notes=hidden)"
+    note="$(run_agent_store create note title='Private Note' topic=confidential)"
+    hook_id="$(run_agent_store hook add create 'kind=task and status=open' -- 'printf hook-command-ran')"
+
+    task_id="${task%% *}"
+    note_id="${note%% *}"
+    latest="$(latest_activity)"
+    expected="Quick Context
+Records: 2
+Record kinds:
+  note: 1
+    fields: title, topic
+  task: 1
+    fields: due, notes, status, title
+    status: open=1
+    due: 2026-07-20..2026-07-20
+Hooks: 1
+Latest activity: $latest"
+    got="$(run_agent_store ctx)"
+    test "$got" = "$expected"
+
+    byte_count="$(printf "%s" "$got" | wc -c | tr -d ' ')"
+    test "$byte_count" -le 8192
+
+    case "$got" in
+      *"$task_id"*|*"$note_id"*|*"$hook_id"*|*"Secret Plan"*|*"Private Note"*|*"confidential"*|*"hidden"*|*"kind=task"*|*"status=open"*|*"hook-command-ran"*) exit 1 ;;
+    esac
+    ;;
+
   context_alias_matches_ctx)
     cd "$tmp"
     run_agent_store init >/tmp/agent-store-context-i3l-init.out
