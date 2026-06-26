@@ -20,7 +20,10 @@
 - all commands that emit records, summaries, or mutation results support --json for structured machine-readable output @draft
 
 ## init
-- agent-store init creates .agent-store for local data and ensures .agent-store is ignored by git @draft
+- label: agent-store init creates .agent-store/ in the current directory and adds a .agent-store/ ignore rule to .gitignore
+  id: k6a
+  command: sh -c 'set -eu; repo=$PWD; tmp=$(mktemp -d); trap "rm -rf \"$tmp\"" EXIT; cd "$tmp"; CARGO_TARGET_DIR="$repo/target/facts-k6a" cargo run --quiet --manifest-path "$repo/Cargo.toml" -- init >/tmp/agent-store-init-k6a.out; test -d .agent-store; grep -Fxq ".agent-store/" .gitignore'
+  tags: [implemented]
 - agent-store init installs builtin skills into .agents/skills and .claude/skills @draft
 - agent-store init adds agent-store usage instructions to AGENTS.md and CLAUDE.md when those files exist @draft
 - agent-store init can be run repeatedly without duplicating instructions or overwriting user-authored skill files @draft
