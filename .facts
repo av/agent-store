@@ -8,15 +8,24 @@
 # CLI
 
 ## records
-- agent-store create <kind> key=value... creates a Record, stores <kind> as its queryable kind, stores each key=value Field, and prints the Record ID @draft
+- label: agent-store create <kind> key=value... creates a Record, stores <kind> as its queryable kind, stores each key=value Field, and prints the Record ID
+  id: b98
+  command: sh -c 'set -eu; repo=$PWD; tmp=$(mktemp -d); trap "rm -rf \"$tmp\"" EXIT; cd "$tmp"; CARGO_TARGET_DIR="$repo/target/facts-b98" cargo run --quiet --manifest-path "$repo/Cargo.toml" -- init >/tmp/agent-store-create-b98-init.out; id=$(CARGO_TARGET_DIR="$repo/target/facts-b98" cargo run --quiet --manifest-path "$repo/Cargo.toml" -- create task title=Write status=open); printf "%s\n" "$id" | grep -Eq "^[a-z0-9]{6,8}$"; out=$(CARGO_TARGET_DIR="$repo/target/facts-b98" cargo run --quiet --manifest-path "$repo/Cargo.toml" -- get "$id"); test "$out" = "$id task status=open title=Write"'
+  tags: [implemented]
 - agent-store find accepts a Query as either one quoted argument or multiple unquoted arguments joined with spaces, then prints matching Records @draft
 - agent-store rm <ID> hard-deletes the Record with that short ID and reports whether a record was removed @draft
-- agent-store get <ID> prints the Record with that short ID in the default record output format @draft
+- label: agent-store get <ID> prints the Record with that short ID in the default record output format
+  id: rzr
+  command: sh -c 'set -eu; repo=$PWD; tmp=$(mktemp -d); trap "rm -rf \"$tmp\"" EXIT; cd "$tmp"; CARGO_TARGET_DIR="$repo/target/facts-rzr" cargo run --quiet --manifest-path "$repo/Cargo.toml" -- init >/tmp/agent-store-get-rzr-init.out; id=$(CARGO_TARGET_DIR="$repo/target/facts-rzr" cargo run --quiet --manifest-path "$repo/Cargo.toml" -- create decision choice=sqlite area=persistence); out=$(CARGO_TARGET_DIR="$repo/target/facts-rzr" cargo run --quiet --manifest-path "$repo/Cargo.toml" -- get "$id"); test "$out" = "$id decision area=persistence choice=sqlite"'
+  tags: [implemented]
 - agent-store set <ID> key=value... updates supplied Fields on an existing Record, accepts empty and null values, and leaves unspecified Fields unchanged @draft
 - agent-store unset <ID> key... removes the supplied Fields from an existing Record without deleting the Record @draft
 
 ## output
-- agent-store prints Records one per line as <id> <kind> key=value... with stable field ordering and shell-quoted values when needed @draft
+- label: agent-store prints Records one per line as <id> <kind> key=value... with stable field ordering and shell-quoted values when needed
+  id: zaj
+  command: sh -c 'set -eu; repo=$PWD; tmp=$(mktemp -d); trap "rm -rf \"$tmp\"" EXIT; cd "$tmp"; CARGO_TARGET_DIR="$repo/target/facts-zaj" cargo run --quiet --manifest-path "$repo/Cargo.toml" -- init >/tmp/agent-store-output-zaj-init.out; id=$(CARGO_TARGET_DIR="$repo/target/facts-zaj" cargo run --quiet --manifest-path "$repo/Cargo.toml" -- create note title="hello world" status=open empty=); out=$(CARGO_TARGET_DIR="$repo/target/facts-zaj" cargo run --quiet --manifest-path "$repo/Cargo.toml" -- get "$id"); test "$out" = "$id note empty='\'''\'' status=open title='\''hello world'\''"'
+  tags: [implemented]
 - all commands that emit records, summaries, or mutation results support --json for structured machine-readable output @draft
 
 ## init

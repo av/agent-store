@@ -1,0 +1,493 @@
+use rand::Rng;
+use rusqlite::{params, Connection, ErrorCode, OptionalExtension, Transaction};
+use std::collections::BTreeMap;
+use std::error::Error;
+use std::fmt;
+use std::fs;
+use std::hash::Hasher;
+use std::path::{Path, PathBuf};
+use std::time::Duration;
+
+pub const STORE_DIR: &str = ".agent-store";
+const STORE_DB_FILE: &str = "store.sqlite";
+const ID_CHARS: &[u8] = b"abcdefghijklmnopqrstuvwxyz0123456789";
+const ID_LEN: usize = 6;
+const ID_RETRIES: usize = 16;
+
+const INITIAL_SCHEMA: &str = r#"
+CREATE TABLE records (
+    id TEXT PRIMARY KEY NOT NULL,
+    kind TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE TABLE record_fields (
+    record_id TEXT NOT NULL,
+    key TEXT NOT NULL,
+    raw_value TEXT NOT NULL,
+    text_value TEXT,
+    number_value REAL,
+    timestamp_value TEXT,
+    boolean_value INTEGER,
+    is_null INTEGER NOT NULL DEFAULT 0 CHECK (is_null IN (0, 1)),
+    PRIMARY KEY (record_id, key),
+    FOREIGN KEY (record_id) REFERENCES records(id) ON DELETE CASCADE
+);
+
+CREATE INDEX record_fields_key_raw_value_idx ON record_fields(key, raw_value);
+CREATE INDEX record_fields_key_text_value_idx ON record_fields(key, text_value);
+CREATE INDEX record_fields_key_number_value_idx ON record_fields(key, number_value);
+CREATE INDEX record_fields_key_timestamp_value_idx ON record_fields(key, timestamp_value);
+CREATE INDEX record_fields_key_boolean_value_idx ON record_fields(key, boolean_value);
+
+CREATE TABLE record_links (
+    from_record_id TEXT NOT NULL,
+    rel TEXT NOT NULL,
+    to_record_id TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    PRIMARY KEY (from_record_id, rel, to_record_id),
+    FOREIGN KEY (from_record_id) REFERENCES records(id) ON DELETE CASCADE,
+    FOREIGN KEY (to_record_id) REFERENCES records(id) ON DELETE CASCADE
+);
+
+CREATE TABLE store_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_type TEXT NOT NULL,
+    record_id TEXT,
+    record_snapshot TEXT,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE TABLE hooks (
+    id TEXT PRIMARY KEY NOT NULL,
+    event TEXT NOT NULL,
+    query TEXT,
+    command TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE TABLE hook_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    hook_id TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    record_id TEXT,
+    exit_status INTEGER,
+    stdout_summary TEXT,
+    stderr_summary TEXT,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    FOREIGN KEY (hook_id) REFERENCES hooks(id) ON DELETE CASCADE
+);
+"#;
+
+struct Migration {
+    version: i64,
+    name: &'static str,
+    sql: &'static str,
+}
+
+const MIGRATIONS: &[Migration] = &[Migration {
+    version: 1,
+    name: "initial_schema",
+    sql: INITIAL_SCHEMA,
+}];
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Record {
+    pub id: String,
+    pub kind: String,
+    pub fields: BTreeMap<String, String>,
+}
+
+pub struct Store {
+    conn: Connection,
+}
+
+#[derive(Debug)]
+pub enum StoreError {
+    Io(std::io::Error),
+    Sql(rusqlite::Error),
+    MigrationChecksum {
+        version: i64,
+        name: String,
+        expected: String,
+        actual: String,
+    },
+    IdCollisionExhausted,
+    InvalidId(String),
+    NotFound(String),
+    AmbiguousId(String),
+}
+
+impl fmt::Display for StoreError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Io(error) => write!(f, "{error}"),
+            Self::Sql(error) => write!(f, "{error}"),
+            Self::MigrationChecksum {
+                version,
+                name,
+                expected,
+                actual,
+            } => write!(
+                f,
+                "migration {version} ({name}) checksum mismatch: expected {expected}, found {actual}"
+            ),
+            Self::IdCollisionExhausted => write!(f, "could not generate a unique record ID"),
+            Self::InvalidId(id) => write!(f, "'{id}' is not a valid record ID prefix"),
+            Self::NotFound(id) => write!(f, "record '{id}' was not found"),
+            Self::AmbiguousId(id) => write!(f, "record ID prefix '{id}' matches multiple records"),
+        }
+    }
+}
+
+impl Error for StoreError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Io(error) => Some(error),
+            Self::Sql(error) => Some(error),
+            _ => None,
+        }
+    }
+}
+
+impl From<std::io::Error> for StoreError {
+    fn from(error: std::io::Error) -> Self {
+        Self::Io(error)
+    }
+}
+
+impl From<rusqlite::Error> for StoreError {
+    fn from(error: rusqlite::Error) -> Self {
+        Self::Sql(error)
+    }
+}
+
+pub type StoreResult<T> = Result<T, StoreError>;
+
+impl Store {
+    pub fn open_project() -> StoreResult<Self> {
+        fs::create_dir_all(STORE_DIR)?;
+        Self::open(Path::new(STORE_DIR).join(STORE_DB_FILE))
+    }
+
+    fn open(path: PathBuf) -> StoreResult<Self> {
+        let mut conn = Connection::open(path)?;
+        conn.busy_timeout(Duration::from_secs(5))?;
+        conn.pragma_update(None, "foreign_keys", "ON")?;
+        conn.pragma_update(None, "journal_mode", "WAL")?;
+        run_migrations(&mut conn)?;
+        Ok(Self { conn })
+    }
+
+    pub fn create_record(
+        &mut self,
+        kind: &str,
+        fields: BTreeMap<String, String>,
+    ) -> StoreResult<Record> {
+        for _ in 0..ID_RETRIES {
+            let id = generate_id();
+            let tx = self.conn.transaction()?;
+            match insert_record(&tx, &id, kind, &fields) {
+                Ok(()) => {
+                    tx.commit()?;
+                    return self.get_record(&id);
+                }
+                Err(error) if is_constraint_violation(&error) => continue,
+                Err(error) => return Err(StoreError::Sql(error)),
+            }
+        }
+
+        Err(StoreError::IdCollisionExhausted)
+    }
+
+    pub fn get_record(&self, id_prefix: &str) -> StoreResult<Record> {
+        validate_id_prefix(id_prefix)?;
+        let id = self.resolve_id(id_prefix)?;
+        let kind = self.conn.query_row(
+            "SELECT kind FROM records WHERE id = ?1",
+            params![id],
+            |row| row.get::<_, String>(0),
+        )?;
+
+        let mut fields = BTreeMap::new();
+        let mut stmt = self.conn.prepare(
+            "SELECT key, raw_value FROM record_fields WHERE record_id = ?1 ORDER BY key",
+        )?;
+        let rows = stmt.query_map(params![id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        for row in rows {
+            let (key, value) = row?;
+            fields.insert(key, value);
+        }
+
+        Ok(Record { id, kind, fields })
+    }
+
+    fn resolve_id(&self, id_prefix: &str) -> StoreResult<String> {
+        let pattern = format!("{id_prefix}%");
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id FROM records WHERE id LIKE ?1 ORDER BY id LIMIT 2")?;
+        let rows = stmt.query_map(params![pattern], |row| row.get::<_, String>(0))?;
+        let ids: Vec<String> = rows.collect::<Result<_, _>>()?;
+
+        match ids.as_slice() {
+            [] => Err(StoreError::NotFound(id_prefix.to_owned())),
+            [id] => Ok(id.clone()),
+            _ => Err(StoreError::AmbiguousId(id_prefix.to_owned())),
+        }
+    }
+}
+
+fn run_migrations(conn: &mut Connection) -> StoreResult<()> {
+    conn.execute_batch(
+        r#"
+        CREATE TABLE IF NOT EXISTS schema_migrations (
+            version INTEGER PRIMARY KEY NOT NULL,
+            name TEXT NOT NULL,
+            checksum TEXT NOT NULL,
+            applied_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+        );
+        "#,
+    )?;
+
+    for migration in MIGRATIONS {
+        let checksum = migration_checksum(migration.sql);
+        let applied = conn
+            .query_row(
+                "SELECT name, checksum FROM schema_migrations WHERE version = ?1",
+                params![migration.version],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            )
+            .optional()?;
+
+        if let Some((name, applied_checksum)) = applied {
+            if applied_checksum != checksum {
+                return Err(StoreError::MigrationChecksum {
+                    version: migration.version,
+                    name,
+                    expected: checksum,
+                    actual: applied_checksum,
+                });
+            }
+            continue;
+        }
+
+        let tx = conn.transaction()?;
+        tx.execute_batch(migration.sql)?;
+        tx.execute(
+            "INSERT INTO schema_migrations (version, name, checksum) VALUES (?1, ?2, ?3)",
+            params![migration.version, migration.name, checksum],
+        )?;
+        tx.commit()?;
+    }
+
+    Ok(())
+}
+
+fn insert_record(
+    tx: &Transaction<'_>,
+    id: &str,
+    kind: &str,
+    fields: &BTreeMap<String, String>,
+) -> Result<(), rusqlite::Error> {
+    tx.execute(
+        r#"
+        INSERT INTO records (id, kind, created_at, updated_at)
+        VALUES (
+            ?1,
+            ?2,
+            strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+            strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        )
+        "#,
+        params![id, kind],
+    )?;
+
+    for (key, value) in fields {
+        insert_field(tx, id, key, value)?;
+    }
+
+    Ok(())
+}
+
+fn insert_field(
+    tx: &Transaction<'_>,
+    record_id: &str,
+    key: &str,
+    raw_value: &str,
+) -> Result<(), rusqlite::Error> {
+    let parsed = ParsedFieldValue::parse(raw_value);
+    tx.execute(
+        r#"
+        INSERT INTO record_fields (
+            record_id,
+            key,
+            raw_value,
+            text_value,
+            number_value,
+            timestamp_value,
+            boolean_value,
+            is_null
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+        "#,
+        params![
+            record_id,
+            key,
+            raw_value,
+            parsed.text_value.as_deref(),
+            parsed.number_value,
+            parsed.timestamp_value.as_deref(),
+            parsed.boolean_value,
+            parsed.is_null
+        ],
+    )?;
+    Ok(())
+}
+
+struct ParsedFieldValue {
+    text_value: Option<String>,
+    number_value: Option<f64>,
+    timestamp_value: Option<String>,
+    boolean_value: Option<i64>,
+    is_null: i64,
+}
+
+impl ParsedFieldValue {
+    fn parse(raw: &str) -> Self {
+        if raw == "null" {
+            return Self {
+                text_value: None,
+                number_value: None,
+                timestamp_value: None,
+                boolean_value: None,
+                is_null: 1,
+            };
+        }
+
+        if raw == "true" || raw == "false" {
+            return Self {
+                text_value: None,
+                number_value: None,
+                timestamp_value: None,
+                boolean_value: Some(i64::from(raw == "true")),
+                is_null: 0,
+            };
+        }
+
+        if looks_like_timestamp(raw) {
+            return Self {
+                text_value: None,
+                number_value: None,
+                timestamp_value: Some(raw.to_owned()),
+                boolean_value: None,
+                is_null: 0,
+            };
+        }
+
+        if let Ok(number) = raw.parse::<f64>() {
+            if number.is_finite() {
+                return Self {
+                    text_value: None,
+                    number_value: Some(number),
+                    timestamp_value: None,
+                    boolean_value: None,
+                    is_null: 0,
+                };
+            }
+        }
+
+        Self {
+            text_value: Some(raw.to_owned()),
+            number_value: None,
+            timestamp_value: None,
+            boolean_value: None,
+            is_null: 0,
+        }
+    }
+}
+
+fn looks_like_timestamp(raw: &str) -> bool {
+    let bytes = raw.as_bytes();
+    bytes.len() >= 10
+        && bytes[0..4].iter().all(u8::is_ascii_digit)
+        && bytes[4] == b'-'
+        && bytes[5..7].iter().all(u8::is_ascii_digit)
+        && bytes[7] == b'-'
+        && bytes[8..10].iter().all(u8::is_ascii_digit)
+}
+
+fn generate_id() -> String {
+    let mut rng = rand::thread_rng();
+    (0..ID_LEN)
+        .map(|_| {
+            let index = rng.gen_range(0..ID_CHARS.len());
+            char::from(ID_CHARS[index])
+        })
+        .collect()
+}
+
+fn validate_id_prefix(id_prefix: &str) -> StoreResult<()> {
+    if id_prefix.is_empty()
+        || id_prefix.len() > 8
+        || !id_prefix
+            .chars()
+            .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit())
+    {
+        return Err(StoreError::InvalidId(id_prefix.to_owned()));
+    }
+    Ok(())
+}
+
+fn is_constraint_violation(error: &rusqlite::Error) -> bool {
+    matches!(
+        error,
+        rusqlite::Error::SqliteFailure(sqlite_error, _)
+            if sqlite_error.code == ErrorCode::ConstraintViolation
+    )
+}
+
+fn migration_checksum(sql: &str) -> String {
+    let mut hasher = Fnv1a64::default();
+    hasher.write(sql.as_bytes());
+    format!("{:016x}", hasher.finish())
+}
+
+struct Fnv1a64(u64);
+
+impl Default for Fnv1a64 {
+    fn default() -> Self {
+        Self(0xcbf29ce484222325)
+    }
+}
+
+impl Hasher for Fnv1a64 {
+    fn finish(&self) -> u64 {
+        self.0
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        for byte in bytes {
+            self.0 ^= u64::from(*byte);
+            self.0 = self.0.wrapping_mul(0x100000001b3);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn generated_ids_are_lowercase_base36() {
+        let id = generate_id();
+
+        assert_eq!(id.len(), ID_LEN);
+        assert!(id
+            .chars()
+            .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit()));
+    }
+}

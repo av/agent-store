@@ -1,10 +1,13 @@
+mod store;
+
+use std::collections::BTreeMap;
 use std::env;
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 use std::path::Path;
 use std::process;
+use store::{Record, Store, STORE_DIR};
 
-const STORE_DIR: &str = ".agent-store";
 const GITIGNORE_PATH: &str = ".gitignore";
 const GITIGNORE_RULE: &str = ".agent-store/";
 const AGENT_SKILLS_DIR: &str = ".agents/skills";
@@ -138,6 +141,8 @@ Options:
 
 Commands:
   init          Initialize a project-local store
+  create        Create a record
+  get           Print a record by ID
 ";
 
 fn main() {
@@ -163,6 +168,48 @@ fn main() {
 
             println!("Initialized {STORE_DIR}/");
         }
+        Some("create") => {
+            let Some(kind) = args.next() else {
+                eprintln!("error: create requires a kind");
+                process::exit(2);
+            };
+
+            match parse_fields(args) {
+                Ok(fields) => {
+                    let mut store = open_store_or_exit();
+                    match store.create_record(&kind, fields) {
+                        Ok(record) => println!("{}", record.id),
+                        Err(error) => {
+                            eprintln!("error: failed to create record: {error}");
+                            process::exit(1);
+                        }
+                    }
+                }
+                Err(error) => {
+                    eprintln!("error: {error}");
+                    process::exit(2);
+                }
+            }
+        }
+        Some("get") => {
+            let Some(id) = args.next() else {
+                eprintln!("error: get requires a record ID");
+                process::exit(2);
+            };
+            if let Some(extra) = args.next() {
+                eprintln!("error: get does not accept argument '{extra}'");
+                process::exit(2);
+            }
+
+            let store = open_store_or_exit();
+            match store.get_record(&id) {
+                Ok(record) => println!("{}", format_record(&record)),
+                Err(error) => {
+                    eprintln!("error: failed to get record: {error}");
+                    process::exit(1);
+                }
+            }
+        }
         Some(command) => {
             eprintln!("error: unrecognized command '{command}'");
             eprintln!();
@@ -184,6 +231,65 @@ fn init_store() -> io::Result<()> {
         ensure_instruction_block(Path::new(instruction_file))?;
     }
     Ok(())
+}
+
+fn open_store_or_exit() -> Store {
+    match Store::open_project() {
+        Ok(store) => store,
+        Err(error) => {
+            eprintln!("error: failed to open store: {error}");
+            process::exit(1);
+        }
+    }
+}
+
+fn parse_fields(args: impl Iterator<Item = String>) -> Result<BTreeMap<String, String>, String> {
+    let mut fields = BTreeMap::new();
+
+    for arg in args {
+        let Some((key, value)) = arg.split_once('=') else {
+            return Err(format!("field argument '{arg}' must use key=value syntax"));
+        };
+        if key.is_empty() {
+            return Err("field names cannot be empty".to_owned());
+        }
+
+        fields.insert(key.to_owned(), value.to_owned());
+    }
+
+    Ok(fields)
+}
+
+fn format_record(record: &Record) -> String {
+    let mut output = format!("{} {}", record.id, record.kind);
+    for (key, value) in &record.fields {
+        output.push(' ');
+        output.push_str(key);
+        output.push('=');
+        output.push_str(&shell_quote_value(value));
+    }
+    output
+}
+
+fn shell_quote_value(value: &str) -> String {
+    if !value.is_empty() && value.bytes().all(is_shell_safe_byte) {
+        return value.to_owned();
+    }
+
+    let mut quoted = String::from("'");
+    for ch in value.chars() {
+        if ch == '\'' {
+            quoted.push_str("'\"'\"'");
+        } else {
+            quoted.push(ch);
+        }
+    }
+    quoted.push('\'');
+    quoted
+}
+
+fn is_shell_safe_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.' | b'/' | b':' | b'@' | b'%')
 }
 
 fn ensure_gitignore_rule(path: &Path, rule: &str) -> io::Result<()> {
@@ -308,5 +414,28 @@ mod tests {
         assert!(!missing.exists());
 
         fs::remove_dir_all(root).expect("test temp dir should be removed");
+    }
+
+    #[test]
+    fn record_output_is_stable_and_shell_quoted() {
+        let record = Record {
+            id: "abc123".to_owned(),
+            kind: "note".to_owned(),
+            fields: BTreeMap::from([
+                ("title".to_owned(), "hello world".to_owned()),
+                ("empty".to_owned(), String::new()),
+                ("status".to_owned(), "open".to_owned()),
+            ]),
+        };
+
+        assert_eq!(
+            format_record(&record),
+            "abc123 note empty='' status=open title='hello world'"
+        );
+    }
+
+    #[test]
+    fn shell_quote_escapes_single_quotes() {
+        assert_eq!(shell_quote_value("can't"), "'can'\"'\"'t'");
     }
 }
