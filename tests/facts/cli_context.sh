@@ -126,6 +126,23 @@ Latest activity: $latest"
     esac
     ;;
 
+  ctx_output_byte_limit)
+    cd "$tmp"
+    run_agent_store --help | grep -Fq "Quick Context output is capped at 8192 bytes."
+
+    run_agent_store init >/tmp/agent-store-ctx-uha-init.out
+    fields=()
+    for index in $(seq -w 1 1600); do
+      fields+=("field_$index=value")
+    done
+    run_agent_store create massive "${fields[@]}" >/tmp/agent-store-ctx-uha-record.out
+
+    run_agent_store ctx >ctx.out
+    byte_count="$(wc -c <ctx.out | tr -d ' ')"
+    test "$byte_count" -le 8192
+    grep -Fq "... truncated at 8192 bytes" ctx.out
+    ;;
+
   *)
     echo "unknown cli_context case: $case_name" >&2
     exit 2

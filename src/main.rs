@@ -21,6 +21,7 @@ const INSTRUCTIONS_START: &str = "<!-- agent-store:start -->";
 const DEFAULT_HOOK_TIMEOUT: Duration = Duration::from_secs(30);
 const HOOK_TIMEOUT_EXIT_STATUS: i32 = -1;
 const HOOK_OUTPUT_CAPTURE_LIMIT_BYTES: usize = 8192;
+const QUICK_CONTEXT_OUTPUT_LIMIT_BYTES: usize = 8192;
 const HOOK_ENV_KEYS: &[&str] = &[
     "AGENT_STORE_EVENT",
     "AGENT_STORE_ID",
@@ -168,6 +169,7 @@ Commands:
   ctx, context  Print a compact Quick Context summary
   hook          Manage stored hooks
 
+Quick Context output is capped at 8192 bytes.
 Hook stdout and stderr captures are capped at 8192 bytes each.
 ";
 
@@ -485,7 +487,12 @@ fn main() {
             let store = open_store_or_exit();
             match store.quick_context_summary() {
                 Ok(summary) => {
-                    println!("{}", format_quick_context(&summary));
+                    let output = format_quick_context(&summary);
+                    if output.len() < QUICK_CONTEXT_OUTPUT_LIMIT_BYTES {
+                        println!("{output}");
+                    } else {
+                        print!("{output}");
+                    }
                 }
                 Err(error) => {
                     eprintln!("error: failed to build Quick Context: {error}");
@@ -1110,7 +1117,23 @@ fn format_quick_context(summary: &QuickContextSummary) -> String {
         "Latest activity: {}",
         summary.latest_activity_at.as_deref().unwrap_or("none")
     ));
-    lines.join("\n")
+    cap_quick_context_output(lines.join("\n"))
+}
+
+fn cap_quick_context_output(mut output: String) -> String {
+    if output.len() <= QUICK_CONTEXT_OUTPUT_LIMIT_BYTES {
+        return output;
+    }
+
+    let marker = format!("\n... truncated at {QUICK_CONTEXT_OUTPUT_LIMIT_BYTES} bytes");
+    let mut truncate_at = QUICK_CONTEXT_OUTPUT_LIMIT_BYTES.saturating_sub(marker.len());
+    while !output.is_char_boundary(truncate_at) {
+        truncate_at -= 1;
+    }
+
+    output.truncate(truncate_at);
+    output.push_str(&marker);
+    output
 }
 
 fn shell_quote_value(value: &str) -> String {
@@ -1301,5 +1324,24 @@ mod tests {
             format_quick_context(&summary),
             "Quick Context\nRecords: 3\nRecord kinds:\n  note: 1\n    fields: title\n  task: 2\n    fields: status, title\nHooks: 1\nLatest activity: 2026-06-26T12:34:56.789Z"
         );
+    }
+
+    #[test]
+    fn quick_context_output_is_bounded() {
+        let summary = QuickContextSummary {
+            record_count: 1,
+            records_by_kind: BTreeMap::from([("large".to_owned(), 1)]),
+            fields_by_kind: BTreeMap::from([(
+                "large".to_owned(),
+                (0..2000).map(|index| format!("field_{index:04}")).collect(),
+            )]),
+            hook_count: 0,
+            latest_activity_at: None,
+        };
+
+        let output = format_quick_context(&summary);
+
+        assert!(output.len() <= QUICK_CONTEXT_OUTPUT_LIMIT_BYTES);
+        assert!(output.ends_with("... truncated at 8192 bytes"));
     }
 }

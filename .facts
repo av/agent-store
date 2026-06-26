@@ -239,7 +239,10 @@
   command: bash tests/facts/cli_context.sh ctx_fields_by_kind
   tags: [implemented]
 - Quick Context output summarizes common per-kind status values and date windows when fields such as status, due, or start exist @draft
-- Quick Context output remains bounded by a documented byte limit regardless of Store size @draft
+- label: agent-store ctx documents an 8192-byte Quick Context output cap in help and writes no more than 8192 bytes to stdout even when Store metadata exceeds that size
+  id: uha
+  command: bash tests/facts/cli_context.sh ctx_output_byte_limit
+  tags: [implemented]
 - label: agent-store ctx exits successfully for an initialized empty Store and prints Records: 0, Record kinds: none, Hooks: 0, and Latest activity: none
   id: k7a
   command: bash tests/facts/cli_context.sh ctx_empty_store
