@@ -4,9 +4,13 @@ use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::env;
 use std::fs::{self, OpenOptions};
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::process::{self, Command};
+use std::thread;
+use std::time::{Duration, Instant};
 
 const GITIGNORE_PATH: &str = ".gitignore";
 const GITIGNORE_RULE: &str = ".agent-store/";
@@ -14,6 +18,8 @@ const AGENT_SKILLS_DIR: &str = ".agents/skills";
 const CLAUDE_SKILLS_DIR: &str = ".claude/skills";
 const INSTRUCTION_FILES: &[&str] = &["AGENTS.md", "CLAUDE.md"];
 const INSTRUCTIONS_START: &str = "<!-- agent-store:start -->";
+const DEFAULT_HOOK_TIMEOUT: Duration = Duration::from_secs(30);
+const HOOK_TIMEOUT_EXIT_STATUS: i32 = -1;
 const INSTRUCTIONS_BLOCK: &str = "\
 <!-- agent-store:start -->
 ## agent-store
@@ -597,6 +603,7 @@ fn run_matching_hooks_after_commit(
     event_type: &str,
     record: &Record,
 ) -> Result<(), String> {
+    let project_root = store.project_root().to_path_buf();
     let hooks = store
         .list_hooks()
         .map_err(|error| format!("failed to list hooks: {error}"))?;
@@ -607,10 +614,24 @@ fn run_matching_hooks_after_commit(
         }
 
         let stdin_payload = format!("{}\n", format_record(record));
-        let output = run_hook_command(&hook, &stdin_payload)?;
-        let exit_status = output.status.code().unwrap_or(1);
+        let output = run_hook_command(&hook, &stdin_payload, &project_root, DEFAULT_HOOK_TIMEOUT)?;
+        let exit_status = if output.timed_out {
+            HOOK_TIMEOUT_EXIT_STATUS
+        } else {
+            output.status.code().unwrap_or(1)
+        };
         let stdout_summary = String::from_utf8_lossy(&output.stdout).into_owned();
-        let stderr_summary = String::from_utf8_lossy(&output.stderr).into_owned();
+        let mut stderr_summary = String::from_utf8_lossy(&output.stderr).into_owned();
+        if output.timed_out {
+            let timeout_summary =
+                format!("timed out after {} seconds", DEFAULT_HOOK_TIMEOUT.as_secs());
+            if stderr_summary.is_empty() {
+                stderr_summary = timeout_summary;
+            } else {
+                stderr_summary.push_str("; ");
+                stderr_summary.push_str(&timeout_summary);
+            }
+        }
 
         store
             .record_hook_run(
@@ -623,6 +644,15 @@ fn run_matching_hooks_after_commit(
             )
             .map_err(|error| format!("failed to record hook {} run: {error}", hook.id))?;
 
+        if output.timed_out {
+            return Err(format!(
+                "hook {} command '{}' timed out after {} seconds",
+                hook.id,
+                hook.command,
+                DEFAULT_HOOK_TIMEOUT.as_secs()
+            ));
+        }
+
         if !output.status.success() {
             return Err(format!(
                 "hook {} command '{}' failed with exit status {}; stderr: {}",
@@ -634,15 +664,44 @@ fn run_matching_hooks_after_commit(
     Ok(())
 }
 
-fn run_hook_command(hook: &Hook, stdin_payload: &str) -> Result<process::Output, String> {
-    let mut child = Command::new("bash")
+struct HookCommandOutput {
+    status: process::ExitStatus,
+    stdout: Vec<u8>,
+    stderr: Vec<u8>,
+    timed_out: bool,
+}
+
+fn run_hook_command(
+    hook: &Hook,
+    stdin_payload: &str,
+    project_root: &Path,
+    timeout: Duration,
+) -> Result<HookCommandOutput, String> {
+    let mut command = Command::new("bash");
+    command
         .arg("-c")
         .arg(&hook.command)
+        .current_dir(project_root)
         .stdin(process::Stdio::piped())
         .stdout(process::Stdio::piped())
-        .stderr(process::Stdio::piped())
+        .stderr(process::Stdio::piped());
+
+    #[cfg(unix)]
+    command.process_group(0);
+
+    let mut child = command
         .spawn()
         .map_err(|error| format!("hook {} failed to start: {error}", hook.id))?;
+    let stdout_reader = child
+        .stdout
+        .take()
+        .map(read_hook_pipe)
+        .ok_or_else(|| format!("hook {} stdout pipe unavailable", hook.id))?;
+    let stderr_reader = child
+        .stderr
+        .take()
+        .map(read_hook_pipe)
+        .ok_or_else(|| format!("hook {} stderr pipe unavailable", hook.id))?;
 
     {
         let mut stdin = child
@@ -658,9 +717,84 @@ fn run_hook_command(hook: &Hook, stdin_payload: &str) -> Result<process::Output,
         }
     }
 
-    child
-        .wait_with_output()
-        .map_err(|error| format!("hook {} failed while waiting: {error}", hook.id))
+    let timed_out = wait_for_child_timeout(&mut child, timeout)
+        .map_err(|error| format!("hook {} failed while waiting: {error}", hook.id))?;
+    if timed_out {
+        terminate_hook_child(&mut child);
+    }
+
+    let status = child
+        .wait()
+        .map_err(|error| format!("hook {} failed while waiting: {error}", hook.id))?;
+    let stdout = join_hook_pipe_reader(hook, "stdout", stdout_reader)?;
+    let stderr = join_hook_pipe_reader(hook, "stderr", stderr_reader)?;
+
+    Ok(HookCommandOutput {
+        status,
+        stdout,
+        stderr,
+        timed_out,
+    })
+}
+
+fn read_hook_pipe<R>(mut pipe: R) -> thread::JoinHandle<io::Result<Vec<u8>>>
+where
+    R: Read + Send + 'static,
+{
+    thread::spawn(move || {
+        let mut output = Vec::new();
+        pipe.read_to_end(&mut output)?;
+        Ok(output)
+    })
+}
+
+fn join_hook_pipe_reader(
+    hook: &Hook,
+    stream_name: &str,
+    reader: thread::JoinHandle<io::Result<Vec<u8>>>,
+) -> Result<Vec<u8>, String> {
+    reader
+        .join()
+        .map_err(|_| format!("hook {} {stream_name} reader panicked", hook.id))?
+        .map_err(|error| format!("hook {} failed reading {stream_name}: {error}", hook.id))
+}
+
+fn wait_for_child_timeout(child: &mut process::Child, timeout: Duration) -> io::Result<bool> {
+    let deadline = Instant::now() + timeout;
+
+    loop {
+        if child.try_wait()?.is_some() {
+            return Ok(false);
+        }
+
+        let now = Instant::now();
+        if now >= deadline {
+            return Ok(true);
+        }
+
+        thread::sleep((deadline - now).min(Duration::from_millis(20)));
+    }
+}
+
+fn terminate_hook_child(child: &mut process::Child) {
+    #[cfg(unix)]
+    {
+        let process_group = -(child.id() as libc::pid_t);
+        // Hooks run as their own process group so a timed-out shell does not
+        // leave child commands alive with inherited stdout/stderr pipes.
+        unsafe {
+            libc::kill(process_group, libc::SIGTERM);
+        }
+        thread::sleep(Duration::from_millis(100));
+        unsafe {
+            libc::kill(process_group, libc::SIGKILL);
+        }
+    }
+
+    #[cfg(not(unix))]
+    {
+        let _ = child.kill();
+    }
 }
 
 fn hook_query_matches(

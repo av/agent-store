@@ -199,7 +199,10 @@
   id: hxt
   command: bash tests/facts/cli_hooks.sh hook_failure_reports_details
   tags: [implemented]
-- Hooks run sequentially after the triggering mutation commits, from the project root, with a 30 second default timeout @draft
+- label: Matching Hooks run sequentially after the triggering mutation commits, with each Bash command started in the project root and interrupted after the default 30-second timeout
+  id: 4as
+  command: bash tests/facts/cli_hooks.sh hooks_run_sequentially_from_project_root_with_timeout
+  tags: [implemented]
 - Hook Bash commands receive AGENT_STORE_EVENT, AGENT_STORE_ID, AGENT_STORE_KIND, and AGENT_STORE_REL when applicable @draft
 - a Hook timeout or non-zero exit makes the triggering CLI command exit non-zero after reporting that the Store mutation already committed @draft
 - Hook stdout and stderr capture are capped at 8192 bytes each and the cap values are documented in command help @draft

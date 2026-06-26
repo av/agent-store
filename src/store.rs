@@ -159,6 +159,7 @@ pub struct HookRun {
 
 pub struct Store {
     conn: Connection,
+    project_root: PathBuf,
 }
 
 #[derive(Debug)]
@@ -256,19 +257,55 @@ impl From<serde_json::Error> for StoreError {
 
 pub type StoreResult<T> = Result<T, StoreError>;
 
+fn find_project_root(start: &Path) -> Option<PathBuf> {
+    start
+        .ancestors()
+        .find(|candidate| candidate.join(STORE_DIR).is_dir())
+        .map(Path::to_path_buf)
+}
+
 impl Store {
     pub fn open_project() -> StoreResult<Self> {
-        fs::create_dir_all(STORE_DIR)?;
-        Self::open(Path::new(STORE_DIR).join(STORE_DB_FILE))
+        let current_dir = std::env::current_dir()?;
+        let project_root = find_project_root(&current_dir).unwrap_or(current_dir);
+        fs::create_dir_all(project_root.join(STORE_DIR))?;
+        Self::open_at(project_root)
     }
 
+    #[cfg(test)]
     fn open(path: PathBuf) -> StoreResult<Self> {
+        let project_root = path
+            .parent()
+            .map(|db_dir| {
+                if db_dir.file_name().is_some_and(|name| name == STORE_DIR) {
+                    db_dir.parent().unwrap_or_else(|| Path::new("."))
+                } else {
+                    db_dir
+                }
+            })
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| PathBuf::from("."));
+        Self::open_db(path, project_root)
+    }
+
+    fn open_at(project_root: PathBuf) -> StoreResult<Self> {
+        Self::open_db(
+            project_root.join(STORE_DIR).join(STORE_DB_FILE),
+            project_root,
+        )
+    }
+
+    fn open_db(path: PathBuf, project_root: PathBuf) -> StoreResult<Self> {
         let mut conn = Connection::open(path)?;
         conn.busy_timeout(Duration::from_secs(5))?;
         conn.pragma_update(None, "foreign_keys", "ON")?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
         run_migrations(&mut conn)?;
-        Ok(Self { conn })
+        Ok(Self { conn, project_root })
+    }
+
+    pub fn project_root(&self) -> &Path {
+        &self.project_root
     }
 
     pub fn create_record(

@@ -406,8 +406,150 @@ assert rows == [
 PY
     ;;
 
+  hooks_run_sequentially_from_project_root_with_timeout)
+    cd "$tmp"
+    run_agent_store init >/tmp/agent-store-hook-runtime-4as-init.out
+
+    mkdir -p "$tmp/bin" "$tmp/subdir"
+    cat > "$tmp/bin/agent-store" <<SH
+#!/usr/bin/env bash
+exec "$target_dir/debug/agent-store" "\$@"
+SH
+    chmod +x "$tmp/bin/agent-store"
+    export PATH="$tmp/bin:$PATH"
+
+    cat > hook-sequence.sh <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+name="$1"
+root="$(pwd)"
+test -d .agent-store
+if test -e hook-running; then
+  printf "overlap:%s\n" "$name" >> hook-sequence.log
+fi
+touch hook-running
+printf "%s:start:%s\n" "$name" "$root" >> hook-sequence.log
+sleep 0.2
+printf "%s:end:%s\n" "$name" "$root" >> hook-sequence.log
+rm hook-running
+printf "%s" "$name"
+SH
+    chmod +x hook-sequence.sh
+
+    first_hook_id="$(run_agent_store hook add create title=Sequential -- './hook-sequence.sh first')"
+    second_hook_id="$(run_agent_store hook add create title=Sequential -- './hook-sequence.sh second')"
+
+    cd "$tmp/subdir"
+    sequential_record_id="$(run_agent_store create task title=Sequential)"
+    cd "$tmp"
+
+    test ! -e "$tmp/subdir/hook-sequence.log"
+    python3 - "$tmp" "$first_hook_id" "$second_hook_id" "$sequential_record_id" <<'PY'
+import pathlib
+import sqlite3
+import sys
+
+root, first_hook_id, second_hook_id, record_id = sys.argv[1:]
+root_path = pathlib.Path(root).resolve()
+lines = (root_path / "hook-sequence.log").read_text().splitlines()
+assert "overlap:first" not in lines, lines
+assert "overlap:second" not in lines, lines
+assert len(lines) == 4, lines
+
+for index in (0, 2):
+    start_name, start_marker, start_root = lines[index].split(":", 2)
+    end_name, end_marker, end_root = lines[index + 1].split(":", 2)
+    assert start_marker == "start", lines
+    assert end_marker == "end", lines
+    assert start_name == end_name, lines
+    assert pathlib.Path(start_root).resolve() == root_path, lines
+    assert pathlib.Path(end_root).resolve() == root_path, lines
+
+seen = {lines[0].split(":", 1)[0], lines[2].split(":", 1)[0]}
+assert seen == {"first", "second"}, lines
+
+con = sqlite3.connect(root_path / ".agent-store/store.sqlite")
+rows = con.execute(
+    """
+    select hook_id, event_type, record_id, exit_status, stdout_summary, stderr_summary
+    from hook_runs
+    order by id
+    """
+).fetchall()
+expected = {
+    (first_hook_id, "create", record_id, 0, "first", ""),
+    (second_hook_id, "create", record_id, 0, "second", ""),
+}
+assert set(rows) == expected, rows
+PY
+
+    timeout_hook_id="$(run_agent_store hook add create title=Timeout -- 'printf hook-timeout-stderr >&2; while :; do sleep 1; done')"
+
+    cd "$tmp/subdir"
+    started_at="$(python3 - <<'PY'
+import time
+print(time.monotonic())
+PY
+)"
+    set +e
+    timeout 40s "$target_dir/debug/agent-store" create task title=Timeout >/tmp/agent-store-hook-timeout-4as.out 2>/tmp/agent-store-hook-timeout-4as.err
+    timeout_status=$?
+    set -e
+    ended_at="$(python3 - <<'PY'
+import time
+print(time.monotonic())
+PY
+)"
+    cd "$tmp"
+
+    test "$timeout_status" -ne 0
+    test "$timeout_status" -ne 124
+    grep -Fq "timed out after 30 seconds" /tmp/agent-store-hook-timeout-4as.err
+
+    python3 - "$started_at" "$ended_at" ".agent-store/store.sqlite" "$timeout_hook_id" <<'PY'
+import sqlite3
+import sys
+
+started_at, ended_at, db, timeout_hook_id = sys.argv[1:]
+elapsed = float(ended_at) - float(started_at)
+assert 28 <= elapsed <= 38, elapsed
+
+con = sqlite3.connect(db)
+timeout_record = con.execute(
+    """
+    select records.id
+    from records
+    join record_fields on record_fields.record_id = records.id
+    where records.kind = 'task'
+      and record_fields.key = 'title'
+      and record_fields.raw_value = 'Timeout'
+    """
+).fetchone()
+assert timeout_record is not None
+record_id = timeout_record[0]
+rows = con.execute(
+    """
+    select hook_id, event_type, record_id, exit_status, stdout_summary, stderr_summary
+    from hook_runs
+    where hook_id = ?
+    order by id
+    """,
+    (timeout_hook_id,),
+).fetchall()
+assert len(rows) == 1, rows
+hook_id, event_type, run_record_id, exit_status, stdout_summary, stderr_summary = rows[0]
+assert hook_id == timeout_hook_id, rows
+assert event_type == "create", rows
+assert run_record_id == record_id, rows
+assert exit_status == -1, rows
+assert stdout_summary == "", rows
+assert "hook-timeout-stderr" in stderr_summary, rows
+assert "timed out after 30 seconds" in stderr_summary, rows
+PY
+    ;;
+
   *)
-    echo "usage: $0 {hook_add_stores_metadata|hook_ls_deterministic|hook_rm_deletes_metadata|hooks_run_after_commit|hook_query_filters_records|hook_query_uses_mutation_snapshot|hook_stdin_receives_record_snapshot|hook_failure_reports_details}" >&2
+    echo "usage: $0 {hook_add_stores_metadata|hook_ls_deterministic|hook_rm_deletes_metadata|hooks_run_after_commit|hook_query_filters_records|hook_query_uses_mutation_snapshot|hook_stdin_receives_record_snapshot|hook_failure_reports_details|hooks_run_sequentially_from_project_root_with_timeout}" >&2
     exit 2
     ;;
 esac
