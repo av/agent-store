@@ -159,7 +159,10 @@
   id: 0hn
   command: bash tests/facts/store_schema_migrations.sh persistence_open_errors_actionable
   tags: [implemented]
-- Record storage supports querying arbitrary Field values without requiring a Rust code change for each new field name @draft
+- label: agent-store find matches Field values for field names first introduced by create or set, without predeclaring those field names
+  id: 41k
+  command: bash tests/facts/cli_records.sh arbitrary_field_queries
+  tags: [implemented]
 
 ## schema
 - label: the initial SQLite schema stores Records, Fields, Links, Store Events, Hooks, Hook Runs, and schema migrations in separate normalized tables

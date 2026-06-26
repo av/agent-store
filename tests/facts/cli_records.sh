@@ -208,6 +208,30 @@ PY
     grep -Fq "find requires a query" /tmp/agent-store-find-m2b-empty.err
     ;;
 
+  arbitrary_field_queries)
+    cd "$tmp"
+    run_agent_store init >/tmp/agent-store-find-41k-init.out
+    first="$(run_agent_store create artifact title=Alpha custom_41k=blue)"
+    second="$(run_agent_store create artifact title=Beta other_41k=blue)"
+    run_agent_store create note title=Gamma custom_41k=red >/tmp/agent-store-find-41k-note.out
+
+    first_line="$first artifact custom_41k=blue title=Alpha"
+    got="$(run_agent_store find custom_41k=blue)"
+    test "$got" = "$first_line"
+
+    out="$(run_agent_store set "$second" later_41k=green score_41k=42)"
+    test "$out" = "Updated $second"
+    second_line="$second artifact later_41k=green other_41k=blue score_41k=42 title=Beta"
+
+    got="$(run_agent_store find later_41k=green)"
+    test "$got" = "$second_line"
+
+    got="$(run_agent_store find 'score_41k>40')"
+    test "$got" = "$second_line"
+
+    test -z "$(run_agent_store find missing_41k=green)"
+    ;;
+
   query_boolean_syntax)
     cd "$tmp"
     run_agent_store init >/tmp/agent-store-query-s5i-init.out
@@ -571,7 +595,7 @@ PY
     ;;
 
   *)
-    echo "usage: $0 {create_alias_matches_create|find_alias_matches_find|set_updates_fields|unset_removes_fields|find_filters_records|query_boolean_syntax|query_argument_parity|query_typed_values|field_empty_null_unset_semantics|record_id_generation_contract|record_id_resolution_errors|json_output}" >&2
+    echo "usage: $0 {create_alias_matches_create|find_alias_matches_find|set_updates_fields|unset_removes_fields|find_filters_records|arbitrary_field_queries|query_boolean_syntax|query_argument_parity|query_typed_values|field_empty_null_unset_semantics|record_id_generation_contract|record_id_resolution_errors|json_output}" >&2
     exit 2
     ;;
 esac
