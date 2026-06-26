@@ -20,6 +20,7 @@ const INSTRUCTION_FILES: &[&str] = &["AGENTS.md", "CLAUDE.md"];
 const INSTRUCTIONS_START: &str = "<!-- agent-store:start -->";
 const DEFAULT_HOOK_TIMEOUT: Duration = Duration::from_secs(30);
 const HOOK_TIMEOUT_EXIT_STATUS: i32 = -1;
+const HOOK_OUTPUT_CAPTURE_LIMIT_BYTES: usize = 8192;
 const HOOK_ENV_KEYS: &[&str] = &[
     "AGENT_STORE_EVENT",
     "AGENT_STORE_ID",
@@ -165,6 +166,8 @@ Commands:
   unlink        Remove a directional link between records
   links         Print incoming and outgoing links for a record
   hook          Manage stored hooks
+
+Hook stdout and stderr captures are capped at 8192 bytes each.
 ";
 
 fn main() {
@@ -775,7 +778,18 @@ where
 {
     thread::spawn(move || {
         let mut output = Vec::new();
-        pipe.read_to_end(&mut output)?;
+        let mut buffer = [0_u8; 4096];
+        loop {
+            let read = pipe.read(&mut buffer)?;
+            if read == 0 {
+                break;
+            }
+
+            let remaining = HOOK_OUTPUT_CAPTURE_LIMIT_BYTES.saturating_sub(output.len());
+            if remaining > 0 {
+                output.extend_from_slice(&buffer[..read.min(remaining)]);
+            }
+        }
         Ok(output)
     })
 }

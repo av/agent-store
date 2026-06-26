@@ -697,8 +697,45 @@ assert rows == [
 PY
     ;;
 
+  hook_output_capture_caps_and_help)
+    cd "$tmp"
+    run_agent_store --help >/tmp/agent-store-hook-caps-lc1-help.out
+    grep -Fq "Hook stdout and stderr captures are capped at 8192 bytes each." /tmp/agent-store-hook-caps-lc1-help.out
+
+    run_agent_store init >/tmp/agent-store-hook-caps-lc1-init.out
+
+    cat > verbose-hook.py <<'PY'
+import sys
+
+sys.stdout.write("O" * 9000)
+sys.stderr.write("E" * 9000)
+PY
+
+    hook_id="$(run_agent_store hook add create -- 'python3 verbose-hook.py')"
+    record_id="$(run_agent_store create task title=Verbose)"
+    printf "%s\n" "$record_id" | grep -Eq "^[a-z0-9]{6,8}$"
+
+    python3 - .agent-store/store.sqlite "$hook_id" "$record_id" <<'PY'
+import sqlite3
+import sys
+
+db, hook_id, record_id = sys.argv[1:]
+con = sqlite3.connect(db)
+rows = con.execute(
+    """
+    select hook_id, event_type, record_id, exit_status, stdout_summary, stderr_summary
+    from hook_runs
+    order by id
+    """
+).fetchall()
+assert rows == [
+    (hook_id, "create", record_id, 0, "O" * 8192, "E" * 8192),
+], (len(rows[0][4]) if rows else None, len(rows[0][5]) if rows else None, rows[:1])
+PY
+    ;;
+
   *)
-    echo "usage: $0 {hook_add_stores_metadata|hook_ls_deterministic|hook_rm_deletes_metadata|hooks_run_after_commit|hook_query_filters_records|hook_query_uses_mutation_snapshot|hook_stdin_receives_record_snapshot|hook_failure_reports_details|hook_failure_or_timeout_reports_committed_mutation|hooks_run_sequentially_from_project_root_with_timeout|hook_env_vars_for_record_events}" >&2
+    echo "usage: $0 {hook_add_stores_metadata|hook_ls_deterministic|hook_rm_deletes_metadata|hooks_run_after_commit|hook_query_filters_records|hook_query_uses_mutation_snapshot|hook_stdin_receives_record_snapshot|hook_failure_reports_details|hook_failure_or_timeout_reports_committed_mutation|hooks_run_sequentially_from_project_root_with_timeout|hook_env_vars_for_record_events|hook_output_capture_caps_and_help}" >&2
     exit 2
     ;;
 esac
