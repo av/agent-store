@@ -214,8 +214,14 @@
 - label: Hook stdout and stderr capture are capped at 8192 bytes each and the cap values are documented in command help
   command: bash tests/facts/cli_hooks.sh hook_output_capture_caps_and_help
   tags: [implemented]
-- link and unlink Hooks evaluate their Query against the source Record and expose the relation and target Record ID through environment variables @draft
-- Hook Bash commands receive AGENT_STORE_TARGET_ID for link and unlink events @draft
+- label: link and unlink Hooks evaluate their Query against the source Record and receive AGENT_STORE_REL matching the Link relation
+  id: pxx
+  command: bash tests/facts/cli_hooks.sh link_hook_query_source_and_relation_env
+  tags: [implemented]
+- label: Hook Bash commands for link and unlink receive AGENT_STORE_TARGET_ID matching the target Record ID
+  id: grk
+  command: bash tests/facts/cli_hooks.sh link_hook_query_source_and_relation_env
+  tags: [implemented]
 
 # context
 - Quick Context output includes total Record count, counts by kind, Hook count, and the most recent Store activity timestamp when available @draft

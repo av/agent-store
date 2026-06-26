@@ -697,6 +697,70 @@ assert rows == [
 PY
     ;;
 
+  link_hook_query_source_and_relation_env)
+    cd "$tmp"
+    run_agent_store init >/tmp/agent-store-hook-link-env-pxx-init.out
+
+    cat > link-hook-env.sh <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+label="$1"
+printf "%s:%s:%s:%s:%s:%s\n" "$label" "$AGENT_STORE_EVENT" "$AGENT_STORE_ID" "$AGENT_STORE_KIND" "$AGENT_STORE_REL" "$AGENT_STORE_TARGET_ID" >> link-hook-env.log
+printf "%s" "$label"
+SH
+    chmod +x link-hook-env.sh
+
+    source_id="$(run_agent_store create task title=Source status=open)"
+    target_id="$(run_agent_store create note title=Target status=open)"
+
+    link_hook_id="$(run_agent_store hook add link 'kind=task and status=open' -- './link-hook-env.sh link')"
+    link_skip_id="$(run_agent_store hook add link 'kind=note' -- './link-hook-env.sh link-skip')"
+    unlink_hook_id="$(run_agent_store hook add unlink 'kind=task and status=open' -- './link-hook-env.sh unlink')"
+    unlink_skip_id="$(run_agent_store hook add unlink 'kind=note' -- './link-hook-env.sh unlink-skip')"
+
+    run_agent_store link "$source_id" blocks "$target_id" >/tmp/agent-store-hook-link-env-pxx-link.out
+    run_agent_store unlink "$source_id" blocks "$target_id" >/tmp/agent-store-hook-link-env-pxx-unlink.out
+
+    expected_log="$(
+      printf "link:link:%s:task:blocks:%s\n" "$source_id" "$target_id"
+      printf "unlink:unlink:%s:task:blocks:%s\n" "$source_id" "$target_id"
+    )"
+    test "$(cat link-hook-env.log)" = "$expected_log"
+
+    python3 - .agent-store/store.sqlite \
+      "$link_hook_id" \
+      "$link_skip_id" \
+      "$unlink_hook_id" \
+      "$unlink_skip_id" \
+      "$source_id" <<'PY'
+import sqlite3
+import sys
+
+(
+    db,
+    link_hook_id,
+    link_skip_id,
+    unlink_hook_id,
+    unlink_skip_id,
+    source_id,
+) = sys.argv[1:]
+con = sqlite3.connect(db)
+rows = con.execute(
+    """
+    select hook_id, event_type, record_id, exit_status, stdout_summary, stderr_summary
+    from hook_runs
+    order by id
+    """
+).fetchall()
+assert rows == [
+    (link_hook_id, "link", source_id, 0, "link", ""),
+    (unlink_hook_id, "unlink", source_id, 0, "unlink", ""),
+], rows
+skipped = {link_skip_id, unlink_skip_id}
+assert not any(row[0] in skipped for row in rows), rows
+PY
+    ;;
+
   hook_output_capture_caps_and_help)
     cd "$tmp"
     run_agent_store --help >/tmp/agent-store-hook-caps-lc1-help.out
@@ -735,7 +799,7 @@ PY
     ;;
 
   *)
-    echo "usage: $0 {hook_add_stores_metadata|hook_ls_deterministic|hook_rm_deletes_metadata|hooks_run_after_commit|hook_query_filters_records|hook_query_uses_mutation_snapshot|hook_stdin_receives_record_snapshot|hook_failure_reports_details|hook_failure_or_timeout_reports_committed_mutation|hooks_run_sequentially_from_project_root_with_timeout|hook_env_vars_for_record_events|hook_output_capture_caps_and_help}" >&2
+    echo "usage: $0 {hook_add_stores_metadata|hook_ls_deterministic|hook_rm_deletes_metadata|hooks_run_after_commit|hook_query_filters_records|hook_query_uses_mutation_snapshot|hook_stdin_receives_record_snapshot|hook_failure_reports_details|hook_failure_or_timeout_reports_committed_mutation|hooks_run_sequentially_from_project_root_with_timeout|hook_env_vars_for_record_events|link_hook_query_source_and_relation_env|hook_output_capture_caps_and_help}" >&2
     exit 2
     ;;
 esac

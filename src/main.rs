@@ -395,7 +395,7 @@ fn main() {
             match store.link_records(&from, &rel, &to) {
                 Ok(link) => {
                     let source = record_for_link_hook_or_exit(&store, "link", &link);
-                    run_hooks_or_exit(&mut store, "link", &source);
+                    run_link_hooks_or_exit(&mut store, "link", &source, &link);
                     if json_output {
                         print_json(link_mutation_json("linked", &link));
                     } else {
@@ -424,7 +424,7 @@ fn main() {
             match store.unlink_records(&from, &rel, &to) {
                 Ok(link) => {
                     let source = record_for_link_hook_or_exit(&store, "unlink", &link);
-                    run_hooks_or_exit(&mut store, "unlink", &source);
+                    run_link_hooks_or_exit(&mut store, "unlink", &source, &link);
                     if json_output {
                         print_json(link_mutation_json("unlinked", &link));
                     } else {
@@ -602,7 +602,17 @@ fn record_for_link_hook_or_exit(store: &Store, event_type: &str, link: &Link) ->
 }
 
 fn run_hooks_or_exit(store: &mut Store, event_type: &str, record: &Record) {
-    if let Err(error) = run_matching_hooks_after_commit(store, event_type, record) {
+    if let Err(error) = run_matching_hooks_after_commit(store, event_type, record, None) {
+        eprintln!(
+            "error: failed to run hooks after Store mutation already committed for {event_type} {}: {error}",
+            record.id
+        );
+        process::exit(1);
+    }
+}
+
+fn run_link_hooks_or_exit(store: &mut Store, event_type: &str, record: &Record, link: &Link) {
+    if let Err(error) = run_matching_hooks_after_commit(store, event_type, record, Some(link)) {
         eprintln!(
             "error: failed to run hooks after Store mutation already committed for {event_type} {}: {error}",
             record.id
@@ -615,6 +625,7 @@ fn run_matching_hooks_after_commit(
     store: &mut Store,
     event_type: &str,
     record: &Record,
+    link: Option<&Link>,
 ) -> Result<(), String> {
     let project_root = store.project_root().to_path_buf();
     let hooks = store
@@ -627,7 +638,7 @@ fn run_matching_hooks_after_commit(
         }
 
         let stdin_payload = format!("{}\n", format_record(record));
-        let env_vars = hook_env_vars(event_type, record);
+        let env_vars = hook_env_vars(event_type, record, link);
         let output = run_hook_command(
             &hook,
             &stdin_payload,
@@ -764,12 +775,21 @@ fn run_hook_command(
     })
 }
 
-fn hook_env_vars(event_type: &str, record: &Record) -> [(&'static str, String); 3] {
-    [
+fn hook_env_vars(
+    event_type: &str,
+    record: &Record,
+    link: Option<&Link>,
+) -> Vec<(&'static str, String)> {
+    let mut env_vars = vec![
         ("AGENT_STORE_EVENT", event_type.to_owned()),
         ("AGENT_STORE_ID", record.id.clone()),
         ("AGENT_STORE_KIND", record.kind.clone()),
-    ]
+    ];
+    if let Some(link) = link {
+        env_vars.push(("AGENT_STORE_REL", link.rel.clone()));
+        env_vars.push(("AGENT_STORE_TARGET_ID", link.to_record_id.clone()));
+    }
+    env_vars
 }
 
 fn read_hook_pipe<R>(mut pipe: R) -> thread::JoinHandle<io::Result<Vec<u8>>>
