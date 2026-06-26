@@ -1109,6 +1109,24 @@ fn format_quick_context(summary: &QuickContextSummary) -> String {
             } else {
                 lines.push(format!("    fields: {}", fields.join(", ")));
             }
+
+            if let Some(status_counts) = summary.status_counts_by_kind.get(kind) {
+                if !status_counts.is_empty() {
+                    lines.push(format!(
+                        "    status: {}",
+                        format_status_counts(status_counts)
+                    ));
+                }
+            }
+
+            if let Some(date_windows) = summary.date_windows_by_kind.get(kind) {
+                for (field, window) in date_windows {
+                    lines.push(format!(
+                        "    {field}: {}..{}",
+                        window.earliest, window.latest
+                    ));
+                }
+            }
         }
     }
 
@@ -1118,6 +1136,14 @@ fn format_quick_context(summary: &QuickContextSummary) -> String {
         summary.latest_activity_at.as_deref().unwrap_or("none")
     ));
     cap_quick_context_output(lines.join("\n"))
+}
+
+fn format_status_counts(status_counts: &BTreeMap<String, i64>) -> String {
+    status_counts
+        .iter()
+        .map(|(status, count)| format!("{}={count}", shell_quote_value(status)))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn cap_quick_context_output(mut output: String) -> String {
@@ -1313,16 +1339,30 @@ mod tests {
                 ("note".to_owned(), vec!["title".to_owned()]),
                 (
                     "task".to_owned(),
-                    vec!["status".to_owned(), "title".to_owned()],
+                    vec!["due".to_owned(), "status".to_owned(), "title".to_owned()],
                 ),
             ]),
+            status_counts_by_kind: BTreeMap::from([(
+                "task".to_owned(),
+                BTreeMap::from([("open".to_owned(), 2)]),
+            )]),
+            date_windows_by_kind: BTreeMap::from([(
+                "task".to_owned(),
+                BTreeMap::from([(
+                    "due".to_owned(),
+                    agent_store::store::DateWindow {
+                        earliest: "2026-06-26".to_owned(),
+                        latest: "2026-06-30".to_owned(),
+                    },
+                )]),
+            )]),
             hook_count: 1,
             latest_activity_at: Some("2026-06-26T12:34:56.789Z".to_owned()),
         };
 
         assert_eq!(
             format_quick_context(&summary),
-            "Quick Context\nRecords: 3\nRecord kinds:\n  note: 1\n    fields: title\n  task: 2\n    fields: status, title\nHooks: 1\nLatest activity: 2026-06-26T12:34:56.789Z"
+            "Quick Context\nRecords: 3\nRecord kinds:\n  note: 1\n    fields: title\n  task: 2\n    fields: due, status, title\n    status: open=2\n    due: 2026-06-26..2026-06-30\nHooks: 1\nLatest activity: 2026-06-26T12:34:56.789Z"
         );
     }
 
@@ -1335,6 +1375,8 @@ mod tests {
                 "large".to_owned(),
                 (0..2000).map(|index| format!("field_{index:04}")).collect(),
             )]),
+            status_counts_by_kind: BTreeMap::new(),
+            date_windows_by_kind: BTreeMap::new(),
             hook_count: 0,
             latest_activity_at: None,
         };

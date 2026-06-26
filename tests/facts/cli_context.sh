@@ -39,8 +39,10 @@ Records: 3
 Record kinds:
   note: 1
     fields: status, title
+    status: open=1
   task: 2
     fields: status, title
+    status: done=1, open=1
 Hooks: 1
 Latest activity: $latest"
     got="$(run_agent_store ctx)"
@@ -104,7 +106,7 @@ Latest activity: none"
   ctx_fields_by_kind)
     cd "$tmp"
     run_agent_store init >/tmp/agent-store-ctx-261-init.out
-    run_agent_store create task title=Write status=open due=2026-06-30 task_only=yes >/tmp/agent-store-ctx-261-task-1.out
+    run_agent_store create task title=Write phase=open deadline=2026-06-30 task_only=yes >/tmp/agent-store-ctx-261-task-1.out
     run_agent_store create task title=Ship priority=high >/tmp/agent-store-ctx-261-task-2.out
     run_agent_store create note title=Plan topic=agents note_only=yes >/tmp/agent-store-ctx-261-note.out
 
@@ -115,7 +117,7 @@ Record kinds:
   note: 1
     fields: note_only, title, topic
   task: 2
-    fields: due, priority, status, task_only, title
+    fields: deadline, phase, priority, task_only, title
 Hooks: 0
 Latest activity: $latest"
     got="$(run_agent_store ctx)"
@@ -124,6 +126,34 @@ Latest activity: $latest"
     case "$got" in
       *"Fields:"*|*"Write"*|*"open"*|*"2026-06-30"*|*"agents"*|*"high"*|*"yes"*) exit 1 ;;
     esac
+    ;;
+
+  ctx_status_date_summaries)
+    cd "$tmp"
+    run_agent_store init >/tmp/agent-store-ctx-iln-init.out
+    run_agent_store create task title=Plan status=open due=2026-07-15 start=2026-06-01 >/tmp/agent-store-ctx-iln-task-1.out
+    run_agent_store create task title=Build status=open due=2026-06-28 start=2026-06-03T09:30:00Z >/tmp/agent-store-ctx-iln-task-2.out
+    run_agent_store create task title=Ship status=done due=2026-07-01 >/tmp/agent-store-ctx-iln-task-3.out
+    run_agent_store create bug title=Fix status=open due=2026-07-10 >/tmp/agent-store-ctx-iln-bug-1.out
+    run_agent_store create bug title=Triage status=open due=2026-06-29 >/tmp/agent-store-ctx-iln-bug-2.out
+
+    latest="$(latest_activity)"
+    expected="Quick Context
+Records: 5
+Record kinds:
+  bug: 2
+    fields: due, status, title
+    status: open=2
+    due: 2026-06-29..2026-07-10
+  task: 3
+    fields: due, start, status, title
+    status: done=1, open=2
+    due: 2026-06-28..2026-07-15
+    start: 2026-06-01..2026-06-03T09:30:00Z
+Hooks: 0
+Latest activity: $latest"
+    got="$(run_agent_store ctx)"
+    test "$got" = "$expected"
     ;;
 
   ctx_output_byte_limit)

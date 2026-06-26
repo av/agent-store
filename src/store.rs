@@ -162,8 +162,16 @@ pub struct QuickContextSummary {
     pub record_count: i64,
     pub records_by_kind: BTreeMap<String, i64>,
     pub fields_by_kind: BTreeMap<String, Vec<String>>,
+    pub status_counts_by_kind: BTreeMap<String, BTreeMap<String, i64>>,
+    pub date_windows_by_kind: BTreeMap<String, BTreeMap<String, DateWindow>>,
     pub hook_count: i64,
     pub latest_activity_at: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DateWindow {
+    pub earliest: String,
+    pub latest: String,
 }
 
 pub struct Store {
@@ -417,6 +425,62 @@ impl Store {
             fields_by_kind.entry(kind).or_default().push(field_name);
         }
 
+        let mut status_counts_by_kind = BTreeMap::new();
+        let mut stmt = self.conn.prepare(
+            r#"
+            SELECT records.kind, record_fields.raw_value, COUNT(*)
+            FROM records
+            JOIN record_fields ON record_fields.record_id = records.id
+            WHERE record_fields.key = 'status'
+            GROUP BY records.kind, record_fields.raw_value
+            ORDER BY records.kind, record_fields.raw_value
+            "#,
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+            ))
+        })?;
+        for row in rows {
+            let (kind, status, count) = row?;
+            status_counts_by_kind
+                .entry(kind)
+                .or_insert_with(BTreeMap::new)
+                .insert(status, count);
+        }
+
+        let mut date_windows_by_kind = BTreeMap::new();
+        let mut stmt = self.conn.prepare(
+            r#"
+            SELECT records.kind, record_fields.key, MIN(record_fields.timestamp_value), MAX(record_fields.timestamp_value)
+            FROM records
+            JOIN record_fields ON record_fields.record_id = records.id
+            WHERE record_fields.key IN ('due', 'start')
+              AND record_fields.timestamp_value IS NOT NULL
+            GROUP BY records.kind, record_fields.key
+            ORDER BY records.kind, record_fields.key
+            "#,
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                DateWindow {
+                    earliest: row.get(2)?,
+                    latest: row.get(3)?,
+                },
+            ))
+        })?;
+        for row in rows {
+            let (kind, field, window) = row?;
+            date_windows_by_kind
+                .entry(kind)
+                .or_insert_with(BTreeMap::new)
+                .insert(field, window);
+        }
+
         let hook_count = self
             .conn
             .query_row("SELECT COUNT(*) FROM hooks", [], |row| row.get(0))?;
@@ -433,6 +497,8 @@ impl Store {
             record_count,
             records_by_kind,
             fields_by_kind,
+            status_counts_by_kind,
+            date_windows_by_kind,
             hook_count,
             latest_activity_at,
         })
