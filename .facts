@@ -198,7 +198,10 @@
   tags: [implemented]
 
 # architecture
-- the crate exposes a narrow persistence interface so command behavior can be tested without depending on sqlite file layout @draft
+- label: callers can open a Store for a chosen project root and exercise record, query, link, and Quick Context behavior through Store and Query APIs without naming the SQLite database path or schema tables
+  id: 5xe
+  command: CARGO_TARGET_DIR=target/facts-5xe cargo test --test persistence_interface persistence_interface_allows_behavior_tests_without_sqlite_layout
+  tags: [implemented]
 
 # decisions
 

@@ -320,6 +320,11 @@ impl Store {
     pub fn open_project() -> StoreResult<Self> {
         let current_dir = std::env::current_dir()?;
         let project_root = find_project_root(&current_dir).unwrap_or(current_dir);
+        Self::open_project_root(project_root)
+    }
+
+    pub fn open_project_root(project_root: impl AsRef<Path>) -> StoreResult<Self> {
+        let project_root = project_root.as_ref().to_path_buf();
         let store_dir = project_root.join(STORE_DIR);
         fs::create_dir_all(&store_dir).map_err(|source| StoreError::StoreDirectory {
             path: store_dir,
