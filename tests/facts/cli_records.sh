@@ -12,6 +12,51 @@ run_agent_store() {
 }
 
 case "$case_name" in
+  create_alias_matches_create)
+    cd "$tmp"
+    run_agent_store init >/tmp/agent-store-cr-ee0-init.out
+    id="$(run_agent_store cr task title=Write status=open)"
+    printf "%s\n" "$id" | grep -Eq "^[a-z0-9]{6,8}$"
+    got="$(run_agent_store get "$id")"
+    test "$got" = "$id task status=open title=Write"
+
+    set +e
+    run_agent_store create >/tmp/agent-store-cr-ee0-create.out 2>/tmp/agent-store-cr-ee0-create.err
+    create_status=$?
+    run_agent_store cr >/tmp/agent-store-cr-ee0-cr.out 2>/tmp/agent-store-cr-ee0-cr.err
+    cr_status=$?
+    set -e
+    test "$create_status" -ne 0
+    test "$cr_status" -eq "$create_status"
+    cmp -s /tmp/agent-store-cr-ee0-create.out /tmp/agent-store-cr-ee0-cr.out
+    cmp -s /tmp/agent-store-cr-ee0-create.err /tmp/agent-store-cr-ee0-cr.err
+    ;;
+
+  find_alias_matches_find)
+    cd "$tmp"
+    run_agent_store init >/tmp/agent-store-ls-8id-init.out
+    open_task="$(run_agent_store create task title=Write status=open priority=high)"
+    run_agent_store create task title=Ship status=done priority=low >/tmp/agent-store-ls-8id-done.out
+    run_agent_store create note title=Write status=open priority=high >/tmp/agent-store-ls-8id-note.out
+
+    expected="$open_task task priority=high status=open title=Write"
+    find_out="$(run_agent_store find 'kind=task and status=open')"
+    test "$find_out" = "$expected"
+    ls_out="$(run_agent_store ls kind=task and status=open)"
+    test "$ls_out" = "$find_out"
+
+    set +e
+    run_agent_store find >/tmp/agent-store-ls-8id-find.out 2>/tmp/agent-store-ls-8id-find.err
+    find_status=$?
+    run_agent_store ls >/tmp/agent-store-ls-8id-ls.out 2>/tmp/agent-store-ls-8id-ls.err
+    ls_status=$?
+    set -e
+    test "$find_status" -ne 0
+    test "$ls_status" -eq "$find_status"
+    cmp -s /tmp/agent-store-ls-8id-find.out /tmp/agent-store-ls-8id-ls.out
+    cmp -s /tmp/agent-store-ls-8id-find.err /tmp/agent-store-ls-8id-ls.err
+    ;;
+
   set_updates_fields)
     cd "$tmp"
     run_agent_store init >/tmp/agent-store-set-1b1-init.out
@@ -284,7 +329,7 @@ PY
     ;;
 
   *)
-    echo "usage: $0 {set_updates_fields|unset_removes_fields|find_filters_records|query_boolean_syntax|query_argument_parity|query_typed_values|field_empty_null_unset_semantics}" >&2
+    echo "usage: $0 {create_alias_matches_create|find_alias_matches_find|set_updates_fields|unset_removes_fields|find_filters_records|query_boolean_syntax|query_argument_parity|query_typed_values|field_empty_null_unset_semantics}" >&2
     exit 2
     ;;
 esac

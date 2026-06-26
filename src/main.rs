@@ -144,8 +144,8 @@ Options:
 
 Commands:
   init          Initialize a project-local store
-  create        Create a record
-  find          Find records by query
+  create, cr    Create a record
+  find, ls      Find records by query
   get           Print a record by ID
   set           Update fields on a record by ID
   unset         Remove fields from a record by ID
@@ -175,7 +175,7 @@ fn main() {
 
             println!("Initialized {STORE_DIR}/");
         }
-        Some("create") => {
+        Some("create") | Some("cr") => {
             let Some(kind) = args.next() else {
                 eprintln!("error: create requires a kind");
                 process::exit(2);
@@ -217,7 +217,7 @@ fn main() {
                 }
             }
         }
-        Some("find") => {
+        Some("find") | Some("ls") => {
             let query_text = args.collect::<Vec<_>>().join(" ");
             if query_text.trim().is_empty() {
                 eprintln!("error: find requires a query");

@@ -59,8 +59,12 @@
   tags: [implemented]
 
 ## aliases
-- agent-store cr is a short alias for create with identical arguments, behavior, and output @draft
-- agent-store ls is a short alias for find with identical query behavior and output @draft
+- label: agent-store cr is a short alias for create with identical arguments, behavior, and output
+  command: bash tests/facts/cli_records.sh create_alias_matches_create
+  tags: [implemented]
+- label: agent-store ls is a short alias for find with identical query behavior and output
+  command: bash tests/facts/cli_records.sh find_alias_matches_find
+  tags: [implemented]
 
 ## hooks
 - agent-store hook add <event> [<Query>] -- <bash command> creates a Hook and prints the Hook ID @draft
