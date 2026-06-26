@@ -10,7 +10,7 @@ use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 use std::path::Path;
 use std::process;
-use store::{Link, LinkEdge, Record, Store, STORE_DIR};
+use store::{Hook, Link, LinkEdge, Record, Store, STORE_DIR};
 
 const GITIGNORE_PATH: &str = ".gitignore";
 const GITIGNORE_RULE: &str = ".agent-store/";
@@ -155,6 +155,7 @@ Commands:
   link          Create a directional link between records
   unlink        Remove a directional link between records
   links         Print incoming and outgoing links for a record
+  hook          Manage stored hooks
 ";
 
 fn main() {
@@ -454,6 +455,76 @@ fn main() {
                 }
             }
         }
+        Some("hook") => match args.next().as_deref() {
+            Some("add") => {
+                let (event, query, command) = match parse_hook_add_args(args) {
+                    Ok(parsed) => parsed,
+                    Err(error) => {
+                        eprintln!("error: {error}");
+                        process::exit(2);
+                    }
+                };
+
+                let mut store = open_store_or_exit();
+                match store.add_hook(&event, query, &command) {
+                    Ok(hook) => {
+                        println!("{}", hook.id);
+                    }
+                    Err(error) => {
+                        eprintln!("error: failed to add hook: {error}");
+                        process::exit(1);
+                    }
+                }
+            }
+            Some("ls") => {
+                if let Some(extra) = args.next() {
+                    eprintln!("error: hook ls does not accept argument '{extra}'");
+                    process::exit(2);
+                }
+
+                let store = open_store_or_exit();
+                match store.list_hooks() {
+                    Ok(hooks) => {
+                        for hook in hooks {
+                            println!("{}", format_hook(&hook));
+                        }
+                    }
+                    Err(error) => {
+                        eprintln!("error: failed to list hooks: {error}");
+                        process::exit(1);
+                    }
+                }
+            }
+            Some("rm") => {
+                let Some(id) = args.next() else {
+                    eprintln!("error: hook rm requires a hook ID");
+                    process::exit(2);
+                };
+                if let Some(extra) = args.next() {
+                    eprintln!("error: hook rm does not accept argument '{extra}'");
+                    process::exit(2);
+                }
+
+                let mut store = open_store_or_exit();
+                match store.delete_hook(&id) {
+                    Ok(hook) => {
+                        println!("Removed {}", hook.id);
+                    }
+                    Err(error) => {
+                        eprintln!("error: failed to remove hook: {error}");
+                        process::exit(1);
+                    }
+                }
+            }
+            Some(command) => {
+                eprintln!("error: unrecognized hook command '{command}'");
+                process::exit(2);
+            }
+            None => {
+                eprintln!("error: hook requires add, ls, or rm");
+                process::exit(2);
+            }
+        },
         Some(command) => {
             eprintln!("error: unrecognized command '{command}'");
             eprintln!();
@@ -556,6 +627,38 @@ fn parse_link_args(
     Ok((from, rel, to))
 }
 
+fn parse_hook_add_args(
+    args: impl Iterator<Item = String>,
+) -> Result<(String, Option<String>, String), String> {
+    let args = args.collect::<Vec<_>>();
+    let Some(separator) = args.iter().position(|arg| arg == "--") else {
+        return Err("hook add requires <event> [<Query>] -- <bash command>".to_owned());
+    };
+
+    let before_separator = &args[..separator];
+    let after_separator = &args[separator + 1..];
+    let Some(event) = before_separator.first() else {
+        return Err("hook add requires an event before --".to_owned());
+    };
+    if after_separator.is_empty() {
+        return Err("hook add requires a bash command after --".to_owned());
+    }
+
+    let query = if before_separator.len() > 1 {
+        let query_text = before_separator[1..].join(" ");
+        Query::parse(&query_text).map_err(|error| format!("invalid hook query: {error}"))?;
+        Some(query_text)
+    } else {
+        None
+    };
+    let command = after_separator.join(" ");
+    if command.trim().is_empty() {
+        return Err("hook add requires a non-empty bash command after --".to_owned());
+    }
+
+    Ok((event.clone(), query, command))
+}
+
 fn print_json(value: Value) {
     println!("{value}");
 }
@@ -615,6 +718,17 @@ fn link_edge_json(link: &LinkEdge) -> Value {
         "rel": &link.rel,
         "record_id": &link.peer_record_id,
     })
+}
+
+fn format_hook(hook: &Hook) -> String {
+    let mut output = format!("{} {}", hook.id, hook.event);
+    if let Some(query) = &hook.query {
+        output.push_str(" query=");
+        output.push_str(&shell_quote_value(query));
+    }
+    output.push_str(" -- ");
+    output.push_str(&shell_quote_value(&hook.command));
+    output
 }
 
 fn format_record(record: &Record) -> String {

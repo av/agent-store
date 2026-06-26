@@ -1,0 +1,132 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+case_name="${1:-}"
+repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+target_dir="$repo/target/facts-cli-hooks-$case_name"
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+
+run_agent_store() {
+  CARGO_TARGET_DIR="$target_dir" cargo run --quiet --manifest-path "$repo/Cargo.toml" -- "$@"
+}
+
+unique_prefix_for() {
+  local first="$1"
+  local second="$2"
+  local length
+
+  for length in 1 2 3 4 5 6; do
+    local prefix
+    prefix="$(printf "%s" "$first" | cut -c1-"$length")"
+    case "$second" in
+      "$prefix"*) ;;
+      *)
+        printf "%s" "$prefix"
+        return 0
+        ;;
+    esac
+  done
+
+  printf "%s" "$first"
+}
+
+case "$case_name" in
+  hook_add_stores_metadata)
+    cd "$tmp"
+    run_agent_store init >/tmp/agent-store-hook-add-1me-init.out
+
+    id="$(run_agent_store hook add create 'kind=task and status=open' -- echo created)"
+    no_query_id="$(run_agent_store hook add rm -- echo removed)"
+    printf "%s\n" "$id" | grep -Eq "^[a-z0-9]{6,8}$"
+    printf "%s\n" "$no_query_id" | grep -Eq "^[a-z0-9]{6,8}$"
+
+    python3 - .agent-store/store.sqlite "$id" "$no_query_id" <<'PY'
+import sqlite3
+import sys
+
+db, with_query_id, no_query_id = sys.argv[1:]
+con = sqlite3.connect(db)
+rows = {
+    row[0]: row[1:]
+    for row in con.execute(
+        """
+        select id, event, query, command, created_at
+        from hooks
+        order by id
+        """
+    )
+}
+assert set(rows) == {with_query_id, no_query_id}, rows
+assert rows[with_query_id][:3] == (
+    "create",
+    "kind=task and status=open",
+    "echo created",
+), rows[with_query_id]
+assert rows[with_query_id][3], rows[with_query_id]
+assert rows[no_query_id][:3] == ("rm", None, "echo removed"), rows[no_query_id]
+assert rows[no_query_id][3], rows[no_query_id]
+PY
+
+    if run_agent_store hook add update -- echo nope >/tmp/agent-store-hook-add-1me-bad-event.out 2>/tmp/agent-store-hook-add-1me-bad-event.err; then
+      exit 1
+    fi
+    grep -Fq "not supported" /tmp/agent-store-hook-add-1me-bad-event.err
+
+    if run_agent_store hook add create 'kind=task and' -- echo bad >/tmp/agent-store-hook-add-1me-bad-query.out 2>/tmp/agent-store-hook-add-1me-bad-query.err; then
+      exit 1
+    fi
+    grep -Fq "invalid hook query" /tmp/agent-store-hook-add-1me-bad-query.err
+    ;;
+
+  hook_ls_deterministic)
+    cd "$tmp"
+    run_agent_store init >/tmp/agent-store-hook-ls-pn0-init.out
+
+    first="$(run_agent_store hook add create kind=task -- echo created)"
+    second="$(run_agent_store hook add rm -- echo removed)"
+
+    first_line="$first create query='kind=task' -- 'echo created'"
+    second_line="$second rm -- 'echo removed'"
+    expected="$(printf "%s\n%s\n" "$first_line" "$second_line" | sort)"
+    got="$(run_agent_store hook ls)"
+    test "$got" = "$expected"
+    ;;
+
+  hook_rm_deletes_metadata)
+    cd "$tmp"
+    run_agent_store init >/tmp/agent-store-hook-rm-nih-init.out
+
+    removed_id="$(run_agent_store hook add create kind=task -- echo created)"
+    kept_id="$(run_agent_store hook add rm -- echo removed)"
+    removed_prefix="$(unique_prefix_for "$removed_id" "$kept_id")"
+
+    out="$(run_agent_store hook rm "$removed_prefix")"
+    test "$out" = "Removed $removed_id"
+
+    kept_line="$kept_id rm -- 'echo removed'"
+    got="$(run_agent_store hook ls)"
+    test "$got" = "$kept_line"
+
+    python3 - .agent-store/store.sqlite "$removed_id" "$kept_id" <<'PY'
+import sqlite3
+import sys
+
+db, removed_id, kept_id = sys.argv[1:]
+con = sqlite3.connect(db)
+ids = [row[0] for row in con.execute("select id from hooks order by id")]
+assert ids == [kept_id], ids
+assert removed_id not in ids
+PY
+
+    if run_agent_store hook rm "$removed_id" >/tmp/agent-store-hook-rm-nih-again.out 2>/tmp/agent-store-hook-rm-nih-again.err; then
+      exit 1
+    fi
+    grep -Fq "was not found" /tmp/agent-store-hook-rm-nih-again.err
+    ;;
+
+  *)
+    echo "usage: $0 {hook_add_stores_metadata|hook_ls_deterministic|hook_rm_deletes_metadata}" >&2
+    exit 2
+    ;;
+esac

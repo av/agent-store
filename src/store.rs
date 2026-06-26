@@ -137,6 +137,14 @@ pub struct RecordLinks {
     pub links: Vec<LinkEdge>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Hook {
+    pub id: String,
+    pub event: String,
+    pub query: Option<String>,
+    pub command: String,
+}
+
 pub struct Store {
     conn: Connection,
 }
@@ -153,10 +161,16 @@ pub enum StoreError {
         actual: String,
     },
     IdCollisionExhausted,
+    HookIdCollisionExhausted,
     InvalidId(String),
     InvalidRelation(String),
+    InvalidHookId(String),
+    InvalidHookEvent(String),
+    EmptyHookCommand,
     NotFound(String),
     AmbiguousId(String),
+    HookNotFound(String),
+    AmbiguousHookId(String),
 }
 
 impl fmt::Display for StoreError {
@@ -175,6 +189,7 @@ impl fmt::Display for StoreError {
                 "migration {version} ({name}) checksum mismatch: expected {expected}, found {actual}"
             ),
             Self::IdCollisionExhausted => write!(f, "could not generate a unique record ID"),
+            Self::HookIdCollisionExhausted => write!(f, "could not generate a unique hook ID"),
             Self::InvalidId(id) => write!(f, "'{id}' is not a valid record ID prefix"),
             Self::InvalidRelation(rel) if rel.is_empty() => {
                 write!(f, "link relation cannot be empty")
@@ -182,8 +197,18 @@ impl fmt::Display for StoreError {
             Self::InvalidRelation(rel) => {
                 write!(f, "link relation '{rel}' cannot contain whitespace")
             }
+            Self::InvalidHookId(id) => write!(f, "'{id}' is not a valid hook ID prefix"),
+            Self::InvalidHookEvent(event) => write!(
+                f,
+                "hook event '{event}' is not supported; expected create, set, unset, rm, link, or unlink"
+            ),
+            Self::EmptyHookCommand => write!(f, "hook command cannot be empty"),
             Self::NotFound(id) => write!(f, "record '{id}' was not found"),
             Self::AmbiguousId(id) => write!(f, "record ID prefix '{id}' matches multiple records"),
+            Self::HookNotFound(id) => write!(f, "hook '{id}' was not found"),
+            Self::AmbiguousHookId(id) => {
+                write!(f, "hook ID prefix '{id}' matches multiple hooks")
+            }
         }
     }
 }
@@ -258,7 +283,7 @@ impl Store {
             }
         }
 
-        Err(StoreError::IdCollisionExhausted)
+        Err(StoreError::HookIdCollisionExhausted)
     }
 
     pub fn get_record(&self, id_prefix: &str) -> StoreResult<Record> {
@@ -419,9 +444,96 @@ impl Store {
         Ok(RecordLinks { record_id, links })
     }
 
+    pub fn add_hook(
+        &mut self,
+        event: &str,
+        query: Option<String>,
+        command: &str,
+    ) -> StoreResult<Hook> {
+        validate_hook_event(event)?;
+        validate_hook_command(command)?;
+
+        for _ in 0..ID_RETRIES {
+            let id = generate_id();
+            let tx = self.conn.transaction()?;
+            match tx.execute(
+                r#"
+                INSERT INTO hooks (id, event, query, command)
+                VALUES (?1, ?2, ?3, ?4)
+                "#,
+                params![&id, event, query.as_deref(), command],
+            ) {
+                Ok(_) => {
+                    tx.commit()?;
+                    return Ok(Hook {
+                        id,
+                        event: event.to_owned(),
+                        query,
+                        command: command.to_owned(),
+                    });
+                }
+                Err(error) if is_constraint_violation(&error) => continue,
+                Err(error) => return Err(StoreError::Sql(error)),
+            }
+        }
+
+        Err(StoreError::IdCollisionExhausted)
+    }
+
+    pub fn list_hooks(&self) -> StoreResult<Vec<Hook>> {
+        let mut stmt = self.conn.prepare(
+            r#"
+            SELECT id, event, query, command
+            FROM hooks
+            ORDER BY id
+            "#,
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(Hook {
+                id: row.get(0)?,
+                event: row.get(1)?,
+                query: row.get(2)?,
+                command: row.get(3)?,
+            })
+        })?;
+
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    pub fn delete_hook(&mut self, id_prefix: &str) -> StoreResult<Hook> {
+        validate_hook_id_prefix(id_prefix)?;
+        let tx = self.conn.transaction()?;
+        let id = resolve_hook_id(&tx, id_prefix)?;
+        let hook = get_hook_by_id(&tx, &id)?;
+        tx.execute("DELETE FROM hooks WHERE id = ?1", params![&hook.id])?;
+        tx.commit()?;
+
+        Ok(hook)
+    }
+
     fn resolve_id(&self, id_prefix: &str) -> StoreResult<String> {
         resolve_id(&self.conn, id_prefix)
     }
+}
+
+fn get_hook_by_id(conn: &Connection, id: &str) -> StoreResult<Hook> {
+    conn.query_row(
+        r#"
+        SELECT id, event, query, command
+        FROM hooks
+        WHERE id = ?1
+        "#,
+        params![id],
+        |row| {
+            Ok(Hook {
+                id: row.get(0)?,
+                event: row.get(1)?,
+                query: row.get(2)?,
+                command: row.get(3)?,
+            })
+        },
+    )
+    .map_err(StoreError::from)
 }
 
 fn get_record_by_id(conn: &Connection, id: &str) -> StoreResult<Record> {
@@ -500,6 +612,19 @@ fn resolve_id(conn: &Connection, id_prefix: &str) -> StoreResult<String> {
         [] => Err(StoreError::NotFound(id_prefix.to_owned())),
         [id] => Ok(id.clone()),
         _ => Err(StoreError::AmbiguousId(id_prefix.to_owned())),
+    }
+}
+
+fn resolve_hook_id(conn: &Connection, id_prefix: &str) -> StoreResult<String> {
+    let pattern = format!("{id_prefix}%");
+    let mut stmt = conn.prepare("SELECT id FROM hooks WHERE id LIKE ?1 ORDER BY id LIMIT 2")?;
+    let rows = stmt.query_map(params![pattern], |row| row.get::<_, String>(0))?;
+    let ids: Vec<String> = rows.collect::<Result<_, _>>()?;
+
+    match ids.as_slice() {
+        [] => Err(StoreError::HookNotFound(id_prefix.to_owned())),
+        [id] => Ok(id.clone()),
+        _ => Err(StoreError::AmbiguousHookId(id_prefix.to_owned())),
     }
 }
 
@@ -697,6 +822,32 @@ fn validate_id_prefix(id_prefix: &str) -> StoreResult<()> {
 fn validate_relation(rel: &str) -> StoreResult<()> {
     if rel.is_empty() || rel.chars().any(char::is_whitespace) {
         return Err(StoreError::InvalidRelation(rel.to_owned()));
+    }
+    Ok(())
+}
+
+fn validate_hook_id_prefix(id_prefix: &str) -> StoreResult<()> {
+    if id_prefix.is_empty()
+        || id_prefix.len() > 8
+        || !id_prefix
+            .chars()
+            .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit())
+    {
+        return Err(StoreError::InvalidHookId(id_prefix.to_owned()));
+    }
+    Ok(())
+}
+
+fn validate_hook_event(event: &str) -> StoreResult<()> {
+    match event {
+        "create" | "set" | "unset" | "rm" | "link" | "unlink" => Ok(()),
+        _ => Err(StoreError::InvalidHookEvent(event.to_owned())),
+    }
+}
+
+fn validate_hook_command(command: &str) -> StoreResult<()> {
+    if command.trim().is_empty() {
+        return Err(StoreError::EmptyHookCommand);
     }
     Ok(())
 }
