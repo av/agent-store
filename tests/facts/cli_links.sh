@@ -111,8 +111,54 @@ in relates $incoming_a"
     test "$got" = "$expected"
     ;;
 
+  find_filters_links)
+    cd "$tmp"
+    run_agent_store init >/tmp/agent-store-find-links-l7a-init.out
+    source_id="$(run_agent_store create task title=source status=open)"
+    target_id="$(run_agent_store create note title=target status=open)"
+    other_id="$(run_agent_store create note title=other status=open)"
+    incoming_id="$(run_agent_store create decision title=incoming status=open)"
+    unrelated_id="$(run_agent_store create task title=unrelated status=open)"
+
+    run_agent_store link "$source_id" blocks "$target_id" >/tmp/agent-store-find-links-l7a-blocks.out
+    run_agent_store link "$source_id" mentions "$other_id" >/tmp/agent-store-find-links-l7a-mentions.out
+    run_agent_store link "$incoming_id" blocks "$source_id" >/tmp/agent-store-find-links-l7a-incoming.out
+
+    source_line="$source_id task status=open title=source"
+    target_line="$target_id note status=open title=target"
+    unrelated_line="$unrelated_id task status=open title=unrelated"
+
+    got="$(run_agent_store find 'link.out=mentions')"
+    test "$got" = "$source_line"
+
+    expected="$source_line
+$target_line"
+    got="$(run_agent_store find 'link.in=blocks')"
+    test "$(printf "%s\n" "$got" | sort)" = "$(printf "%s\n" "$expected" | sort)"
+
+    got="$(run_agent_store find "link.out.blocks=$target_id")"
+    test "$got" = "$source_line"
+
+    got="$(run_agent_store find "link.in.blocks=$incoming_id")"
+    test "$got" = "$source_line"
+
+    got="$(run_agent_store find "kind=note and link.in.blocks=$source_id")"
+    test "$got" = "$target_line"
+
+    expected="$source_line
+$target_line"
+    got="$(run_agent_store find "link.out=mentions or link.in.blocks=$source_id")"
+    test "$(printf "%s\n" "$got" | sort)" = "$(printf "%s\n" "$expected" | sort)"
+
+    got="$(run_agent_store find 'kind=task and not link.out=blocks')"
+    test "$got" = "$unrelated_line"
+
+    got="$(run_agent_store find "link.out.blocks=$other_id")"
+    test -z "$got"
+    ;;
+
   *)
-    echo "usage: $0 {link_adds_idempotently|unlink_removes_idempotently|links_lists_deterministically}" >&2
+    echo "usage: $0 {link_adds_idempotently|unlink_removes_idempotently|links_lists_deterministically|find_filters_links}" >&2
     exit 2
     ;;
 esac

@@ -1,4 +1,4 @@
-use crate::store::Record;
+use crate::store::{LinkDirection, LinkEdge, Record};
 use crate::value::FieldValue;
 use std::cmp::Ordering;
 use std::error::Error;
@@ -19,9 +19,22 @@ enum Expr {
 
 #[derive(Debug, Clone, PartialEq)]
 struct Comparison {
-    field: String,
+    target: ComparisonTarget,
     op: ComparisonOp,
+    value_raw: String,
     value: FieldValue,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ComparisonTarget {
+    RecordField(String),
+    Link(LinkPredicate),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct LinkPredicate {
+    direction: LinkDirection,
+    rel: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -91,40 +104,156 @@ impl Query {
     }
 
     pub fn matches(&self, record: &Record) -> bool {
-        self.expression.matches(record)
+        self.matches_with_links(record, &[])
+    }
+
+    pub fn matches_with_links(&self, record: &Record, links: &[LinkEdge]) -> bool {
+        self.expression.matches(record, links)
+    }
+
+    pub fn uses_links(&self) -> bool {
+        self.expression.uses_links()
     }
 }
 
 impl Expr {
-    fn matches(&self, record: &Record) -> bool {
+    fn matches(&self, record: &Record, links: &[LinkEdge]) -> bool {
         match self {
-            Self::Comparison(comparison) => comparison.matches(record),
-            Self::And(left, right) => left.matches(record) && right.matches(record),
-            Self::Or(left, right) => left.matches(record) || right.matches(record),
-            Self::Not(expression) => !expression.matches(record),
+            Self::Comparison(comparison) => comparison.matches(record, links),
+            Self::And(left, right) => left.matches(record, links) && right.matches(record, links),
+            Self::Or(left, right) => left.matches(record, links) || right.matches(record, links),
+            Self::Not(expression) => !expression.matches(record, links),
+        }
+    }
+
+    fn uses_links(&self) -> bool {
+        match self {
+            Self::Comparison(comparison) => comparison.uses_links(),
+            Self::And(left, right) | Self::Or(left, right) => {
+                left.uses_links() || right.uses_links()
+            }
+            Self::Not(expression) => expression.uses_links(),
         }
     }
 }
 
 impl Comparison {
-    fn matches(&self, record: &Record) -> bool {
-        let Some(actual) = record_value(record, &self.field) else {
-            return false;
-        };
+    fn matches(&self, record: &Record, links: &[LinkEdge]) -> bool {
+        match &self.target {
+            ComparisonTarget::RecordField(field) => self.matches_record_field(record, field),
+            ComparisonTarget::Link(predicate) => predicate.matches(links, &self.value_raw),
+        }
+    }
 
-        match self.op {
-            ComparisonOp::Equal => actual == self.value,
-            ComparisonOp::NotEqual => actual != self.value,
-            ComparisonOp::Less => actual.value_ordering(&self.value) == Some(Ordering::Less),
-            ComparisonOp::LessOrEqual => matches!(
-                actual.value_ordering(&self.value),
-                Some(Ordering::Less | Ordering::Equal)
-            ),
-            ComparisonOp::Greater => actual.value_ordering(&self.value) == Some(Ordering::Greater),
-            ComparisonOp::GreaterOrEqual => matches!(
-                actual.value_ordering(&self.value),
-                Some(Ordering::Greater | Ordering::Equal)
-            ),
+    fn matches_record_field(&self, record: &Record, field: &str) -> bool {
+        match record_value(record, field) {
+            Some(actual) => match self.op {
+                ComparisonOp::Equal => actual == self.value,
+                ComparisonOp::NotEqual => actual != self.value,
+                ComparisonOp::Less => actual.value_ordering(&self.value) == Some(Ordering::Less),
+                ComparisonOp::LessOrEqual => matches!(
+                    actual.value_ordering(&self.value),
+                    Some(Ordering::Less | Ordering::Equal)
+                ),
+                ComparisonOp::Greater => {
+                    actual.value_ordering(&self.value) == Some(Ordering::Greater)
+                }
+                ComparisonOp::GreaterOrEqual => matches!(
+                    actual.value_ordering(&self.value),
+                    Some(Ordering::Greater | Ordering::Equal)
+                ),
+            },
+            None => false,
+        }
+    }
+
+    fn uses_links(&self) -> bool {
+        matches!(self.target, ComparisonTarget::Link(_))
+    }
+}
+
+impl LinkPredicate {
+    fn matches(&self, links: &[LinkEdge], value: &str) -> bool {
+        links.iter().any(|link| {
+            link.direction == self.direction
+                && match &self.rel {
+                    Some(rel) => link.rel == *rel && link.peer_record_id == value,
+                    None => link.rel == value,
+                }
+        })
+    }
+}
+
+fn parse_comparison_target(field: &str) -> Result<ComparisonTarget, QueryError> {
+    match field {
+        "link.out" => {
+            return Ok(ComparisonTarget::Link(LinkPredicate {
+                direction: LinkDirection::Out,
+                rel: None,
+            }));
+        }
+        "link.in" => {
+            return Ok(ComparisonTarget::Link(LinkPredicate {
+                direction: LinkDirection::In,
+                rel: None,
+            }));
+        }
+        _ => {}
+    }
+
+    if let Some(rel) = field.strip_prefix("link.out.") {
+        if rel.is_empty() {
+            return Err(QueryError::new("link.out.<rel> requires a relation name"));
+        }
+        return Ok(ComparisonTarget::Link(LinkPredicate {
+            direction: LinkDirection::Out,
+            rel: Some(rel.to_owned()),
+        }));
+    }
+
+    if let Some(rel) = field.strip_prefix("link.in.") {
+        if rel.is_empty() {
+            return Err(QueryError::new("link.in.<rel> requires a relation name"));
+        }
+        return Ok(ComparisonTarget::Link(LinkPredicate {
+            direction: LinkDirection::In,
+            rel: Some(rel.to_owned()),
+        }));
+    }
+
+    if field.starts_with("link.") {
+        return Err(QueryError::new(format!("unknown link predicate '{field}'")));
+    }
+
+    Ok(ComparisonTarget::RecordField(field.to_owned()))
+}
+
+fn ensure_link_operator(target: &ComparisonTarget, op: ComparisonOp) -> Result<(), QueryError> {
+    if matches!(target, ComparisonTarget::Link(_)) && op != ComparisonOp::Equal {
+        return Err(QueryError::new(
+            "link predicates only support '='; use 'not' to negate a link predicate",
+        ));
+    }
+
+    Ok(())
+}
+
+impl ComparisonOp {
+    fn parse(token: Option<Token>, field: &str) -> Result<Self, QueryError> {
+        match token {
+            Some(Token::Equal) => Ok(Self::Equal),
+            Some(Token::NotEqual) => Ok(Self::NotEqual),
+            Some(Token::Less) => Ok(Self::Less),
+            Some(Token::LessOrEqual) => Ok(Self::LessOrEqual),
+            Some(Token::Greater) => Ok(Self::Greater),
+            Some(Token::GreaterOrEqual) => Ok(Self::GreaterOrEqual),
+            Some(token) => Err(QueryError::new(format!(
+                "expected comparison operator after '{field}', found {}",
+                describe_token(&token)
+            ))),
+            None => Err(QueryError::new(format!(
+                "expected comparison operator after '{field}'"
+            ))),
         }
     }
 }
@@ -203,28 +332,18 @@ impl Parser {
 
     fn parse_comparison(&mut self) -> Result<Comparison, QueryError> {
         let field = self.expect_word("field name")?;
-        let op = match self.next() {
-            Some(Token::Equal) => ComparisonOp::Equal,
-            Some(Token::NotEqual) => ComparisonOp::NotEqual,
-            Some(Token::Less) => ComparisonOp::Less,
-            Some(Token::LessOrEqual) => ComparisonOp::LessOrEqual,
-            Some(Token::Greater) => ComparisonOp::Greater,
-            Some(Token::GreaterOrEqual) => ComparisonOp::GreaterOrEqual,
-            Some(token) => {
-                return Err(QueryError::new(format!(
-                    "expected comparison operator after '{field}', found {}",
-                    describe_token(&token)
-                )));
-            }
-            None => {
-                return Err(QueryError::new(format!(
-                    "expected comparison operator after '{field}'"
-                )));
-            }
-        };
-        let value = FieldValue::parse(&self.expect_word("comparison value")?);
+        let op = ComparisonOp::parse(self.next(), &field)?;
+        let value_raw = self.expect_word("comparison value")?;
+        let target = parse_comparison_target(&field)?;
+        ensure_link_operator(&target, op)?;
+        let value = FieldValue::parse(&value_raw);
 
-        Ok(Comparison { field, op, value })
+        Ok(Comparison {
+            target,
+            op,
+            value_raw,
+            value,
+        })
     }
 
     fn expect_word(&mut self, label: &str) -> Result<String, QueryError> {
@@ -381,6 +500,21 @@ mod tests {
         }
     }
 
+    fn links() -> Vec<LinkEdge> {
+        vec![
+            LinkEdge {
+                direction: LinkDirection::Out,
+                rel: "blocks".to_owned(),
+                peer_record_id: "def456".to_owned(),
+            },
+            LinkEdge {
+                direction: LinkDirection::In,
+                rel: "relates".to_owned(),
+                peer_record_id: "ghi789".to_owned(),
+            },
+        ]
+    }
+
     #[test]
     fn parses_adjacent_and_spaced_comparisons() {
         let query = Query::parse("kind = task and status!=done").expect("query should parse");
@@ -448,5 +582,37 @@ mod tests {
             let query = Query::parse(query).expect("query should parse");
             assert!(!query.matches(&record()));
         }
+    }
+
+    #[test]
+    fn link_predicates_match_direction_relation_and_peer_id() {
+        for query in [
+            "link.out=blocks",
+            "link.out.blocks=def456",
+            "link.in=relates",
+            "link.in.relates=ghi789",
+            "kind=task and link.out.blocks=def456",
+        ] {
+            let query = Query::parse(query).expect("query should parse");
+            assert!(query.matches_with_links(&record(), &links()));
+            assert!(query.uses_links());
+        }
+    }
+
+    #[test]
+    fn link_predicates_compose_with_boolean_negation() {
+        let query =
+            Query::parse("link.out=blocks and not link.in=blocks").expect("query should parse");
+
+        assert!(query.matches_with_links(&record(), &links()));
+    }
+
+    #[test]
+    fn link_predicates_only_support_equality() {
+        let error = Query::parse("link.out!=blocks").expect_err("query should not parse");
+
+        assert!(error
+            .to_string()
+            .contains("link predicates only support '='"));
     }
 }

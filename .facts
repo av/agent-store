@@ -91,7 +91,10 @@
   id: cav
   command: bash tests/facts/cli_links.sh links_lists_deterministically
   tags: [implemented]
-- agent-store find supports filtering Records by incoming and outgoing Links, relation names, and linked Record IDs in the first link-enabled release @draft
+- label: agent-store find <Query> treats link.out=<rel> and link.in=<rel> as direction-plus-relation Link predicates, treats link.out.<rel>=<record-id> and link.in.<rel>=<record-id> as direction-plus-relation-plus-peer Record ID Link predicates, and composes those predicates with the existing boolean Query language
+  id: l7a
+  command: bash tests/facts/cli_links.sh find_filters_links
+  tags: [implemented]
 
 # domain
 - label: a Store is a project-local SQLite-backed database under .agent-store

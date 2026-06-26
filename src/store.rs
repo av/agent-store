@@ -266,10 +266,18 @@ impl Store {
         let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
         let ids: Vec<String> = rows.collect::<Result<_, _>>()?;
         let mut records = Vec::new();
+        let uses_links = query.uses_links();
 
         for id in ids {
             let record = get_record_by_id(&self.conn, &id)?;
-            if query.matches(&record) {
+            let matches = if uses_links {
+                let links = links_for_record_id(&self.conn, &id)?;
+                query.matches_with_links(&record, &links)
+            } else {
+                query.matches(&record)
+            };
+
+            if matches {
                 records.push(record);
             }
         }
@@ -399,43 +407,7 @@ impl Store {
     pub fn links_for_record(&self, id_prefix: &str) -> StoreResult<RecordLinks> {
         validate_id_prefix(id_prefix)?;
         let record_id = self.resolve_id(id_prefix)?;
-        let mut stmt = self.conn.prepare(
-            r#"
-            SELECT direction, rel, peer_record_id
-            FROM (
-                SELECT
-                    0 AS direction_order,
-                    'out' AS direction,
-                    rel,
-                    to_record_id AS peer_record_id
-                FROM record_links
-                WHERE from_record_id = ?1
-                UNION ALL
-                SELECT
-                    1 AS direction_order,
-                    'in' AS direction,
-                    rel,
-                    from_record_id AS peer_record_id
-                FROM record_links
-                WHERE to_record_id = ?1
-            )
-            ORDER BY direction_order, rel, peer_record_id
-            "#,
-        )?;
-        let rows = stmt.query_map(params![&record_id], |row| {
-            let direction_text: String = row.get(0)?;
-            let direction = match direction_text.as_str() {
-                "out" => LinkDirection::Out,
-                "in" => LinkDirection::In,
-                _ => unreachable!("record link query returns only known directions"),
-            };
-            Ok(LinkEdge {
-                direction,
-                rel: row.get(1)?,
-                peer_record_id: row.get(2)?,
-            })
-        })?;
-        let links = rows.collect::<Result<_, _>>()?;
+        let links = links_for_record_id(&self.conn, &record_id)?;
 
         Ok(RecordLinks { record_id, links })
     }
@@ -468,6 +440,47 @@ fn get_record_by_id(conn: &Connection, id: &str) -> StoreResult<Record> {
         kind,
         fields,
     })
+}
+
+fn links_for_record_id(conn: &Connection, record_id: &str) -> StoreResult<Vec<LinkEdge>> {
+    let mut stmt = conn.prepare(
+        r#"
+        SELECT direction, rel, peer_record_id
+        FROM (
+            SELECT
+                0 AS direction_order,
+                'out' AS direction,
+                rel,
+                to_record_id AS peer_record_id
+            FROM record_links
+            WHERE from_record_id = ?1
+            UNION ALL
+            SELECT
+                1 AS direction_order,
+                'in' AS direction,
+                rel,
+                from_record_id AS peer_record_id
+            FROM record_links
+            WHERE to_record_id = ?1
+        )
+        ORDER BY direction_order, rel, peer_record_id
+        "#,
+    )?;
+    let rows = stmt.query_map(params![record_id], |row| {
+        let direction_text: String = row.get(0)?;
+        let direction = match direction_text.as_str() {
+            "out" => LinkDirection::Out,
+            "in" => LinkDirection::In,
+            _ => unreachable!("record link query returns only known directions"),
+        };
+        Ok(LinkEdge {
+            direction,
+            rel: row.get(1)?,
+            peer_record_id: row.get(2)?,
+        })
+    })?;
+
+    Ok(rows.collect::<Result<_, _>>()?)
 }
 
 fn resolve_id(conn: &Connection, id_prefix: &str) -> StoreResult<String> {
