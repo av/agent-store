@@ -24,9 +24,18 @@
   id: k6a
   command: sh -c 'set -eu; repo=$PWD; tmp=$(mktemp -d); trap "rm -rf \"$tmp\"" EXIT; cd "$tmp"; CARGO_TARGET_DIR="$repo/target/facts-k6a" cargo run --quiet --manifest-path "$repo/Cargo.toml" -- init >/tmp/agent-store-init-k6a.out; test -d .agent-store; grep -Fxq ".agent-store/" .gitignore'
   tags: [implemented]
-- agent-store init installs builtin skills into .agents/skills and .claude/skills @draft
-- agent-store init adds agent-store usage instructions to AGENTS.md and CLAUDE.md when those files exist @draft
-- agent-store init can be run repeatedly without duplicating instructions or overwriting user-authored skill files @draft
+- label: agent-store init installs the agent-store, agent-store-patterns, and agent-store-pipelines builtin skills as SKILL.md files under both .agents/skills and .claude/skills
+  id: 4je
+  command: sh -c "set -eu; repo=\$PWD; tmp=\$(mktemp -d); cd \"\$tmp\"; CARGO_TARGET_DIR=\"\$repo/target/facts-4je\" cargo run --quiet --manifest-path \"\$repo/Cargo.toml\" -- init >/tmp/agent-store-init-4je.out; for root in .agents/skills .claude/skills; do for skill in agent-store agent-store-patterns agent-store-pipelines; do test -f \"\$root/\$skill/SKILL.md\"; grep -Fq \"name: \$skill\" \"\$root/\$skill/SKILL.md\"; done; done; rm -rf \"\$tmp\""
+  tags: [implemented]
+- label: agent-store init appends a managed usage block to existing AGENTS.md and CLAUDE.md files while preserving their existing content
+  id: ciy
+  command: sh -c "set -eu; repo=\$PWD; tmp=\$(mktemp -d); cd \"\$tmp\"; printf \"user-authored line\\n\" > AGENTS.md; printf \"user-authored line\\n\" > CLAUDE.md; CARGO_TARGET_DIR=\"\$repo/target/facts-ciy\" cargo run --quiet --manifest-path \"\$repo/Cargo.toml\" -- init >/tmp/agent-store-init-ciy.out; for doc in AGENTS.md CLAUDE.md; do grep -Fq \"user-authored line\" \"\$doc\"; grep -Fq \"<!-- agent-store:start -->\" \"\$doc\"; grep -Fq \"agent-store init\" \"\$doc\"; grep -Fq \"<!-- agent-store:end -->\" \"\$doc\"; done; rm -rf \"\$tmp\""
+  tags: [implemented]
+- label: agent-store init can be run repeatedly without duplicating managed instruction blocks or overwriting pre-existing skill files
+  id: vpz
+  command: sh -c "set -eu; repo=\$PWD; tmp=\$(mktemp -d); cd \"\$tmp\"; printf \"user-authored line\\n\" > AGENTS.md; printf \"user-authored line\\n\" > CLAUDE.md; mkdir -p .agents/skills/agent-store .claude/skills/agent-store; printf \"custom agent skill\\n\" > .agents/skills/agent-store/SKILL.md; printf \"custom claude skill\\n\" > .claude/skills/agent-store/SKILL.md; CARGO_TARGET_DIR=\"\$repo/target/facts-vpz\" cargo run --quiet --manifest-path \"\$repo/Cargo.toml\" -- init >/tmp/agent-store-init-vpz-1.out; CARGO_TARGET_DIR=\"\$repo/target/facts-vpz\" cargo run --quiet --manifest-path \"\$repo/Cargo.toml\" -- init >/tmp/agent-store-init-vpz-2.out; test \"\$(grep -Fc \"<!-- agent-store:start -->\" AGENTS.md)\" -eq 1; test \"\$(grep -Fc \"<!-- agent-store:start -->\" CLAUDE.md)\" -eq 1; test \"\$(grep -Fc \".agent-store/\" .gitignore)\" -eq 1; grep -Fxq \"custom agent skill\" .agents/skills/agent-store/SKILL.md; grep -Fxq \"custom claude skill\" .claude/skills/agent-store/SKILL.md; rm -rf \"\$tmp\""
+  tags: [implemented]
 
 ## aliases
 - agent-store cr is a short alias for create with identical arguments, behavior, and output @draft
