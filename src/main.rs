@@ -1,7 +1,14 @@
+mod cli;
+mod output;
+
 use agent_store::query::Query;
-use agent_store::store::{Hook, Link, LinkEdge, QuickContextSummary, Record, Store, STORE_DIR};
-use serde_json::{json, Value};
-use std::collections::BTreeMap;
+use agent_store::store::{Hook, Link, Record, Store, STORE_DIR};
+use cli::{CliCommand, HookCliCommand};
+use output::{
+    format_hook, format_quick_context, format_record, init_json, link_mutation_json, mutation_json,
+    print_json, record_links_json, records_json, single_record_json,
+    QUICK_CONTEXT_OUTPUT_LIMIT_BYTES, USAGE,
+};
 use std::env;
 use std::fs::{self, OpenOptions};
 use std::io::{self, Read, Write};
@@ -21,7 +28,6 @@ const INSTRUCTIONS_START: &str = "<!-- agent-store:start -->";
 const DEFAULT_HOOK_TIMEOUT: Duration = Duration::from_secs(30);
 const HOOK_TIMEOUT_EXIT_STATUS: i32 = -1;
 const HOOK_OUTPUT_CAPTURE_LIMIT_BYTES: usize = 8192;
-const QUICK_CONTEXT_OUTPUT_LIMIT_BYTES: usize = 8192;
 const HOOK_ENV_KEYS: &[&str] = &[
     "AGENT_STORE_EVENT",
     "AGENT_STORE_ID",
@@ -145,110 +151,60 @@ agent-store create log command=test output="$(cargo test 2>&1)"
     },
 ];
 
-const USAGE: &str = "\
-Usage: agent-store [OPTIONS] <COMMAND>
-
-A project-local store for agent-facing records, links, hooks, and context.
-
-Options:
-  -h, --help    Print help
-  -V, --version Print version
-      --json    Print structured JSON for command output
-
-Commands:
-  init          Initialize a project-local store
-  create, cr    Create a record
-  find, ls      Find records by query
-  get           Print a record by ID
-  set           Update fields on a record by ID
-  unset         Remove fields from a record by ID
-  rm            Delete a record by ID
-  link          Create a directional link between records
-  unlink        Remove a directional link between records
-  links         Print incoming and outgoing links for a record
-  ctx, context  Print a compact Quick Context summary
-  hook          Manage stored hooks
-
-Quick Context output is capped at 8192 bytes.
-Hook stdout and stderr captures are capped at 8192 bytes each.
-";
-
 fn main() {
-    let mut raw_args: Vec<String> = env::args().skip(1).collect();
-    let json_output = take_json_flag(&mut raw_args);
-    let mut args = raw_args.into_iter();
+    let cli = match cli::parse_args(env::args().skip(1)) {
+        Ok(cli) => cli,
+        Err(error) => {
+            eprintln!("error: {error}");
+            if error.include_usage() {
+                eprintln!();
+                eprint!("{USAGE}");
+            }
+            process::exit(2);
+        }
+    };
 
-    match args.next().as_deref() {
-        Some("-h") | Some("--help") => {
+    match cli.command {
+        CliCommand::Help => {
             print!("{USAGE}");
         }
-        Some("-V") | Some("--version") => {
+        CliCommand::Version => {
             println!("agent-store {}", env!("CARGO_PKG_VERSION"));
         }
-        Some("init") => {
-            if let Some(extra) = args.next() {
-                eprintln!("error: init does not accept argument '{extra}'");
-                process::exit(2);
-            }
-
+        CliCommand::Init => {
             if let Err(error) = init_store() {
                 eprintln!("error: failed to initialize store: {error}");
                 process::exit(1);
             }
 
-            if json_output {
-                print_json(json!({
-                    "status": "initialized",
-                    "store_dir": STORE_DIR,
-                }));
+            if cli.json_output {
+                print_json(init_json());
             } else {
                 println!("Initialized {STORE_DIR}/");
             }
         }
-        Some("create") | Some("cr") => {
-            let Some(kind) = args.next() else {
-                eprintln!("error: create requires a kind");
-                process::exit(2);
-            };
-
-            match parse_fields(args) {
-                Ok(fields) => {
-                    let mut store = open_store_or_exit();
-                    match store.create_record(&kind, fields) {
-                        Ok(record) => {
-                            run_hooks_or_exit(&mut store, "create", &record);
-                            if json_output {
-                                print_json(mutation_json("created", &record));
-                            } else {
-                                println!("{}", record.id);
-                            }
-                        }
-                        Err(error) => {
-                            eprintln!("error: failed to create record: {error}");
-                            process::exit(1);
-                        }
+        CliCommand::Create { kind, fields } => {
+            let mut store = open_store_or_exit();
+            match store.create_record(&kind, fields) {
+                Ok(record) => {
+                    run_hooks_or_exit(&mut store, "create", &record);
+                    if cli.json_output {
+                        print_json(mutation_json("created", &record));
+                    } else {
+                        println!("{}", record.id);
                     }
                 }
                 Err(error) => {
-                    eprintln!("error: {error}");
-                    process::exit(2);
+                    eprintln!("error: failed to create record: {error}");
+                    process::exit(1);
                 }
             }
         }
-        Some("get") => {
-            let Some(id) = args.next() else {
-                eprintln!("error: get requires a record ID");
-                process::exit(2);
-            };
-            if let Some(extra) = args.next() {
-                eprintln!("error: get does not accept argument '{extra}'");
-                process::exit(2);
-            }
-
+        CliCommand::Get { id } => {
             let store = open_store_or_exit();
             match store.get_record(&id) {
                 Ok(record) => {
-                    if json_output {
+                    if cli.json_output {
                         print_json(single_record_json(&record));
                     } else {
                         println!("{}", format_record(&record));
@@ -260,14 +216,8 @@ fn main() {
                 }
             }
         }
-        Some("find") | Some("ls") => {
-            let query_text = args.collect::<Vec<_>>().join(" ");
-            if query_text.trim().is_empty() {
-                eprintln!("error: find requires a query");
-                process::exit(2);
-            }
-
-            let query = match Query::parse(&query_text) {
+        CliCommand::Find { query } => {
+            let query = match Query::parse(&query) {
                 Ok(query) => query,
                 Err(error) => {
                     eprintln!("error: invalid query: {error}");
@@ -277,7 +227,7 @@ fn main() {
             let store = open_store_or_exit();
             match store.find_records(&query) {
                 Ok(records) => {
-                    if json_output {
+                    if cli.json_output {
                         print_json(records_json(&records));
                     } else {
                         for record in records {
@@ -291,89 +241,46 @@ fn main() {
                 }
             }
         }
-        Some("set") => {
-            let Some(id) = args.next() else {
-                eprintln!("error: set requires a record ID");
-                process::exit(2);
-            };
-
-            match parse_fields(args) {
-                Ok(fields) if fields.is_empty() => {
-                    eprintln!("error: set requires at least one key=value field");
-                    process::exit(2);
-                }
-                Ok(fields) => {
-                    let mut store = open_store_or_exit();
-                    match store.set_record(&id, fields) {
-                        Ok(record) => {
-                            run_hooks_or_exit(&mut store, "set", &record);
-                            if json_output {
-                                print_json(mutation_json("updated", &record));
-                            } else {
-                                println!("Updated {}", record.id);
-                            }
-                        }
-                        Err(error) => {
-                            eprintln!("error: failed to set record: {error}");
-                            process::exit(1);
-                        }
+        CliCommand::Set { id, fields } => {
+            let mut store = open_store_or_exit();
+            match store.set_record(&id, fields) {
+                Ok(record) => {
+                    run_hooks_or_exit(&mut store, "set", &record);
+                    if cli.json_output {
+                        print_json(mutation_json("updated", &record));
+                    } else {
+                        println!("Updated {}", record.id);
                     }
                 }
                 Err(error) => {
-                    eprintln!("error: {error}");
-                    process::exit(2);
+                    eprintln!("error: failed to set record: {error}");
+                    process::exit(1);
                 }
             }
         }
-        Some("unset") => {
-            let Some(id) = args.next() else {
-                eprintln!("error: unset requires a record ID");
-                process::exit(2);
-            };
-
-            match parse_field_keys(args) {
-                Ok(keys) if keys.is_empty() => {
-                    eprintln!("error: unset requires at least one field name");
-                    process::exit(2);
-                }
-                Ok(keys) => {
-                    let mut store = open_store_or_exit();
-                    match store.unset_record(&id, keys) {
-                        Ok(record) => {
-                            run_hooks_or_exit(&mut store, "unset", &record);
-                            if json_output {
-                                print_json(mutation_json("updated", &record));
-                            } else {
-                                println!("Updated {}", record.id);
-                            }
-                        }
-                        Err(error) => {
-                            eprintln!("error: failed to unset record: {error}");
-                            process::exit(1);
-                        }
+        CliCommand::Unset { id, keys } => {
+            let mut store = open_store_or_exit();
+            match store.unset_record(&id, keys) {
+                Ok(record) => {
+                    run_hooks_or_exit(&mut store, "unset", &record);
+                    if cli.json_output {
+                        print_json(mutation_json("updated", &record));
+                    } else {
+                        println!("Updated {}", record.id);
                     }
                 }
                 Err(error) => {
-                    eprintln!("error: {error}");
-                    process::exit(2);
+                    eprintln!("error: failed to unset record: {error}");
+                    process::exit(1);
                 }
             }
         }
-        Some("rm") => {
-            let Some(id) = args.next() else {
-                eprintln!("error: rm requires a record ID");
-                process::exit(2);
-            };
-            if let Some(extra) = args.next() {
-                eprintln!("error: rm does not accept argument '{extra}'");
-                process::exit(2);
-            }
-
+        CliCommand::Rm { id } => {
             let mut store = open_store_or_exit();
             match store.delete_record(&id) {
                 Ok(record) => {
                     run_hooks_or_exit(&mut store, "rm", &record);
-                    if json_output {
+                    if cli.json_output {
                         print_json(mutation_json("removed", &record));
                     } else {
                         println!("Removed {}", record.id);
@@ -385,21 +292,13 @@ fn main() {
                 }
             }
         }
-        Some("link") => {
-            let (from, rel, to) = match parse_link_args(args, "link") {
-                Ok(args) => args,
-                Err(error) => {
-                    eprintln!("error: {error}");
-                    process::exit(2);
-                }
-            };
-
+        CliCommand::Link { from, rel, to } => {
             let mut store = open_store_or_exit();
             match store.link_records(&from, &rel, &to) {
                 Ok(link) => {
                     let source = record_for_link_hook_or_exit(&store, "link", &link);
                     run_link_hooks_or_exit(&mut store, "link", &source, &link);
-                    if json_output {
+                    if cli.json_output {
                         print_json(link_mutation_json("linked", &link));
                     } else {
                         println!(
@@ -414,21 +313,13 @@ fn main() {
                 }
             }
         }
-        Some("unlink") => {
-            let (from, rel, to) = match parse_link_args(args, "unlink") {
-                Ok(args) => args,
-                Err(error) => {
-                    eprintln!("error: {error}");
-                    process::exit(2);
-                }
-            };
-
+        CliCommand::Unlink { from, rel, to } => {
             let mut store = open_store_or_exit();
             match store.unlink_records(&from, &rel, &to) {
                 Ok(link) => {
                     let source = record_for_link_hook_or_exit(&store, "unlink", &link);
                     run_link_hooks_or_exit(&mut store, "unlink", &source, &link);
-                    if json_output {
+                    if cli.json_output {
                         print_json(link_mutation_json("unlinked", &link));
                     } else {
                         println!(
@@ -443,20 +334,11 @@ fn main() {
                 }
             }
         }
-        Some("links") => {
-            let Some(id) = args.next() else {
-                eprintln!("error: links requires a record ID");
-                process::exit(2);
-            };
-            if let Some(extra) = args.next() {
-                eprintln!("error: links does not accept argument '{extra}'");
-                process::exit(2);
-            }
-
+        CliCommand::Links { id } => {
             let store = open_store_or_exit();
             match store.links_for_record(&id) {
                 Ok(record_links) => {
-                    if json_output {
+                    if cli.json_output {
                         print_json(record_links_json(
                             &record_links.record_id,
                             &record_links.links,
@@ -478,12 +360,7 @@ fn main() {
                 }
             }
         }
-        Some(command @ ("ctx" | "context")) => {
-            if let Some(extra) = args.next() {
-                eprintln!("error: {command} does not accept argument '{extra}'");
-                process::exit(2);
-            }
-
+        CliCommand::Context => {
             let store = open_store_or_exit();
             match store.quick_context_summary() {
                 Ok(summary) => {
@@ -500,16 +377,12 @@ fn main() {
                 }
             }
         }
-        Some("hook") => match args.next().as_deref() {
-            Some("add") => {
-                let (event, query, command) = match parse_hook_add_args(args) {
-                    Ok(parsed) => parsed,
-                    Err(error) => {
-                        eprintln!("error: {error}");
-                        process::exit(2);
-                    }
-                };
-
+        CliCommand::Hook(command) => match command {
+            HookCliCommand::Add {
+                event,
+                query,
+                command,
+            } => {
                 let mut store = open_store_or_exit();
                 match store.add_hook(&event, query, &command) {
                     Ok(hook) => {
@@ -521,12 +394,7 @@ fn main() {
                     }
                 }
             }
-            Some("ls") => {
-                if let Some(extra) = args.next() {
-                    eprintln!("error: hook ls does not accept argument '{extra}'");
-                    process::exit(2);
-                }
-
+            HookCliCommand::List => {
                 let store = open_store_or_exit();
                 match store.list_hooks() {
                     Ok(hooks) => {
@@ -540,16 +408,7 @@ fn main() {
                     }
                 }
             }
-            Some("rm") => {
-                let Some(id) = args.next() else {
-                    eprintln!("error: hook rm requires a hook ID");
-                    process::exit(2);
-                };
-                if let Some(extra) = args.next() {
-                    eprintln!("error: hook rm does not accept argument '{extra}'");
-                    process::exit(2);
-                }
-
+            HookCliCommand::Remove { id } => {
                 let mut store = open_store_or_exit();
                 match store.delete_hook(&id) {
                     Ok(hook) => {
@@ -561,38 +420,8 @@ fn main() {
                     }
                 }
             }
-            Some(command) => {
-                eprintln!("error: unrecognized hook command '{command}'");
-                process::exit(2);
-            }
-            None => {
-                eprintln!("error: hook requires add, ls, or rm");
-                process::exit(2);
-            }
         },
-        Some(command) => {
-            eprintln!("error: unrecognized command '{command}'");
-            eprintln!();
-            eprint!("{USAGE}");
-            process::exit(2);
-        }
-        None => {
-            print!("{USAGE}");
-        }
     }
-}
-
-fn take_json_flag(args: &mut Vec<String>) -> bool {
-    let mut json_output = false;
-    args.retain(|arg| {
-        if arg == "--json" {
-            json_output = true;
-            false
-        } else {
-            true
-        }
-    });
-    json_output
 }
 
 fn init_store() -> io::Result<()> {
@@ -916,280 +745,6 @@ fn hook_query_matches(
     Ok(query.matches_with_links(record, &links))
 }
 
-fn parse_fields(args: impl Iterator<Item = String>) -> Result<BTreeMap<String, String>, String> {
-    let mut fields = BTreeMap::new();
-
-    for arg in args {
-        let Some((key, value)) = arg.split_once('=') else {
-            return Err(format!("field argument '{arg}' must use key=value syntax"));
-        };
-        if key.is_empty() {
-            return Err("field names cannot be empty".to_owned());
-        }
-
-        fields.insert(key.to_owned(), value.to_owned());
-    }
-
-    Ok(fields)
-}
-
-fn parse_field_keys(args: impl Iterator<Item = String>) -> Result<Vec<String>, String> {
-    let mut keys = Vec::new();
-
-    for arg in args {
-        if arg.is_empty() {
-            return Err("field names cannot be empty".to_owned());
-        }
-        if arg.contains('=') {
-            return Err(format!(
-                "field argument '{arg}' must be a field name, not key=value"
-            ));
-        }
-
-        keys.push(arg);
-    }
-
-    Ok(keys)
-}
-
-fn parse_link_args(
-    mut args: impl Iterator<Item = String>,
-    command: &str,
-) -> Result<(String, String, String), String> {
-    let Some(from) = args.next() else {
-        return Err(format!("{command} requires <from> <rel> <to>"));
-    };
-    let Some(rel) = args.next() else {
-        return Err(format!("{command} requires <from> <rel> <to>"));
-    };
-    let Some(to) = args.next() else {
-        return Err(format!("{command} requires <from> <rel> <to>"));
-    };
-    if let Some(extra) = args.next() {
-        return Err(format!("{command} does not accept argument '{extra}'"));
-    }
-
-    Ok((from, rel, to))
-}
-
-fn parse_hook_add_args(
-    args: impl Iterator<Item = String>,
-) -> Result<(String, Option<String>, String), String> {
-    let args = args.collect::<Vec<_>>();
-    let Some(separator) = args.iter().position(|arg| arg == "--") else {
-        return Err("hook add requires <event> [<Query>] -- <bash command>".to_owned());
-    };
-
-    let before_separator = &args[..separator];
-    let after_separator = &args[separator + 1..];
-    let Some(event) = before_separator.first() else {
-        return Err("hook add requires an event before --".to_owned());
-    };
-    if after_separator.is_empty() {
-        return Err("hook add requires a bash command after --".to_owned());
-    }
-
-    let query = if before_separator.len() > 1 {
-        let query_text = before_separator[1..].join(" ");
-        Query::parse(&query_text).map_err(|error| format!("invalid hook query: {error}"))?;
-        Some(query_text)
-    } else {
-        None
-    };
-    let command = after_separator.join(" ");
-    if command.trim().is_empty() {
-        return Err("hook add requires a non-empty bash command after --".to_owned());
-    }
-
-    Ok((event.clone(), query, command))
-}
-
-fn print_json(value: Value) {
-    println!("{value}");
-}
-
-fn single_record_json(record: &Record) -> Value {
-    json!({
-        "record": record_json(record),
-    })
-}
-
-fn records_json(records: &[Record]) -> Value {
-    json!({
-        "records": records.iter().map(record_json).collect::<Vec<_>>(),
-    })
-}
-
-fn mutation_json(status: &str, record: &Record) -> Value {
-    json!({
-        "status": status,
-        "record": record_json(record),
-    })
-}
-
-fn link_mutation_json(status: &str, link: &Link) -> Value {
-    json!({
-        "status": status,
-        "link": link_json(link),
-    })
-}
-
-fn record_json(record: &Record) -> Value {
-    json!({
-        "id": &record.id,
-        "kind": &record.kind,
-        "fields": &record.fields,
-    })
-}
-
-fn link_json(link: &Link) -> Value {
-    json!({
-        "from_record_id": &link.from_record_id,
-        "rel": &link.rel,
-        "to_record_id": &link.to_record_id,
-    })
-}
-
-fn record_links_json(record_id: &str, links: &[LinkEdge]) -> Value {
-    json!({
-        "record_id": record_id,
-        "links": links.iter().map(link_edge_json).collect::<Vec<_>>(),
-    })
-}
-
-fn link_edge_json(link: &LinkEdge) -> Value {
-    json!({
-        "direction": link.direction.as_str(),
-        "rel": &link.rel,
-        "record_id": &link.peer_record_id,
-    })
-}
-
-fn format_hook(hook: &Hook) -> String {
-    let mut output = format!("{} {}", hook.id, hook.event);
-    if let Some(query) = &hook.query {
-        output.push_str(" query=");
-        output.push_str(&shell_quote_value(query));
-    }
-    output.push_str(" -- ");
-    output.push_str(&shell_quote_value(&hook.command));
-    output
-}
-
-fn format_record(record: &Record) -> String {
-    let mut output = format!("{} {}", record.id, record.kind);
-    for (key, value) in &record.fields {
-        output.push(' ');
-        output.push_str(key);
-        output.push('=');
-        output.push_str(&shell_quote_value(value));
-    }
-    output
-}
-
-fn format_quick_context(summary: &QuickContextSummary) -> String {
-    let mut lines = vec![
-        "Quick Context".to_owned(),
-        format!("Records: {}", summary.record_count),
-    ];
-
-    if summary.records_by_kind.is_empty() {
-        lines.push("Record kinds: none".to_owned());
-    } else {
-        lines.push("Record kinds:".to_owned());
-        for (kind, count) in &summary.records_by_kind {
-            lines.push(format!("  {kind}: {count}"));
-            let fields = summary
-                .fields_by_kind
-                .get(kind)
-                .map(Vec::as_slice)
-                .unwrap_or(&[]);
-            if fields.is_empty() {
-                lines.push("    fields: none".to_owned());
-            } else {
-                lines.push(format!("    fields: {}", fields.join(", ")));
-            }
-
-            if let Some(status_counts) = summary.status_counts_by_kind.get(kind) {
-                if !status_counts.is_empty() {
-                    lines.push(format!(
-                        "    status: {}",
-                        format_status_counts(status_counts)
-                    ));
-                }
-            }
-
-            if let Some(date_windows) = summary.date_windows_by_kind.get(kind) {
-                for (field, window) in date_windows {
-                    lines.push(format!(
-                        "    {field}: {}..{}",
-                        window.earliest, window.latest
-                    ));
-                }
-            }
-        }
-    }
-
-    if summary.link_count > 0 {
-        lines.push(format!("Links: {}", summary.link_count));
-        for (rel, count) in &summary.links_by_relation {
-            lines.push(format!("  {rel}: {count}"));
-        }
-    }
-
-    lines.push(format!("Hooks: {}", summary.hook_count));
-    lines.push(format!(
-        "Latest activity: {}",
-        summary.latest_activity_at.as_deref().unwrap_or("none")
-    ));
-    cap_quick_context_output(lines.join("\n"))
-}
-
-fn format_status_counts(status_counts: &BTreeMap<String, i64>) -> String {
-    status_counts
-        .iter()
-        .map(|(status, count)| format!("{}={count}", shell_quote_value(status)))
-        .collect::<Vec<_>>()
-        .join(", ")
-}
-
-fn cap_quick_context_output(mut output: String) -> String {
-    if output.len() <= QUICK_CONTEXT_OUTPUT_LIMIT_BYTES {
-        return output;
-    }
-
-    let marker = format!("\n... truncated at {QUICK_CONTEXT_OUTPUT_LIMIT_BYTES} bytes");
-    let mut truncate_at = QUICK_CONTEXT_OUTPUT_LIMIT_BYTES.saturating_sub(marker.len());
-    while !output.is_char_boundary(truncate_at) {
-        truncate_at -= 1;
-    }
-
-    output.truncate(truncate_at);
-    output.push_str(&marker);
-    output
-}
-
-fn shell_quote_value(value: &str) -> String {
-    if !value.is_empty() && value.bytes().all(is_shell_safe_byte) {
-        return value.to_owned();
-    }
-
-    let mut quoted = String::from("'");
-    for ch in value.chars() {
-        if ch == '\'' {
-            quoted.push_str("'\"'\"'");
-        } else {
-            quoted.push(ch);
-        }
-    }
-    quoted.push('\'');
-    quoted
-}
-
-fn is_shell_safe_byte(byte: u8) -> bool {
-    byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.' | b'/' | b':' | b'@' | b'%')
-}
-
 fn ensure_gitignore_rule(path: &Path, rule: &str) -> io::Result<()> {
     let existing = match fs::read_to_string(path) {
         Ok(contents) => contents,
@@ -1312,92 +867,5 @@ mod tests {
         assert!(!missing.exists());
 
         fs::remove_dir_all(root).expect("test temp dir should be removed");
-    }
-
-    #[test]
-    fn record_output_is_stable_and_shell_quoted() {
-        let record = Record {
-            id: "abc123".to_owned(),
-            kind: "note".to_owned(),
-            fields: BTreeMap::from([
-                ("title".to_owned(), "hello world".to_owned()),
-                ("empty".to_owned(), String::new()),
-                ("status".to_owned(), "open".to_owned()),
-            ]),
-        };
-
-        assert_eq!(
-            format_record(&record),
-            "abc123 note empty='' status=open title='hello world'"
-        );
-    }
-
-    #[test]
-    fn shell_quote_escapes_single_quotes() {
-        assert_eq!(shell_quote_value("can't"), "'can'\"'\"'t'");
-    }
-
-    #[test]
-    fn quick_context_output_is_stable() {
-        let summary = QuickContextSummary {
-            record_count: 3,
-            records_by_kind: BTreeMap::from([("note".to_owned(), 1), ("task".to_owned(), 2)]),
-            fields_by_kind: BTreeMap::from([
-                ("note".to_owned(), vec!["title".to_owned()]),
-                (
-                    "task".to_owned(),
-                    vec!["due".to_owned(), "status".to_owned(), "title".to_owned()],
-                ),
-            ]),
-            status_counts_by_kind: BTreeMap::from([(
-                "task".to_owned(),
-                BTreeMap::from([("open".to_owned(), 2)]),
-            )]),
-            date_windows_by_kind: BTreeMap::from([(
-                "task".to_owned(),
-                BTreeMap::from([(
-                    "due".to_owned(),
-                    agent_store::store::DateWindow {
-                        earliest: "2026-06-26".to_owned(),
-                        latest: "2026-06-30".to_owned(),
-                    },
-                )]),
-            )]),
-            link_count: 3,
-            links_by_relation: BTreeMap::from([
-                ("blocks".to_owned(), 2),
-                ("depends_on".to_owned(), 1),
-            ]),
-            hook_count: 1,
-            latest_activity_at: Some("2026-06-26T12:34:56.789Z".to_owned()),
-        };
-
-        assert_eq!(
-            format_quick_context(&summary),
-            "Quick Context\nRecords: 3\nRecord kinds:\n  note: 1\n    fields: title\n  task: 2\n    fields: due, status, title\n    status: open=2\n    due: 2026-06-26..2026-06-30\nLinks: 3\n  blocks: 2\n  depends_on: 1\nHooks: 1\nLatest activity: 2026-06-26T12:34:56.789Z"
-        );
-    }
-
-    #[test]
-    fn quick_context_output_is_bounded() {
-        let summary = QuickContextSummary {
-            record_count: 1,
-            records_by_kind: BTreeMap::from([("large".to_owned(), 1)]),
-            fields_by_kind: BTreeMap::from([(
-                "large".to_owned(),
-                (0..2000).map(|index| format!("field_{index:04}")).collect(),
-            )]),
-            status_counts_by_kind: BTreeMap::new(),
-            date_windows_by_kind: BTreeMap::new(),
-            link_count: 0,
-            links_by_relation: BTreeMap::new(),
-            hook_count: 0,
-            latest_activity_at: None,
-        };
-
-        let output = format_quick_context(&summary);
-
-        assert!(output.len() <= QUICK_CONTEXT_OUTPUT_LIMIT_BYTES);
-        assert!(output.ends_with("... truncated at 8192 bytes"));
     }
 }

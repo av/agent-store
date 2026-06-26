@@ -1,0 +1,437 @@
+use agent_store::query::Query;
+use std::collections::BTreeMap;
+use std::error::Error;
+use std::fmt;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Cli {
+    pub json_output: bool,
+    pub command: CliCommand,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CliCommand {
+    Help,
+    Version,
+    Init,
+    Create {
+        kind: String,
+        fields: BTreeMap<String, String>,
+    },
+    Get {
+        id: String,
+    },
+    Find {
+        query: String,
+    },
+    Set {
+        id: String,
+        fields: BTreeMap<String, String>,
+    },
+    Unset {
+        id: String,
+        keys: Vec<String>,
+    },
+    Rm {
+        id: String,
+    },
+    Link {
+        from: String,
+        rel: String,
+        to: String,
+    },
+    Unlink {
+        from: String,
+        rel: String,
+        to: String,
+    },
+    Links {
+        id: String,
+    },
+    Context,
+    Hook(HookCliCommand),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HookCliCommand {
+    Add {
+        event: String,
+        query: Option<String>,
+        command: String,
+    },
+    List,
+    Remove {
+        id: String,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CliParseError {
+    message: String,
+    include_usage: bool,
+}
+
+impl CliParseError {
+    fn new(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            include_usage: false,
+        }
+    }
+
+    fn with_usage(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            include_usage: true,
+        }
+    }
+
+    pub fn include_usage(&self) -> bool {
+        self.include_usage
+    }
+}
+
+impl fmt::Display for CliParseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl Error for CliParseError {}
+
+pub fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Cli, CliParseError> {
+    let mut raw_args: Vec<String> = args.into_iter().collect();
+    let json_output = take_json_flag(&mut raw_args);
+    let mut args = raw_args.into_iter();
+
+    let command = match args.next() {
+        Some(command) => parse_command(command, args)?,
+        None => CliCommand::Help,
+    };
+
+    Ok(Cli {
+        json_output,
+        command,
+    })
+}
+
+fn parse_command(
+    command: String,
+    mut args: impl Iterator<Item = String>,
+) -> Result<CliCommand, CliParseError> {
+    match command.as_str() {
+        "-h" | "--help" => Ok(CliCommand::Help),
+        "-V" | "--version" => Ok(CliCommand::Version),
+        "init" => {
+            if let Some(extra) = args.next() {
+                return Err(CliParseError::new(format!(
+                    "init does not accept argument '{extra}'"
+                )));
+            }
+            Ok(CliCommand::Init)
+        }
+        "create" | "cr" => {
+            let kind = args
+                .next()
+                .ok_or_else(|| CliParseError::new("create requires a kind"))?;
+            let fields = parse_fields(args)?;
+            Ok(CliCommand::Create { kind, fields })
+        }
+        "get" => {
+            let id = args
+                .next()
+                .ok_or_else(|| CliParseError::new("get requires a record ID"))?;
+            if let Some(extra) = args.next() {
+                return Err(CliParseError::new(format!(
+                    "get does not accept argument '{extra}'"
+                )));
+            }
+            Ok(CliCommand::Get { id })
+        }
+        "find" | "ls" => {
+            let query = args.collect::<Vec<_>>().join(" ");
+            if query.trim().is_empty() {
+                return Err(CliParseError::new("find requires a query"));
+            }
+            Ok(CliCommand::Find { query })
+        }
+        "set" => {
+            let id = args
+                .next()
+                .ok_or_else(|| CliParseError::new("set requires a record ID"))?;
+            let fields = parse_fields(args)?;
+            if fields.is_empty() {
+                return Err(CliParseError::new(
+                    "set requires at least one key=value field",
+                ));
+            }
+            Ok(CliCommand::Set { id, fields })
+        }
+        "unset" => {
+            let id = args
+                .next()
+                .ok_or_else(|| CliParseError::new("unset requires a record ID"))?;
+            let keys = parse_field_keys(args)?;
+            if keys.is_empty() {
+                return Err(CliParseError::new("unset requires at least one field name"));
+            }
+            Ok(CliCommand::Unset { id, keys })
+        }
+        "rm" => {
+            let id = args
+                .next()
+                .ok_or_else(|| CliParseError::new("rm requires a record ID"))?;
+            if let Some(extra) = args.next() {
+                return Err(CliParseError::new(format!(
+                    "rm does not accept argument '{extra}'"
+                )));
+            }
+            Ok(CliCommand::Rm { id })
+        }
+        "link" => {
+            let (from, rel, to) = parse_link_args(args, "link")?;
+            Ok(CliCommand::Link { from, rel, to })
+        }
+        "unlink" => {
+            let (from, rel, to) = parse_link_args(args, "unlink")?;
+            Ok(CliCommand::Unlink { from, rel, to })
+        }
+        "links" => {
+            let id = args
+                .next()
+                .ok_or_else(|| CliParseError::new("links requires a record ID"))?;
+            if let Some(extra) = args.next() {
+                return Err(CliParseError::new(format!(
+                    "links does not accept argument '{extra}'"
+                )));
+            }
+            Ok(CliCommand::Links { id })
+        }
+        "ctx" | "context" => {
+            if let Some(extra) = args.next() {
+                return Err(CliParseError::new(format!(
+                    "{command} does not accept argument '{extra}'"
+                )));
+            }
+            Ok(CliCommand::Context)
+        }
+        "hook" => parse_hook_command(args).map(CliCommand::Hook),
+        _ => Err(CliParseError::with_usage(format!(
+            "unrecognized command '{command}'"
+        ))),
+    }
+}
+
+fn parse_hook_command(
+    mut args: impl Iterator<Item = String>,
+) -> Result<HookCliCommand, CliParseError> {
+    match args.next().as_deref() {
+        Some("add") => {
+            let (event, query, command) = parse_hook_add_args(args)?;
+            Ok(HookCliCommand::Add {
+                event,
+                query,
+                command,
+            })
+        }
+        Some("ls") => {
+            if let Some(extra) = args.next() {
+                return Err(CliParseError::new(format!(
+                    "hook ls does not accept argument '{extra}'"
+                )));
+            }
+            Ok(HookCliCommand::List)
+        }
+        Some("rm") => {
+            let id = args
+                .next()
+                .ok_or_else(|| CliParseError::new("hook rm requires a hook ID"))?;
+            if let Some(extra) = args.next() {
+                return Err(CliParseError::new(format!(
+                    "hook rm does not accept argument '{extra}'"
+                )));
+            }
+            Ok(HookCliCommand::Remove { id })
+        }
+        Some(command) => Err(CliParseError::new(format!(
+            "unrecognized hook command '{command}'"
+        ))),
+        None => Err(CliParseError::new("hook requires add, ls, or rm")),
+    }
+}
+
+fn take_json_flag(args: &mut Vec<String>) -> bool {
+    let mut json_output = false;
+    args.retain(|arg| {
+        if arg == "--json" {
+            json_output = true;
+            false
+        } else {
+            true
+        }
+    });
+    json_output
+}
+
+fn parse_fields(
+    args: impl Iterator<Item = String>,
+) -> Result<BTreeMap<String, String>, CliParseError> {
+    let mut fields = BTreeMap::new();
+
+    for arg in args {
+        let Some((key, value)) = arg.split_once('=') else {
+            return Err(CliParseError::new(format!(
+                "field argument '{arg}' must use key=value syntax"
+            )));
+        };
+        if key.is_empty() {
+            return Err(CliParseError::new("field names cannot be empty"));
+        }
+
+        fields.insert(key.to_owned(), value.to_owned());
+    }
+
+    Ok(fields)
+}
+
+fn parse_field_keys(args: impl Iterator<Item = String>) -> Result<Vec<String>, CliParseError> {
+    let mut keys = Vec::new();
+
+    for arg in args {
+        if arg.is_empty() {
+            return Err(CliParseError::new("field names cannot be empty"));
+        }
+        if arg.contains('=') {
+            return Err(CliParseError::new(format!(
+                "field argument '{arg}' must be a field name, not key=value"
+            )));
+        }
+
+        keys.push(arg);
+    }
+
+    Ok(keys)
+}
+
+fn parse_link_args(
+    mut args: impl Iterator<Item = String>,
+    command: &str,
+) -> Result<(String, String, String), CliParseError> {
+    let Some(from) = args.next() else {
+        return Err(CliParseError::new(format!(
+            "{command} requires <from> <rel> <to>"
+        )));
+    };
+    let Some(rel) = args.next() else {
+        return Err(CliParseError::new(format!(
+            "{command} requires <from> <rel> <to>"
+        )));
+    };
+    let Some(to) = args.next() else {
+        return Err(CliParseError::new(format!(
+            "{command} requires <from> <rel> <to>"
+        )));
+    };
+    if let Some(extra) = args.next() {
+        return Err(CliParseError::new(format!(
+            "{command} does not accept argument '{extra}'"
+        )));
+    }
+
+    Ok((from, rel, to))
+}
+
+fn parse_hook_add_args(
+    args: impl Iterator<Item = String>,
+) -> Result<(String, Option<String>, String), CliParseError> {
+    let args = args.collect::<Vec<_>>();
+    let Some(separator) = args.iter().position(|arg| arg == "--") else {
+        return Err(CliParseError::new(
+            "hook add requires <event> [<Query>] -- <bash command>",
+        ));
+    };
+
+    let before_separator = &args[..separator];
+    let after_separator = &args[separator + 1..];
+    let Some(event) = before_separator.first() else {
+        return Err(CliParseError::new("hook add requires an event before --"));
+    };
+    if after_separator.is_empty() {
+        return Err(CliParseError::new(
+            "hook add requires a bash command after --",
+        ));
+    }
+
+    let query = if before_separator.len() > 1 {
+        let query_text = before_separator[1..].join(" ");
+        Query::parse(&query_text)
+            .map_err(|error| CliParseError::new(format!("invalid hook query: {error}")))?;
+        Some(query_text)
+    } else {
+        None
+    };
+    let command = after_separator.join(" ");
+    if command.trim().is_empty() {
+        return Err(CliParseError::new(
+            "hook add requires a non-empty bash command after --",
+        ));
+    }
+
+    Ok((event.clone(), query, command))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_json_flag_from_any_position() {
+        let parsed = parse_args([
+            "create".to_owned(),
+            "task".to_owned(),
+            "title=Write".to_owned(),
+            "--json".to_owned(),
+        ])
+        .expect("args should parse");
+
+        assert!(parsed.json_output);
+        assert_eq!(
+            parsed.command,
+            CliCommand::Create {
+                kind: "task".to_owned(),
+                fields: BTreeMap::from([("title".to_owned(), "Write".to_owned())]),
+            }
+        );
+    }
+
+    #[test]
+    fn parses_hook_add_query_and_command() {
+        let parsed = parse_args([
+            "hook".to_owned(),
+            "add".to_owned(),
+            "create".to_owned(),
+            "kind=task".to_owned(),
+            "--".to_owned(),
+            "echo".to_owned(),
+            "created".to_owned(),
+        ])
+        .expect("args should parse");
+
+        assert_eq!(
+            parsed.command,
+            CliCommand::Hook(HookCliCommand::Add {
+                event: "create".to_owned(),
+                query: Some("kind=task".to_owned()),
+                command: "echo created".to_owned(),
+            })
+        );
+    }
+
+    #[test]
+    fn unknown_top_level_commands_request_usage() {
+        let error = parse_args(["missing".to_owned()]).expect_err("args should fail");
+
+        assert_eq!(error.to_string(), "unrecognized command 'missing'");
+        assert!(error.include_usage());
+    }
+}

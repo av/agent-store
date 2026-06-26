@@ -3,7 +3,9 @@
   id: 28o
   command: sh -c 'cargo run --quiet -- --help > /tmp/agent-store-help-28o.txt && grep -Fq "Usage: agent-store" /tmp/agent-store-help-28o.txt'
   tags: [implemented]
-- agent-store keeps command parsing, command behavior, persistence, and output formatting separated behind small internal boundaries @draft
+- label: agent-store has separate internal boundaries for CLI argument parsing, command execution, persistence access, and user-facing text/JSON output formatting
+  id: 1gb
+  tags: [implemented]
 
 # CLI
 
