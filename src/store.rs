@@ -1,5 +1,6 @@
 use rand::Rng;
 use rusqlite::{params, Connection, ErrorCode, OptionalExtension, Transaction};
+use serde_json::json;
 use std::collections::BTreeMap;
 use std::error::Error;
 use std::fmt;
@@ -107,6 +108,7 @@ pub struct Store {
 pub enum StoreError {
     Io(std::io::Error),
     Sql(rusqlite::Error),
+    Json(serde_json::Error),
     MigrationChecksum {
         version: i64,
         name: String,
@@ -124,6 +126,7 @@ impl fmt::Display for StoreError {
         match self {
             Self::Io(error) => write!(f, "{error}"),
             Self::Sql(error) => write!(f, "{error}"),
+            Self::Json(error) => write!(f, "{error}"),
             Self::MigrationChecksum {
                 version,
                 name,
@@ -146,6 +149,7 @@ impl Error for StoreError {
         match self {
             Self::Io(error) => Some(error),
             Self::Sql(error) => Some(error),
+            Self::Json(error) => Some(error),
             _ => None,
         }
     }
@@ -160,6 +164,12 @@ impl From<std::io::Error> for StoreError {
 impl From<rusqlite::Error> for StoreError {
     fn from(error: rusqlite::Error) -> Self {
         Self::Sql(error)
+    }
+}
+
+impl From<serde_json::Error> for StoreError {
+    fn from(error: serde_json::Error) -> Self {
+        Self::Json(error)
     }
 }
 
@@ -204,41 +214,78 @@ impl Store {
     pub fn get_record(&self, id_prefix: &str) -> StoreResult<Record> {
         validate_id_prefix(id_prefix)?;
         let id = self.resolve_id(id_prefix)?;
-        let kind = self.conn.query_row(
-            "SELECT kind FROM records WHERE id = ?1",
-            params![id],
-            |row| row.get::<_, String>(0),
-        )?;
+        get_record_by_id(&self.conn, &id)
+    }
 
-        let mut fields = BTreeMap::new();
-        let mut stmt = self.conn.prepare(
-            "SELECT key, raw_value FROM record_fields WHERE record_id = ?1 ORDER BY key",
-        )?;
-        let rows = stmt.query_map(params![id], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        })?;
-        for row in rows {
-            let (key, value) = row?;
-            fields.insert(key, value);
-        }
+    pub fn delete_record(&mut self, id_prefix: &str) -> StoreResult<Record> {
+        validate_id_prefix(id_prefix)?;
+        let tx = self.conn.transaction()?;
+        let id = resolve_id(&tx, id_prefix)?;
+        let record = get_record_by_id(&tx, &id)?;
+        let snapshot = record_snapshot_json(&record)?;
 
-        Ok(Record { id, kind, fields })
+        tx.execute(
+            r#"
+            INSERT INTO store_events (event_type, record_id, record_snapshot)
+            VALUES ('rm', ?1, ?2)
+            "#,
+            params![&record.id, &snapshot],
+        )?;
+        tx.execute("DELETE FROM records WHERE id = ?1", params![&record.id])?;
+        tx.commit()?;
+
+        Ok(record)
     }
 
     fn resolve_id(&self, id_prefix: &str) -> StoreResult<String> {
-        let pattern = format!("{id_prefix}%");
-        let mut stmt = self
-            .conn
-            .prepare("SELECT id FROM records WHERE id LIKE ?1 ORDER BY id LIMIT 2")?;
-        let rows = stmt.query_map(params![pattern], |row| row.get::<_, String>(0))?;
-        let ids: Vec<String> = rows.collect::<Result<_, _>>()?;
-
-        match ids.as_slice() {
-            [] => Err(StoreError::NotFound(id_prefix.to_owned())),
-            [id] => Ok(id.clone()),
-            _ => Err(StoreError::AmbiguousId(id_prefix.to_owned())),
-        }
+        resolve_id(&self.conn, id_prefix)
     }
+}
+
+fn get_record_by_id(conn: &Connection, id: &str) -> StoreResult<Record> {
+    let kind = conn.query_row(
+        "SELECT kind FROM records WHERE id = ?1",
+        params![id],
+        |row| row.get::<_, String>(0),
+    )?;
+
+    let mut fields = BTreeMap::new();
+    let mut stmt =
+        conn.prepare("SELECT key, raw_value FROM record_fields WHERE record_id = ?1 ORDER BY key")?;
+    let rows = stmt.query_map(params![id], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })?;
+    for row in rows {
+        let (key, value) = row?;
+        fields.insert(key, value);
+    }
+
+    Ok(Record {
+        id: id.to_owned(),
+        kind,
+        fields,
+    })
+}
+
+fn resolve_id(conn: &Connection, id_prefix: &str) -> StoreResult<String> {
+    let pattern = format!("{id_prefix}%");
+    let mut stmt = conn.prepare("SELECT id FROM records WHERE id LIKE ?1 ORDER BY id LIMIT 2")?;
+    let rows = stmt.query_map(params![pattern], |row| row.get::<_, String>(0))?;
+    let ids: Vec<String> = rows.collect::<Result<_, _>>()?;
+
+    match ids.as_slice() {
+        [] => Err(StoreError::NotFound(id_prefix.to_owned())),
+        [id] => Ok(id.clone()),
+        _ => Err(StoreError::AmbiguousId(id_prefix.to_owned())),
+    }
+}
+
+fn record_snapshot_json(record: &Record) -> StoreResult<String> {
+    Ok(serde_json::to_string(&json!({
+        "id": record.id,
+        "kind": record.kind,
+        "fields": record.fields,
+    }))?)
 }
 
 fn run_migrations(conn: &mut Connection) -> StoreResult<()> {

@@ -288,6 +288,53 @@ assert con.execute(
 PY
     ;;
 
+  hard_delete_store_event_snapshot)
+    cd "$tmp"
+    victim="$(create_record task title=victim status=open note="hello world")"
+    run_agent_store rm "$victim" >/tmp/agent-store-rm-vju.out
+    grep -Fxq "Removed $victim" /tmp/agent-store-rm-vju.out
+    if run_agent_store get "$victim" >/tmp/agent-store-rm-vju-get.out 2>/tmp/agent-store-rm-vju-get.err; then
+      exit 1
+    fi
+    grep -Fq "was not found" /tmp/agent-store-rm-vju-get.err
+    python3 - .agent-store/store.sqlite "$victim" <<'PY'
+import json
+import sqlite3
+import sys
+
+db, victim = sys.argv[1:]
+con = sqlite3.connect(db)
+rows = con.execute(
+    """
+    select event_type, record_id, record_snapshot, created_at
+    from store_events
+    order by id
+    """
+).fetchall()
+assert len(rows) == 1, rows
+event_type, record_id, record_snapshot, created_at = rows[0]
+assert event_type == "rm", rows[0]
+assert record_id == victim, rows[0]
+assert created_at, rows[0]
+
+snapshot = json.loads(record_snapshot)
+assert snapshot == {
+    "id": victim,
+    "kind": "task",
+    "fields": {
+        "note": "hello world",
+        "status": "open",
+        "title": "victim",
+    },
+}, snapshot
+assert con.execute("select count(*) from records where id = ?", (victim,)).fetchone()[0] == 0
+assert con.execute(
+    "select count(*) from record_fields where record_id = ?",
+    (victim,),
+).fetchone()[0] == 0
+PY
+    ;;
+
   migration_checksum_mismatch)
     cd "$tmp"
     mkdir .agent-store
@@ -321,7 +368,7 @@ PY
     ;;
 
   *)
-    echo "usage: $0 {store_is_project_local|migrations_apply_on_open|initial_schema_tables|records_columns|record_fields_typed_columns|record_links_cardinality_shape|record_links_columns_unique|record_delete_cascades_links|migration_checksum_mismatch}" >&2
+    echo "usage: $0 {store_is_project_local|migrations_apply_on_open|initial_schema_tables|records_columns|record_fields_typed_columns|record_links_cardinality_shape|record_links_columns_unique|record_delete_cascades_links|hard_delete_store_event_snapshot|migration_checksum_mismatch}" >&2
     exit 2
     ;;
 esac

@@ -143,6 +143,7 @@ Commands:
   init          Initialize a project-local store
   create        Create a record
   get           Print a record by ID
+  rm            Delete a record by ID
 ";
 
 fn main() {
@@ -206,6 +207,25 @@ fn main() {
                 Ok(record) => println!("{}", format_record(&record)),
                 Err(error) => {
                     eprintln!("error: failed to get record: {error}");
+                    process::exit(1);
+                }
+            }
+        }
+        Some("rm") => {
+            let Some(id) = args.next() else {
+                eprintln!("error: rm requires a record ID");
+                process::exit(2);
+            };
+            if let Some(extra) = args.next() {
+                eprintln!("error: rm does not accept argument '{extra}'");
+                process::exit(2);
+            }
+
+            let mut store = open_store_or_exit();
+            match store.delete_record(&id) {
+                Ok(record) => println!("Removed {}", record.id),
+                Err(error) => {
+                    eprintln!("error: failed to remove record: {error}");
                     process::exit(1);
                 }
             }

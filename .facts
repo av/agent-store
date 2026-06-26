@@ -104,7 +104,9 @@
 - label: deleting a Record cascades to its Fields and Links but does not delete other Records linked to it
   command: bash tests/facts/store_schema_migrations.sh record_delete_cascades_links
   tags: [implemented]
-- hard deletes write a Store Event with a pre-delete Record snapshot before removing the active Record row @draft
+- label: hard deletes write a Store Event with a pre-delete Record snapshot before removing the active Record row
+  command: bash tests/facts/store_schema_migrations.sh hard_delete_store_event_snapshot
+  tags: [implemented]
 
 ## migrations
 - schema migrations are embedded in the Rust binary and run inside transactions when a Store is opened @implemented
