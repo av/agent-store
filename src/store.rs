@@ -89,17 +89,61 @@ CREATE TABLE hook_runs (
 );
 "#;
 
+const PRESERVE_HOOK_RUNS_AFTER_HOOK_DELETE: &str = r#"
+CREATE TABLE hook_runs_rebuilt (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    hook_id TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    record_id TEXT,
+    exit_status INTEGER,
+    stdout_summary TEXT,
+    stderr_summary TEXT,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+INSERT INTO hook_runs_rebuilt (
+    id,
+    hook_id,
+    event_type,
+    record_id,
+    exit_status,
+    stdout_summary,
+    stderr_summary,
+    created_at
+)
+SELECT
+    id,
+    hook_id,
+    event_type,
+    record_id,
+    exit_status,
+    stdout_summary,
+    stderr_summary,
+    created_at
+FROM hook_runs;
+
+DROP TABLE hook_runs;
+ALTER TABLE hook_runs_rebuilt RENAME TO hook_runs;
+"#;
+
 struct Migration {
     version: i64,
     name: &'static str,
     sql: &'static str,
 }
 
-const MIGRATIONS: &[Migration] = &[Migration {
-    version: 1,
-    name: "initial_schema",
-    sql: INITIAL_SCHEMA,
-}];
+const MIGRATIONS: &[Migration] = &[
+    Migration {
+        version: 1,
+        name: "initial_schema",
+        sql: INITIAL_SCHEMA,
+    },
+    Migration {
+        version: 2,
+        name: "preserve_hook_runs_after_hook_delete",
+        sql: PRESERVE_HOOK_RUNS_AFTER_HOOK_DELETE,
+    },
+];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Record {
@@ -917,7 +961,6 @@ impl Store {
         let tx = self
             .conn
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        get_hook_by_id(&tx, hook_id)?;
         tx.execute(
             r#"
             INSERT INTO hook_runs (
@@ -1501,6 +1544,91 @@ mod tests {
 
         let reopened = Store::open(db_path).unwrap();
         assert_eq!(reopened.list_hook_runs().unwrap(), vec![run]);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn hook_runs_survive_hook_deletion() {
+        let dir = std::env::temp_dir().join(format!("agent-store-test-{}", generate_id()));
+        fs::create_dir_all(&dir).unwrap();
+        let db_path = dir.join("store.sqlite");
+        let mut store = Store::open(db_path).unwrap();
+
+        let hook = store.add_hook("create", None, "printf ok").unwrap();
+        let record = store
+            .create_record("task", BTreeMap::from([("title".into(), "write".into())]))
+            .unwrap();
+        let removed = store.delete_hook(&hook.id).unwrap();
+        assert_eq!(removed, hook);
+        assert!(store.list_hooks().unwrap().is_empty());
+
+        let run = store
+            .record_hook_run(&hook.id, "create", &record.id, 0, "ok", "")
+            .unwrap();
+        assert_eq!(run.hook_id, hook.id);
+        assert_eq!(store.list_hook_runs().unwrap(), vec![run]);
+
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn migration_preserves_existing_hook_runs_after_hook_deletion() {
+        let dir = std::env::temp_dir().join(format!("agent-store-test-{}", generate_id()));
+        fs::create_dir_all(&dir).unwrap();
+        let db_path = dir.join("store.sqlite");
+
+        {
+            let conn = Connection::open(&db_path).unwrap();
+            conn.pragma_update(None, "foreign_keys", "ON").unwrap();
+            conn.execute_batch(INITIAL_SCHEMA).unwrap();
+            conn.execute_batch(
+                r#"
+                CREATE TABLE schema_migrations (
+                    version INTEGER PRIMARY KEY NOT NULL,
+                    name TEXT NOT NULL,
+                    checksum TEXT NOT NULL,
+                    applied_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+                );
+                "#,
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO schema_migrations (version, name, checksum) VALUES (1, 'initial_schema', ?1)",
+                params![migration_checksum(INITIAL_SCHEMA)],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO hooks (id, event, query, command) VALUES ('aaaaaa', 'create', NULL, 'printf ok')",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO records (id, kind, created_at, updated_at) VALUES ('bbbbbb', 'task', 'now', 'now')",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO hook_runs (hook_id, event_type, record_id, exit_status, stdout_summary, stderr_summary) VALUES ('aaaaaa', 'create', 'bbbbbb', 0, 'ok', '')",
+                [],
+            )
+            .unwrap();
+        }
+
+        let mut store = Store::open(db_path).unwrap();
+        let migration_count: i64 = store
+            .conn
+            .query_row("SELECT COUNT(*) FROM schema_migrations", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(migration_count, 2);
+        store.delete_hook("aaaaaa").unwrap();
+
+        let runs = store.list_hook_runs().unwrap();
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].hook_id, "aaaaaa");
+        assert_eq!(runs[0].record_id, "bbbbbb");
+
         fs::remove_dir_all(dir).unwrap();
     }
 }

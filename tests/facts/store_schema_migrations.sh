@@ -12,6 +12,7 @@ run_agent_store() {
 }
 
 create_store() {
+  run_agent_store init >/dev/null
   run_agent_store create task \
     title=Write \
     text=hello \
@@ -53,11 +54,13 @@ import sys
 db = sys.argv[1]
 con = sqlite3.connect(db)
 rows = con.execute("select version, name, length(checksum), applied_at from schema_migrations").fetchall()
-assert len(rows) == 1, rows
-assert rows[0][0] == 1, rows
-assert rows[0][1] == "initial_schema", rows
-assert rows[0][2] == 16, rows
-assert rows[0][3], rows
+assert [(row[0], row[1]) for row in rows] == [
+    (1, "initial_schema"),
+    (2, "preserve_hook_runs_after_hook_delete"),
+], rows
+for row in rows:
+    assert row[2] == 16, row
+    assert row[3], row
 PY
     ;;
 
@@ -741,6 +744,281 @@ remaining_targets = con.execute(
 ).fetchone()[0]
 assert remaining_targets == 0, remaining_targets
 PY
+    ;;
+
+  concurrent_hook_lifecycle_races)
+    CARGO_TARGET_DIR="$target_dir" cargo build --quiet --manifest-path "$repo/Cargo.toml"
+    agent_store_bin="$target_dir/debug/agent-store"
+    cd "$tmp"
+    "$agent_store_bin" init >/tmp/agent-store-hook-lifecycle-init.out
+
+    evidence_root="${AGENT_STORE_E2E_DIR:-}"
+    if [ -n "$evidence_root" ]; then
+      mkdir -p "$evidence_root/logs" "$evidence_root/reports"
+    fi
+
+    side_effects="$tmp/hook-side-effects"
+    mkdir "$side_effects"
+
+    cat > slow-hook.sh <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+name="$1"
+started_dir="$2"
+release_file="$3"
+side_effects="$4"
+touch "$started_dir/$name-$AGENT_STORE_ID"
+while [ ! -f "$release_file" ]; do
+  sleep 0.01
+done
+touch "$side_effects/$name-$AGENT_STORE_ID"
+printf "%s" "$name"
+SH
+    chmod +x slow-hook.sh
+
+    cat > quick-hook.sh <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+name="$1"
+side_effects="$2"
+touch "$side_effects/$name-$AGENT_STORE_ID"
+printf "%s" "$name"
+SH
+    chmod +x quick-hook.sh
+
+    wait_for_file_count() {
+      local dir="$1"
+      local expected="$2"
+      local attempts=500
+      while [ "$(find "$dir" -type f | wc -l | tr -d ' ')" -lt "$expected" ]; do
+        attempts=$((attempts - 1))
+        if [ "$attempts" -le 0 ]; then
+          find "$dir" -type f -print >&2
+          return 1
+        fi
+        sleep 0.01
+      done
+    }
+
+    remove_started="$tmp/remove-started"
+    mkdir "$remove_started"
+    remove_release="$tmp/remove-release"
+    removed_hook_id="$("$agent_store_bin" hook add create 'kind=task and batch=hook-lifecycle-remove' -- "./slow-hook.sh removed-hook $remove_started $remove_release $side_effects")"
+
+    "$agent_store_bin" create task title=remove-race batch=hook-lifecycle-remove >"$tmp/remove-create.out" 2>"$tmp/remove-create.err" &
+    remove_pid="$!"
+    wait_for_file_count "$remove_started" 1
+
+    "$agent_store_bin" hook rm "$removed_hook_id" >"$tmp/remove-hook.out" 2>"$tmp/remove-hook.err"
+    grep -Fxq "Removed $removed_hook_id" "$tmp/remove-hook.out"
+    touch "$remove_release"
+
+    set +e
+    wait "$remove_pid"
+    remove_create_code="$?"
+    set -e
+    printf "%s" "$remove_create_code" >"$tmp/remove-create.status"
+    if [ "$remove_create_code" != "0" ]; then
+      cat "$tmp/remove-create.err" >&2
+      exit 1
+    fi
+    remove_record="$(cat "$tmp/remove-create.out")"
+    test -f "$side_effects/removed-hook-$remove_record"
+
+    add_started="$tmp/add-started"
+    mkdir "$add_started"
+    add_release="$tmp/add-release"
+    holding_hook_id="$("$agent_store_bin" hook add create 'kind=task and batch=hook-lifecycle-add' -- "./slow-hook.sh holding-hook $add_started $add_release $side_effects")"
+
+    add_workers=6
+    add_pids=()
+    for index in $(seq 1 "$add_workers"); do
+      "$agent_store_bin" create task title="add-race-$index" batch=hook-lifecycle-add >"$tmp/add-create-$index.out" 2>"$tmp/add-create-$index.err" &
+      add_pids+=("$!")
+    done
+    wait_for_file_count "$add_started" "$add_workers"
+
+    add_hook_pids=()
+    add_hook_count=3
+    for index in $(seq 1 "$add_hook_count"); do
+      "$agent_store_bin" hook add create 'kind=task and batch=hook-lifecycle-add' -- "./quick-hook.sh added-$index $side_effects" >"$tmp/add-hook-$index.out" 2>"$tmp/add-hook-$index.err" &
+      add_hook_pids+=("$!")
+    done
+    for pid in "${add_hook_pids[@]}"; do
+      wait "$pid"
+    done
+
+    added_hook_ids=()
+    for index in $(seq 1 "$add_hook_count"); do
+      added_hook_ids+=("$(cat "$tmp/add-hook-$index.out")")
+    done
+
+    touch "$add_release"
+    add_status=0
+    for pid in "${add_pids[@]}"; do
+      if ! wait "$pid"; then
+        add_status=1
+      fi
+    done
+    if [ "$add_status" -ne 0 ]; then
+      cat "$tmp"/add-create-*.err >&2
+      exit 1
+    fi
+
+    post_add_record="$("$agent_store_bin" create task title=post-add batch=hook-lifecycle-add)"
+
+    if grep -R "database is locked" "$tmp"/*.err; then
+      exit 1
+    fi
+    if grep -R "failed to run hooks after Store mutation already committed" "$tmp"/*.err; then
+      exit 1
+    fi
+    if grep -R "panicked at" "$tmp"/*.err; then
+      exit 1
+    fi
+
+    "$agent_store_bin" hook ls >"$tmp/hook-ls.out" 2>"$tmp/hook-ls.err"
+    if grep -Fq "$removed_hook_id " "$tmp/hook-ls.out"; then
+      exit 1
+    fi
+    grep -Fq "$holding_hook_id " "$tmp/hook-ls.out"
+    for hook_id in "${added_hook_ids[@]}"; do
+      grep -Fq "$hook_id " "$tmp/hook-ls.out"
+    done
+
+    for index in $(seq 1 "$add_workers"); do
+      record_id="$(cat "$tmp/add-create-$index.out")"
+      test -f "$side_effects/holding-hook-$record_id"
+      if compgen -G "$side_effects/added-*-$record_id" >/dev/null; then
+        exit 1
+      fi
+    done
+    test -f "$side_effects/holding-hook-$post_add_record"
+    for index in $(seq 1 "$add_hook_count"); do
+      test -f "$side_effects/added-$index-$post_add_record"
+    done
+
+    added_ids_arg="$(IFS=,; printf "%s" "${added_hook_ids[*]}")"
+    summary="$(python3 - .agent-store/store.sqlite "$removed_hook_id" "$holding_hook_id" "$added_ids_arg" "$remove_record" "$post_add_record" "$add_workers" "$add_hook_count" <<'PY'
+import sqlite3
+import sys
+
+(
+    db,
+    removed_hook_id,
+    holding_hook_id,
+    added_ids_arg,
+    remove_record,
+    post_add_record,
+    add_workers_s,
+    add_hook_count_s,
+) = sys.argv[1:]
+add_workers = int(add_workers_s)
+add_hook_count = int(add_hook_count_s)
+added_hook_ids = [item for item in added_ids_arg.split(",") if item]
+assert len(added_hook_ids) == add_hook_count, added_hook_ids
+
+con = sqlite3.connect(db)
+
+removed_hook_rows = con.execute(
+    "select count(*) from hooks where id = ?",
+    (removed_hook_id,),
+).fetchone()[0]
+assert removed_hook_rows == 0, removed_hook_rows
+
+present_hooks = {
+    row[0]
+    for row in con.execute(
+        "select id from hooks where id in ({})".format(",".join("?" for _ in [holding_hook_id, *added_hook_ids])),
+        [holding_hook_id, *added_hook_ids],
+    )
+}
+expected_present = {holding_hook_id, *added_hook_ids}
+assert present_hooks == expected_present, (present_hooks, expected_present)
+
+removed_runs = con.execute(
+    """
+    select record_id, exit_status, stdout_summary, stderr_summary
+    from hook_runs
+    where hook_id = ?
+    """,
+    (removed_hook_id,),
+).fetchall()
+assert removed_runs == [(remove_record, 0, "removed-hook", "")], removed_runs
+
+holding_runs = con.execute(
+    "select count(*) from hook_runs where hook_id = ?",
+    (holding_hook_id,),
+).fetchone()[0]
+assert holding_runs == add_workers + 1, holding_runs
+
+for hook_id in added_hook_ids:
+    rows = con.execute(
+        "select record_id, exit_status from hook_runs where hook_id = ?",
+        (hook_id,),
+    ).fetchall()
+    assert rows == [(post_add_record, 0)], (hook_id, rows)
+
+record_counts = dict(
+    con.execute(
+        """
+        select rf.raw_value, count(*)
+        from records r
+        join record_fields rf on rf.record_id = r.id
+        where rf.key = 'batch'
+          and rf.raw_value in ('hook-lifecycle-remove', 'hook-lifecycle-add')
+        group by rf.raw_value
+        """
+    ).fetchall()
+)
+assert record_counts == {
+    "hook-lifecycle-remove": 1,
+    "hook-lifecycle-add": add_workers + 1,
+}, record_counts
+
+total_runs = con.execute(
+    "select count(*) from hook_runs where hook_id in ({})".format(",".join("?" for _ in [removed_hook_id, holding_hook_id, *added_hook_ids])),
+    [removed_hook_id, holding_hook_id, *added_hook_ids],
+).fetchone()[0]
+expected_runs = 1 + add_workers + 1 + add_hook_count
+assert total_runs == expected_runs, (total_runs, expected_runs)
+
+print(
+    "removed_hook_runs={removed} holding_hook_runs={holding} added_hook_runs={added} final_hooks={final_hooks}".format(
+        removed=len(removed_runs),
+        holding=holding_runs,
+        added=add_hook_count,
+        final_hooks=len(present_hooks),
+    )
+)
+PY
+)"
+
+    expected_side_effects=$((1 + add_workers + 1 + add_hook_count))
+    side_effect_count="$(find "$side_effects" -type f | wc -l | tr -d ' ')"
+    test "$side_effect_count" = "$expected_side_effects"
+
+    if [ -n "$evidence_root" ]; then
+      find "$tmp" -maxdepth 1 -type f \
+        \( -name 'remove-*' -o -name 'add-*' -o -name 'hook-ls.*' \) \
+        -exec cp {} "$evidence_root/logs/" \;
+      find "$side_effects" -maxdepth 1 -type f -exec cp {} "$evidence_root/logs/" \;
+      cp .agent-store/store.sqlite "$evidence_root/store.sqlite"
+      cat > "$evidence_root/reports/concurrent-hook-lifecycle-races.md" <<EOF
+# Concurrent Hook Lifecycle Race Evidence
+
+- removed_hook_id: $removed_hook_id
+- holding_hook_id: $holding_hook_id
+- added_hook_ids: ${added_hook_ids[*]}
+- remove_record: $remove_record
+- post_add_record: $post_add_record
+- add_workers: $add_workers
+- $summary
+- hook_side_effects: $side_effect_count
+- database: $evidence_root/store.sqlite
+- logs: $evidence_root/logs
+EOF
+    fi
     ;;
 
   concurrent_link_record_disappearance_races)
@@ -1763,7 +2041,7 @@ EOF
     ;;
 
   *)
-    echo "usage: $0 {store_is_project_local|migrations_apply_on_open|initial_schema_tables|records_columns|record_fields_typed_columns|record_links_cardinality_shape|record_links_columns_unique|record_delete_cascades_links|hard_delete_store_event_snapshot|record_mutations_transactional|persistence_open_errors_actionable|migration_checksum_mismatch|concurrent_process_writers|concurrent_process_writers_with_hooks|concurrent_process_mutations_with_hooks|concurrent_link_record_disappearance_races|concurrent_set_unset_link_snapshot_races|create_rm_link_snapshot_hooks|concurrent_same_record_and_link_races}" >&2
+    echo "usage: $0 {store_is_project_local|migrations_apply_on_open|initial_schema_tables|records_columns|record_fields_typed_columns|record_links_cardinality_shape|record_links_columns_unique|record_delete_cascades_links|hard_delete_store_event_snapshot|record_mutations_transactional|persistence_open_errors_actionable|migration_checksum_mismatch|concurrent_process_writers|concurrent_process_writers_with_hooks|concurrent_process_mutations_with_hooks|concurrent_hook_lifecycle_races|concurrent_link_record_disappearance_races|concurrent_set_unset_link_snapshot_races|create_rm_link_snapshot_hooks|concurrent_same_record_and_link_races}" >&2
     exit 2
     ;;
 esac

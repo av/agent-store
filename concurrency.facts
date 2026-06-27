@@ -13,3 +13,7 @@
 - label: create Hooks evaluate link predicates against an empty create-time Link snapshot, and rm Hooks evaluate link predicates against the pre-delete Link snapshot so post-event Link changes do not make matching Hooks skip or non-matching Hooks run
   command: bash tests/facts/store_schema_migrations.sh create_rm_link_snapshot_hooks
   tags: [implemented]
+- label: simultaneous hook add and hook rm with matching create mutations finish without database lock errors or post-commit hook persistence failures, leave removed Hooks absent and added Hooks present, and persist Hook Runs for Hooks already selected by committed mutations even if those Hooks are removed before the run is recorded
+  id: hkr
+  command: bash tests/facts/store_schema_migrations.sh concurrent_hook_lifecycle_races
+  tags: [implemented]
