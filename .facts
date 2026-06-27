@@ -113,6 +113,12 @@
   command: bash tests/facts/cli_links.sh find_filters_links
   tags: [implemented]
 
+## help
+- label: agent-store documented subcommands, aliases, and hook subcommands treat -h and --help as read-only help: each exits 0, prints command-specific usage, and does not create, update, delete, link, unlink, or run Hooks
+  id: x3h
+  command: bash tests/facts/cli_help.sh subcommand_help_is_read_only
+  tags: [implemented]
+
 # domain
 - label: a Store is a project-local SQLite-backed database under .agent-store
   command: bash tests/facts/store_schema_migrations.sh store_is_project_local

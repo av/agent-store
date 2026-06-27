@@ -5,8 +5,8 @@ use agent_store::query::Query;
 use agent_store::store::{Hook, Link, Record, Store, STORE_DIR};
 use cli::{CliCommand, HookCliCommand};
 use output::{
-    format_hook, format_quick_context, format_record, init_json, link_mutation_json, mutation_json,
-    print_json, record_links_json, records_json, single_record_json,
+    format_hook, format_quick_context, format_record, help_text, init_json, link_mutation_json,
+    mutation_json, print_json, record_links_json, records_json, single_record_json,
     QUICK_CONTEXT_OUTPUT_LIMIT_BYTES, USAGE,
 };
 use std::env;
@@ -165,8 +165,8 @@ fn main() {
     };
 
     match cli.command {
-        CliCommand::Help => {
-            print!("{USAGE}");
+        CliCommand::Help { topic } => {
+            print!("{}", help_text(topic));
         }
         CliCommand::Version => {
             println!("agent-store {}", env!("CARGO_PKG_VERSION"));

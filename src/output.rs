@@ -1,3 +1,4 @@
+use crate::cli::HelpTopic;
 use agent_store::store::{Hook, Link, LinkEdge, QuickContextSummary, Record};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
@@ -31,6 +32,128 @@ Commands:
 Quick Context output is capped at 8192 bytes.
 Hook stdout and stderr captures are capped at 8192 bytes each.
 ";
+
+const INIT_USAGE: &str = "\
+Usage: agent-store init
+
+Initialize the project-local store, install builtin skills, and add managed
+agent-store instructions to existing AGENTS.md and CLAUDE.md files.
+";
+
+const CREATE_USAGE: &str = "\
+Usage: agent-store create <kind> [key=value...]
+       agent-store cr <kind> [key=value...]
+
+Create a Record with the supplied kind and fields, then print its Record ID.
+";
+
+const GET_USAGE: &str = "\
+Usage: agent-store get <ID>
+
+Print one Record resolved from an unambiguous Record ID prefix.
+";
+
+const FIND_USAGE: &str = "\
+Usage: agent-store find <Query>
+       agent-store ls <Query>
+
+Find Records by query. Query arguments may be quoted as one shell argument or
+passed as multiple arguments that are joined with spaces.
+";
+
+const SET_USAGE: &str = "\
+Usage: agent-store set <ID> key=value...
+
+Resolve a Record ID prefix and update the supplied fields atomically.
+";
+
+const UNSET_USAGE: &str = "\
+Usage: agent-store unset <ID> key...
+
+Resolve a Record ID prefix and remove the supplied fields atomically.
+";
+
+const RM_USAGE: &str = "\
+Usage: agent-store rm <ID>
+
+Resolve a Record ID prefix and delete that Record.
+";
+
+const LINK_USAGE: &str = "\
+Usage: agent-store link <from> <rel> <to>
+
+Resolve source and target Record ID prefixes and create one directional Link.
+";
+
+const UNLINK_USAGE: &str = "\
+Usage: agent-store unlink <from> <rel> <to>
+
+Resolve source and target Record ID prefixes and remove one directional Link.
+";
+
+const LINKS_USAGE: &str = "\
+Usage: agent-store links <ID>
+
+Resolve a Record ID prefix and print its outgoing and incoming Links.
+";
+
+const CONTEXT_USAGE: &str = "\
+Usage: agent-store ctx
+       agent-store context
+
+Print a compact Quick Context summary capped at 8192 bytes.
+";
+
+const HOOK_USAGE: &str = "\
+Usage: agent-store hook <COMMAND>
+
+Manage stored hooks.
+
+Commands:
+  add           Add a Hook
+  ls            List Hooks
+  rm            Remove a Hook by ID
+";
+
+const HOOK_ADD_USAGE: &str = "\
+Usage: agent-store hook add <event> [<Query>] -- <bash command>
+
+Store a Hook for create, set, unset, rm, link, or unlink. When a Query is
+provided, the Hook runs only for matching Records.
+";
+
+const HOOK_LIST_USAGE: &str = "\
+Usage: agent-store hook ls
+
+Print stored Hooks in deterministic order.
+";
+
+const HOOK_REMOVE_USAGE: &str = "\
+Usage: agent-store hook rm <ID>
+
+Resolve a Hook ID prefix and remove that Hook.
+";
+
+pub fn help_text(topic: HelpTopic) -> &'static str {
+    match topic {
+        HelpTopic::Top => USAGE,
+        HelpTopic::Init => INIT_USAGE,
+        HelpTopic::Create => CREATE_USAGE,
+        HelpTopic::Get => GET_USAGE,
+        HelpTopic::Find => FIND_USAGE,
+        HelpTopic::Set => SET_USAGE,
+        HelpTopic::Unset => UNSET_USAGE,
+        HelpTopic::Rm => RM_USAGE,
+        HelpTopic::Link => LINK_USAGE,
+        HelpTopic::Unlink => UNLINK_USAGE,
+        HelpTopic::Links => LINKS_USAGE,
+        HelpTopic::Context => CONTEXT_USAGE,
+        HelpTopic::Hook => HOOK_USAGE,
+        HelpTopic::HookAdd => HOOK_ADD_USAGE,
+        HelpTopic::HookList => HOOK_LIST_USAGE,
+        HelpTopic::HookRemove => HOOK_REMOVE_USAGE,
+    }
+}
 
 pub fn print_json(value: Value) {
     println!("{value}");

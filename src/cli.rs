@@ -9,9 +9,31 @@ pub struct Cli {
     pub command: CliCommand,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HelpTopic {
+    Top,
+    Init,
+    Create,
+    Get,
+    Find,
+    Set,
+    Unset,
+    Rm,
+    Link,
+    Unlink,
+    Links,
+    Context,
+    Hook,
+    HookAdd,
+    HookList,
+    HookRemove,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CliCommand {
-    Help,
+    Help {
+        topic: HelpTopic,
+    },
     Version,
     Init,
     Create {
@@ -106,7 +128,9 @@ pub fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Cli, CliPars
 
     let command = match args.next() {
         Some(command) => parse_command(command, args)?,
-        None => CliCommand::Help,
+        None => CliCommand::Help {
+            topic: HelpTopic::Top,
+        },
     };
 
     Ok(Cli {
@@ -117,12 +141,18 @@ pub fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Cli, CliPars
 
 fn parse_command(
     command: String,
-    mut args: impl Iterator<Item = String>,
+    args: impl Iterator<Item = String>,
 ) -> Result<CliCommand, CliParseError> {
+    let args = args.collect::<Vec<_>>();
+
     match command.as_str() {
-        "-h" | "--help" => Ok(CliCommand::Help),
+        "-h" | "--help" => Ok(help_command(HelpTopic::Top)),
         "-V" | "--version" => Ok(CliCommand::Version),
         "init" => {
+            if command_help_requested(&args) {
+                return Ok(help_command(HelpTopic::Init));
+            }
+            let mut args = args.into_iter();
             if let Some(extra) = args.next() {
                 return Err(CliParseError::new(format!(
                     "init does not accept argument '{extra}'"
@@ -131,6 +161,10 @@ fn parse_command(
             Ok(CliCommand::Init)
         }
         "create" | "cr" => {
+            if command_help_requested(&args) {
+                return Ok(help_command(HelpTopic::Create));
+            }
+            let mut args = args.into_iter();
             let kind = args
                 .next()
                 .ok_or_else(|| CliParseError::new("create requires a kind"))?;
@@ -138,6 +172,10 @@ fn parse_command(
             Ok(CliCommand::Create { kind, fields })
         }
         "get" => {
+            if command_help_requested(&args) {
+                return Ok(help_command(HelpTopic::Get));
+            }
+            let mut args = args.into_iter();
             let id = args
                 .next()
                 .ok_or_else(|| CliParseError::new("get requires a record ID"))?;
@@ -149,13 +187,20 @@ fn parse_command(
             Ok(CliCommand::Get { id })
         }
         "find" | "ls" => {
-            let query = args.collect::<Vec<_>>().join(" ");
+            if command_help_requested(&args) {
+                return Ok(help_command(HelpTopic::Find));
+            }
+            let query = args.join(" ");
             if query.trim().is_empty() {
                 return Err(CliParseError::new("find requires a query"));
             }
             Ok(CliCommand::Find { query })
         }
         "set" => {
+            if command_help_requested(&args) {
+                return Ok(help_command(HelpTopic::Set));
+            }
+            let mut args = args.into_iter();
             let id = args
                 .next()
                 .ok_or_else(|| CliParseError::new("set requires a record ID"))?;
@@ -168,6 +213,10 @@ fn parse_command(
             Ok(CliCommand::Set { id, fields })
         }
         "unset" => {
+            if command_help_requested(&args) {
+                return Ok(help_command(HelpTopic::Unset));
+            }
+            let mut args = args.into_iter();
             let id = args
                 .next()
                 .ok_or_else(|| CliParseError::new("unset requires a record ID"))?;
@@ -178,6 +227,10 @@ fn parse_command(
             Ok(CliCommand::Unset { id, keys })
         }
         "rm" => {
+            if command_help_requested(&args) {
+                return Ok(help_command(HelpTopic::Rm));
+            }
+            let mut args = args.into_iter();
             let id = args
                 .next()
                 .ok_or_else(|| CliParseError::new("rm requires a record ID"))?;
@@ -189,14 +242,24 @@ fn parse_command(
             Ok(CliCommand::Rm { id })
         }
         "link" => {
-            let (from, rel, to) = parse_link_args(args, "link")?;
+            if command_help_requested(&args) {
+                return Ok(help_command(HelpTopic::Link));
+            }
+            let (from, rel, to) = parse_link_args(args.into_iter(), "link")?;
             Ok(CliCommand::Link { from, rel, to })
         }
         "unlink" => {
-            let (from, rel, to) = parse_link_args(args, "unlink")?;
+            if command_help_requested(&args) {
+                return Ok(help_command(HelpTopic::Unlink));
+            }
+            let (from, rel, to) = parse_link_args(args.into_iter(), "unlink")?;
             Ok(CliCommand::Unlink { from, rel, to })
         }
         "links" => {
+            if command_help_requested(&args) {
+                return Ok(help_command(HelpTopic::Links));
+            }
+            let mut args = args.into_iter();
             let id = args
                 .next()
                 .ok_or_else(|| CliParseError::new("links requires a record ID"))?;
@@ -208,6 +271,10 @@ fn parse_command(
             Ok(CliCommand::Links { id })
         }
         "ctx" | "context" => {
+            if command_help_requested(&args) {
+                return Ok(help_command(HelpTopic::Context));
+            }
+            let mut args = args.into_iter();
             if let Some(extra) = args.next() {
                 return Err(CliParseError::new(format!(
                     "{command} does not accept argument '{extra}'"
@@ -215,34 +282,44 @@ fn parse_command(
             }
             Ok(CliCommand::Context)
         }
-        "hook" => parse_hook_command(args).map(CliCommand::Hook),
+        "hook" => parse_hook_command(args),
         _ => Err(CliParseError::with_usage(format!(
             "unrecognized command '{command}'"
         ))),
     }
 }
 
-fn parse_hook_command(
-    mut args: impl Iterator<Item = String>,
-) -> Result<HookCliCommand, CliParseError> {
-    match args.next().as_deref() {
+fn parse_hook_command(args: Vec<String>) -> Result<CliCommand, CliParseError> {
+    match args.first().map(String::as_str) {
+        Some(command) if is_help_arg(command) => Ok(help_command(HelpTopic::Hook)),
         Some("add") => {
-            let (event, query, command) = parse_hook_add_args(args)?;
-            Ok(HookCliCommand::Add {
+            if hook_add_help_requested(&args[1..]) {
+                return Ok(help_command(HelpTopic::HookAdd));
+            }
+            let (event, query, command) = parse_hook_add_args(args.into_iter().skip(1))?;
+            Ok(CliCommand::Hook(HookCliCommand::Add {
                 event,
                 query,
                 command,
-            })
+            }))
         }
         Some("ls") => {
+            if command_help_requested(&args[1..]) {
+                return Ok(help_command(HelpTopic::HookList));
+            }
+            let mut args = args.into_iter().skip(1);
             if let Some(extra) = args.next() {
                 return Err(CliParseError::new(format!(
                     "hook ls does not accept argument '{extra}'"
                 )));
             }
-            Ok(HookCliCommand::List)
+            Ok(CliCommand::Hook(HookCliCommand::List))
         }
         Some("rm") => {
+            if command_help_requested(&args[1..]) {
+                return Ok(help_command(HelpTopic::HookRemove));
+            }
+            let mut args = args.into_iter().skip(1);
             let id = args
                 .next()
                 .ok_or_else(|| CliParseError::new("hook rm requires a hook ID"))?;
@@ -251,13 +328,38 @@ fn parse_hook_command(
                     "hook rm does not accept argument '{extra}'"
                 )));
             }
-            Ok(HookCliCommand::Remove { id })
+            Ok(CliCommand::Hook(HookCliCommand::Remove { id }))
         }
         Some(command) => Err(CliParseError::new(format!(
             "unrecognized hook command '{command}'"
         ))),
         None => Err(CliParseError::new("hook requires add, ls, or rm")),
     }
+}
+
+fn help_command(topic: HelpTopic) -> CliCommand {
+    CliCommand::Help { topic }
+}
+
+fn is_help_arg(arg: &str) -> bool {
+    matches!(arg, "-h" | "--help")
+}
+
+fn command_help_requested(args: &[String]) -> bool {
+    args.iter().any(|arg| is_help_arg(arg))
+}
+
+fn hook_add_help_requested(args: &[String]) -> bool {
+    for arg in args {
+        if arg == "--" {
+            return false;
+        }
+        if is_help_arg(arg) {
+            return true;
+        }
+    }
+
+    false
 }
 
 fn take_json_flag(args: &mut Vec<String>) -> bool {
@@ -401,6 +503,76 @@ mod tests {
                 kind: "task".to_owned(),
                 fields: BTreeMap::from([("title".to_owned(), "Write".to_owned())]),
             }
+        );
+    }
+
+    #[test]
+    fn subcommand_help_flags_take_precedence_over_positionals() {
+        let cases = [
+            (
+                vec!["create", "--help"],
+                CliCommand::Help {
+                    topic: HelpTopic::Create,
+                },
+            ),
+            (
+                vec!["find", "--help"],
+                CliCommand::Help {
+                    topic: HelpTopic::Find,
+                },
+            ),
+            (
+                vec!["hook", "--help"],
+                CliCommand::Help {
+                    topic: HelpTopic::Hook,
+                },
+            ),
+            (
+                vec!["hook", "add", "--help"],
+                CliCommand::Help {
+                    topic: HelpTopic::HookAdd,
+                },
+            ),
+            (
+                vec!["hook", "ls", "-h"],
+                CliCommand::Help {
+                    topic: HelpTopic::HookList,
+                },
+            ),
+            (
+                vec!["hook", "rm", "-h"],
+                CliCommand::Help {
+                    topic: HelpTopic::HookRemove,
+                },
+            ),
+        ];
+
+        for (args, expected) in cases {
+            let parsed =
+                parse_args(args.into_iter().map(str::to_owned)).expect("args should parse");
+            assert_eq!(parsed.command, expected);
+        }
+    }
+
+    #[test]
+    fn hook_add_allows_help_text_inside_bash_command() {
+        let parsed = parse_args([
+            "hook".to_owned(),
+            "add".to_owned(),
+            "create".to_owned(),
+            "--".to_owned(),
+            "echo".to_owned(),
+            "--help".to_owned(),
+        ])
+        .expect("args should parse");
+
+        assert_eq!(
+            parsed.command,
+            CliCommand::Hook(HookCliCommand::Add {
+                event: "create".to_owned(),
+                query: None,
+                command: "echo --help".to_owned(),
+            })
         );
     }
 
