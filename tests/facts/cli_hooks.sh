@@ -2151,20 +2151,76 @@ PY
 
     cat > verbose-hook.py <<'PY'
 import sys
+import time
 
-sys.stdout.write("O" * 9000)
-sys.stderr.write("E" * 9000)
+label = sys.argv[1]
+action = sys.argv[2]
+count = int(sys.argv[3])
+
+sys.stdout.write(f"{label}-stdout\n")
+sys.stdout.write("O" * count)
+sys.stdout.flush()
+sys.stderr.write(f"{label}-stderr\n")
+sys.stderr.write("E" * count)
+sys.stderr.flush()
+
+if action == "fail":
+    raise SystemExit(37)
+if action == "timeout":
+    while True:
+        time.sleep(1)
 PY
 
-    hook_id="$(run_agent_store hook add create -- 'python3 verbose-hook.py')"
-    record_id="$(run_agent_store create task title=Verbose)"
+    success_hook_id="$(run_agent_store hook add create title=VerboseSuccess -- 'python3 verbose-hook.py success ok 9000')"
+    record_id="$(run_agent_store create task title=VerboseSuccess)"
     printf "%s\n" "$record_id" | grep -Eq "^[a-z0-9]{6,8}$"
 
-    python3 - .agent-store/store.sqlite "$hook_id" "$record_id" <<'PY'
+    plain_record_id="$(run_agent_store create task title=PlainLarge status=pending)"
+    plain_hook_id="$(run_agent_store hook add set status=large-failure -- 'python3 verbose-hook.py plain-fail fail 131072')"
+    plain_out="$tmp/plain-large-failure.out"
+    plain_err="$tmp/plain-large-failure.err"
+    if run_agent_store set "$plain_record_id" status=large-failure >"$plain_out" 2>"$plain_err"; then
+      exit 1
+    fi
+    test ! -s "$plain_out"
+    grep -Fq "Store mutation already committed" "$plain_err"
+    grep -Fq "exit status 37" "$plain_err"
+    grep -Fq "plain-fail-stderr" "$plain_err"
+    run_agent_store get "$plain_record_id" | grep -Fq "status=large-failure"
+
+    json_source_id="$(run_agent_store create task title=JsonLargeSource)"
+    json_target_id="$(run_agent_store create task title=JsonLargeTarget)"
+    json_hook_id="$(run_agent_store hook add link kind=task -- 'python3 verbose-hook.py json-timeout timeout 131072')"
+    json_out="$tmp/json-large-timeout.out"
+    json_err="$tmp/json-large-timeout.err"
+    if run_agent_store --json link "$json_source_id" relates "$json_target_id" >"$json_out" 2>"$json_err"; then
+      exit 1
+    fi
+    test ! -s "$json_out"
+    grep -Fq "Store mutation already committed" "$json_err"
+    grep -Fq "timed out after 30 seconds" "$json_err"
+    grep -Fq "json-timeout-stderr" "$json_err"
+    run_agent_store links "$json_source_id" | grep -Fq "out relates $json_target_id"
+
+    python3 - .agent-store/store.sqlite \
+      "$success_hook_id" \
+      "$plain_hook_id" \
+      "$json_hook_id" \
+      "$record_id" \
+      "$plain_record_id" \
+      "$json_source_id" <<'PY'
 import sqlite3
 import sys
 
-db, hook_id, record_id = sys.argv[1:]
+(
+    db,
+    success_hook_id,
+    plain_hook_id,
+    json_hook_id,
+    record_id,
+    plain_record_id,
+    json_source_id,
+) = sys.argv[1:]
 con = sqlite3.connect(db)
 rows = con.execute(
     """
@@ -2173,10 +2229,69 @@ rows = con.execute(
     order by id
     """
 ).fetchall()
-assert rows == [
-    (hook_id, "create", record_id, 0, "O" * 8192, "E" * 8192),
-], (len(rows[0][4]) if rows else None, len(rows[0][5]) if rows else None, rows[:1])
+by_hook = {row[0]: row[1:] for row in rows}
+assert set(by_hook) == {success_hook_id, plain_hook_id, json_hook_id}, rows
+
+def assert_capped(value, prefix):
+    assert len(value) == 8192, (prefix, len(value), value[:80], value[-80:])
+    assert value.startswith(prefix), (prefix, value[:80])
+
+success = by_hook[success_hook_id]
+assert success[:3] == ("create", record_id, 0), success
+assert_capped(success[3], "success-stdout\n")
+assert_capped(success[4], "success-stderr\n")
+
+plain = by_hook[plain_hook_id]
+assert plain[:3] == ("set", plain_record_id, 37), plain
+assert_capped(plain[3], "plain-fail-stdout\n")
+assert_capped(plain[4], "plain-fail-stderr\n")
+
+json_timeout = by_hook[json_hook_id]
+assert json_timeout[:3] == ("link", json_source_id, -1), json_timeout
+assert_capped(json_timeout[3], "json-timeout-stdout\n")
+assert json_timeout[4].startswith("json-timeout-stderr\n"), json_timeout
+assert json_timeout[4][8192:] == "; timed out after 30 seconds", (
+    len(json_timeout[4]),
+    json_timeout[4][:80],
+    json_timeout[4][-80:],
+)
+
+events = con.execute(
+    """
+    select event_type, record_id
+    from store_events
+    where record_id in (?, ?, ?)
+    order by id
+    """,
+    (record_id, plain_record_id, json_source_id),
+).fetchall()
+assert ("create", record_id) in events, events
+assert ("set", plain_record_id) in events, events
+assert ("link", json_source_id) in events, events
 PY
+
+    evidence_root="${AGENT_STORE_E2E_DIR:-}"
+    if [ -n "$evidence_root" ]; then
+      mkdir -p "$evidence_root/logs" "$evidence_root/reports"
+      cp "$plain_out" "$evidence_root/logs/plain-large-failure.out"
+      cp "$plain_err" "$evidence_root/logs/plain-large-failure.err"
+      cp "$json_out" "$evidence_root/logs/json-large-timeout.out"
+      cp "$json_err" "$evidence_root/logs/json-large-timeout.err"
+      cat > "$evidence_root/reports/hook-output-capture-caps.md" <<EOF
+# Hook Output Capture Caps
+
+- success_hook_id: $success_hook_id
+- plain_failure_hook_id: $plain_hook_id
+- json_timeout_hook_id: $json_hook_id
+- substantial_output_bytes_per_stream: 131072
+- persisted_capture_limit_bytes: 8192
+- plain_failure_stdout_empty: yes
+- json_timeout_stdout_empty: yes
+- committed_records: $record_id $plain_record_id $json_source_id
+EOF
+    fi
+
+    printf "hook_output_capture_caps success=%s plain_failure=%s json_timeout=%s\n" "$record_id" "$plain_record_id" "$json_source_id"
     ;;
 
   hook_signal_termination_reports_committed_mutation)

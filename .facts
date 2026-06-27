@@ -261,7 +261,8 @@
   id: fgg
   command: bash tests/facts/cli_hooks.sh hook_failure_or_timeout_reports_committed_mutation
   tags: [implemented]
-- label: Hook stdout and stderr capture are capped at 8192 bytes each and the cap values are documented in command help
+- label: Hook stdout and stderr capture are capped at 8192 bytes each, cap values are documented in command help, and representative plain or JSON mutations whose failing or timed-out Hook emits substantial output do not hang, persist capped Hook Run output, report useful committed-failure stderr, and leave JSON stdout empty
+  id: lc1
   command: bash tests/facts/cli_hooks.sh hook_output_capture_caps_and_help
   tags: [implemented]
 - label: link and unlink Hooks evaluate their Query against the source Record and receive AGENT_STORE_REL matching the Link relation
