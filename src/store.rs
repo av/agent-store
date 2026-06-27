@@ -415,7 +415,9 @@ impl Store {
     ) -> StoreResult<Record> {
         for _ in 0..ID_RETRIES {
             let id = next_id();
-            let tx = self.conn.transaction()?;
+            let tx = self
+                .conn
+                .transaction_with_behavior(TransactionBehavior::Immediate)?;
             match insert_record(&tx, &id, kind, &fields) {
                 Ok(()) => {
                     let record = Record {
@@ -615,7 +617,9 @@ impl Store {
         fields: BTreeMap<String, String>,
     ) -> StoreResult<Record> {
         validate_id_prefix(id_prefix)?;
-        let tx = self.conn.transaction()?;
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
         let id = resolve_id(&tx, id_prefix)?;
 
         for (key, value) in &fields {
@@ -634,7 +638,9 @@ impl Store {
 
     pub fn unset_record(&mut self, id_prefix: &str, keys: Vec<String>) -> StoreResult<Record> {
         validate_id_prefix(id_prefix)?;
-        let tx = self.conn.transaction()?;
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
         let id = resolve_id(&tx, id_prefix)?;
 
         for key in keys {
@@ -656,7 +662,9 @@ impl Store {
 
     pub fn delete_record(&mut self, id_prefix: &str) -> StoreResult<Record> {
         validate_id_prefix(id_prefix)?;
-        let tx = self.conn.transaction()?;
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
         let id = resolve_id(&tx, id_prefix)?;
         let record = get_record_by_id(&tx, &id)?;
 
@@ -677,7 +685,9 @@ impl Store {
         validate_id_prefix(to_prefix)?;
         validate_relation(rel)?;
 
-        let tx = self.conn.transaction()?;
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
         let from_id = resolve_id(&tx, from_prefix)?;
         let to_id = resolve_id(&tx, to_prefix)?;
         tx.execute(
@@ -708,7 +718,9 @@ impl Store {
         validate_id_prefix(to_prefix)?;
         validate_relation(rel)?;
 
-        let tx = self.conn.transaction()?;
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
         let from_id = resolve_id(&tx, from_prefix)?;
         let to_id = resolve_id(&tx, to_prefix)?;
         tx.execute(
@@ -748,7 +760,9 @@ impl Store {
 
         for _ in 0..ID_RETRIES {
             let id = generate_id();
-            let tx = self.conn.transaction()?;
+            let tx = self
+                .conn
+                .transaction_with_behavior(TransactionBehavior::Immediate)?;
             match tx.execute(
                 r#"
                 INSERT INTO hooks (id, event, query, command)
@@ -795,7 +809,9 @@ impl Store {
 
     pub fn delete_hook(&mut self, id_prefix: &str) -> StoreResult<Hook> {
         validate_hook_id_prefix(id_prefix)?;
-        let tx = self.conn.transaction()?;
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
         let id = resolve_hook_id(&tx, id_prefix)?;
         let hook = get_hook_by_id(&tx, &id)?;
         tx.execute("DELETE FROM hooks WHERE id = ?1", params![&hook.id])?;
@@ -817,7 +833,9 @@ impl Store {
         validate_hook_event(event_type)?;
         validate_id_prefix(record_id)?;
 
-        let tx = self.conn.transaction()?;
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
         get_hook_by_id(&tx, hook_id)?;
         tx.execute(
             r#"
