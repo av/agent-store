@@ -488,6 +488,194 @@ assert "timed out after 30 seconds" in timeout_row[4], timeout_row
 PY
     ;;
 
+  hook_command_launch_or_execution_failure_reports_committed_mutation)
+    cd "$tmp"
+    run_agent_store init >/tmp/agent-store-hook-exec-7r8-init.out
+    agent_store_bin="$target_dir/debug/agent-store"
+
+    evidence_root="${AGENT_STORE_E2E_DIR:-}"
+    if [ -n "$evidence_root" ]; then
+      mkdir -p "$evidence_root/logs" "$evidence_root/reports"
+    fi
+
+    json_record="$("$agent_store_bin" create task title=InvalidHookCommand status=pending)"
+    missing_command='./definitely-missing-hook-executable'
+    invalid_command='if then'
+
+    missing_hook_id="$("$agent_store_bin" hook add create title=MissingHookExecutable -- "$missing_command")"
+    invalid_hook_id="$("$agent_store_bin" hook add set 'kind=task and title=InvalidHookCommand and status=done' -- "$invalid_command")"
+
+    event_marker="$(python3 - .agent-store/store.sqlite <<'PY'
+import sqlite3
+import sys
+
+con = sqlite3.connect(sys.argv[1])
+print(con.execute("select coalesce(max(id), 0) from store_events").fetchone()[0])
+PY
+)"
+    hook_marker="$(python3 - .agent-store/store.sqlite <<'PY'
+import sqlite3
+import sys
+
+con = sqlite3.connect(sys.argv[1])
+print(con.execute("select coalesce(max(id), 0) from hook_runs").fetchone()[0])
+PY
+)"
+
+    set +e
+    "$agent_store_bin" create task title=MissingHookExecutable >"$tmp/hook-exec-missing.out" 2>"$tmp/hook-exec-missing.err"
+    missing_status="$?"
+    "$agent_store_bin" --json set "$json_record" status=done >"$tmp/hook-exec-json-invalid.out" 2>"$tmp/hook-exec-json-invalid.err"
+    invalid_status="$?"
+    set -e
+    printf "%s" "$missing_status" >"$tmp/hook-exec-missing.status"
+    printf "%s" "$invalid_status" >"$tmp/hook-exec-json-invalid.status"
+
+    test "$missing_status" -ne 0
+    test ! -s "$tmp/hook-exec-missing.out"
+    grep -Fq "Store mutation already committed" "$tmp/hook-exec-missing.err"
+    grep -Fq "hook $missing_hook_id" "$tmp/hook-exec-missing.err"
+    grep -Fq "$missing_command" "$tmp/hook-exec-missing.err"
+    grep -Fq "exit status 127" "$tmp/hook-exec-missing.err"
+    grep -Fq "definitely-missing-hook-executable" "$tmp/hook-exec-missing.err"
+
+    test "$invalid_status" -ne 0
+    test ! -s "$tmp/hook-exec-json-invalid.out"
+    grep -Fq "Store mutation already committed" "$tmp/hook-exec-json-invalid.err"
+    grep -Fq "hook $invalid_hook_id" "$tmp/hook-exec-json-invalid.err"
+    grep -Fq "$invalid_command" "$tmp/hook-exec-json-invalid.err"
+    grep -Fq "exit status 2" "$tmp/hook-exec-json-invalid.err"
+    grep -Fq "syntax error" "$tmp/hook-exec-json-invalid.err"
+
+    summary="$(python3 - \
+      "$tmp" \
+      .agent-store/store.sqlite \
+      "$event_marker" \
+      "$hook_marker" \
+      "$json_record" \
+      "$missing_hook_id" \
+      "$invalid_hook_id" <<'PY'
+import pathlib
+import sqlite3
+import sys
+
+(
+    tmp_s,
+    db,
+    event_marker_s,
+    hook_marker_s,
+    json_record,
+    missing_hook_id,
+    invalid_hook_id,
+) = sys.argv[1:]
+tmp = pathlib.Path(tmp_s)
+event_marker = int(event_marker_s)
+hook_marker = int(hook_marker_s)
+con = sqlite3.connect(db)
+
+for name, expected in [
+    ("missing", "definitely-missing-hook-executable"),
+    ("json-invalid", "syntax error"),
+]:
+    stdout = (tmp / f"hook-exec-{name}.out").read_text(encoding="utf-8")
+    stderr = (tmp / f"hook-exec-{name}.err").read_text(encoding="utf-8")
+    status = int((tmp / f"hook-exec-{name}.status").read_text(encoding="utf-8"))
+    assert stdout == "", (name, stdout)
+    assert status != 0, (name, status)
+    assert "Store mutation already committed" in stderr, (name, stderr)
+    assert expected in stderr, (name, stderr)
+
+plain_record_row = con.execute(
+    """
+    select records.id
+    from records
+    join record_fields on record_fields.record_id = records.id
+    where records.kind = 'task'
+      and record_fields.key = 'title'
+      and record_fields.raw_value = 'MissingHookExecutable'
+    """
+).fetchone()
+assert plain_record_row is not None
+plain_record = plain_record_row[0]
+
+json_status = con.execute(
+    """
+    select raw_value
+    from record_fields
+    where record_id = ? and key = 'status'
+    """,
+    (json_record,),
+).fetchone()
+assert json_status == ("done",), json_status
+
+event_rows = con.execute(
+    """
+    select event_type, record_id
+    from store_events
+    where id > ?
+    order by id
+    """,
+    (event_marker,),
+).fetchall()
+assert event_rows == [
+    ("create", plain_record),
+    ("set", json_record),
+], event_rows
+
+rows = con.execute(
+    """
+    select hook_id, event_type, record_id, exit_status, stdout_summary, stderr_summary
+    from hook_runs
+    where id > ? and hook_id in (?, ?)
+    order by id
+    """,
+    (hook_marker, missing_hook_id, invalid_hook_id),
+).fetchall()
+assert len(rows) == 2, rows
+assert rows[0][:5] == (
+    missing_hook_id,
+    "create",
+    plain_record,
+    127,
+    "",
+), rows[0]
+assert "definitely-missing-hook-executable" in rows[0][5], rows[0]
+assert rows[1][:5] == (
+    invalid_hook_id,
+    "set",
+    json_record,
+    2,
+    "",
+), rows[1]
+assert "syntax error" in rows[1][5], rows[1]
+
+print(
+    "hook_execution_failures=2 plain_record={} json_record={} statuses={}".format(
+        plain_record,
+        json_record,
+        ",".join(str(row[3]) for row in rows),
+    )
+)
+PY
+)"
+
+    if [ -n "$evidence_root" ]; then
+      cp "$tmp"/hook-exec-* "$evidence_root/logs/"
+      cp .agent-store/store.sqlite "$evidence_root/store.sqlite"
+      cat > "$evidence_root/reports/hook-command-execution-failure.md" <<EOF
+# Hook Command Execution Failure Evidence
+
+- missing_hook_id: $missing_hook_id
+- invalid_hook_id: $invalid_hook_id
+- missing_status: $missing_status
+- invalid_status: $invalid_status
+- $summary
+- database: $evidence_root/store.sqlite
+- logs: $evidence_root/logs
+EOF
+    fi
+    ;;
+
   json_mutation_hook_failure_or_timeout_reports_committed_without_success_json)
     cd "$tmp"
     run_agent_store init >/tmp/agent-store-json-hook-failure-jhf-init.out
@@ -2656,7 +2844,7 @@ EOF
     ;;
 
   *)
-    echo "usage: $0 {hook_add_stores_metadata|hook_ls_deterministic|hook_rm_deletes_metadata|hooks_run_after_commit|hook_query_filters_records|hook_query_uses_mutation_snapshot|hook_stdin_receives_record_snapshot|hook_failure_reports_details|hook_failure_or_timeout_reports_committed_mutation|json_mutation_hook_failure_or_timeout_reports_committed_without_success_json|json_multiple_matching_hooks_stop_after_failure_or_timeout|hooks_run_sequentially_from_project_root_with_timeout|hook_env_vars_for_record_events|link_hook_query_source_and_relation_env|hook_output_capture_caps_and_help|hook_signal_termination_reports_committed_mutation|hook_timeout_terminates_process_group}" >&2
+    echo "usage: $0 {hook_add_stores_metadata|hook_ls_deterministic|hook_rm_deletes_metadata|hooks_run_after_commit|hook_query_filters_records|hook_query_uses_mutation_snapshot|hook_stdin_receives_record_snapshot|hook_failure_reports_details|hook_failure_or_timeout_reports_committed_mutation|hook_command_launch_or_execution_failure_reports_committed_mutation|json_mutation_hook_failure_or_timeout_reports_committed_without_success_json|json_multiple_matching_hooks_stop_after_failure_or_timeout|hooks_run_sequentially_from_project_root_with_timeout|hook_env_vars_for_record_events|link_hook_query_source_and_relation_env|hook_output_capture_caps_and_help|hook_signal_termination_reports_committed_mutation|hook_timeout_terminates_process_group}" >&2
     exit 2
     ;;
 esac

@@ -279,6 +279,9 @@
   id: yjb
   command: bash tests/facts/cli_hooks.sh hook_signal_termination_reports_committed_mutation
   tags: [implemented]
+- label: Plain and --json mutations whose matching Hook command cannot be executed because the command is missing or invalid exit non-zero after the Store mutation commits, emit useful stderr, persist the Store mutation, Store Event, and Hook Run with failure status and captured stderr, and JSON mode leaves stdout empty
+  command: bash tests/facts/cli_hooks.sh hook_command_launch_or_execution_failure_reports_committed_mutation
+  tags: [implemented]
 
 # context
 - label: Quick Context output includes total Record count, per-kind Record counts sorted by kind, Hook count, and the most recent Store activity timestamp when available
