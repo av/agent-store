@@ -1021,6 +1021,347 @@ EOF
     fi
     ;;
 
+  concurrent_hook_lifecycle_mutation_races)
+    CARGO_TARGET_DIR="$target_dir" cargo build --quiet --manifest-path "$repo/Cargo.toml"
+    agent_store_bin="$target_dir/debug/agent-store"
+    cd "$tmp"
+    "$agent_store_bin" init >/tmp/agent-store-hook-lifecycle-mutations-init.out
+
+    evidence_root="${AGENT_STORE_E2E_DIR:-}"
+    if [ -n "$evidence_root" ]; then
+      mkdir -p "$evidence_root/logs" "$evidence_root/reports"
+    fi
+
+    started_dir="$tmp/hook-started"
+    side_effects="$tmp/hook-side-effects"
+    release_file="$tmp/hook-release"
+    mkdir "$started_dir" "$side_effects"
+
+    cat > slow-mutation-hook.sh <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+name="$1"
+started_dir="$2"
+release_file="$3"
+side_effects="$4"
+touch "$started_dir/$name-$AGENT_STORE_ID"
+while [ ! -f "$release_file" ]; do
+  sleep 0.01
+done
+touch "$side_effects/$name-$AGENT_STORE_ID"
+printf "%s" "$name"
+SH
+    chmod +x slow-mutation-hook.sh
+
+    wait_for_file_count() {
+      local dir="$1"
+      local expected="$2"
+      local attempts=500
+      while [ "$(find "$dir" -type f | wc -l | tr -d ' ')" -lt "$expected" ]; do
+        attempts=$((attempts - 1))
+        if [ "$attempts" -le 0 ]; then
+          find "$dir" -type f -print >&2
+          return 1
+        fi
+        sleep 0.01
+      done
+    }
+
+    set_record="$("$agent_store_bin" create task title=set-record batch=hook-lifecycle-mutation status=pending)"
+    unset_record="$("$agent_store_bin" create task title=unset-record batch=hook-lifecycle-mutation flag=present)"
+    rm_record="$("$agent_store_bin" create task title=rm-record batch=hook-lifecycle-mutation action=remove)"
+    link_source="$("$agent_store_bin" create task title=link-source batch=hook-lifecycle-mutation)"
+    link_target="$("$agent_store_bin" create note title=link-target batch=hook-lifecycle-mutation)"
+    unlink_source="$("$agent_store_bin" create task title=unlink-source batch=hook-lifecycle-mutation)"
+    unlink_target="$("$agent_store_bin" create note title=unlink-target batch=hook-lifecycle-mutation)"
+    "$agent_store_bin" link "$unlink_source" blocks "$unlink_target" >"$tmp/setup-unlink-link.out" 2>"$tmp/setup-unlink-link.err"
+
+    set_hook_id="$("$agent_store_bin" hook add set 'kind=task and batch=hook-lifecycle-mutation and status=done' -- "./slow-mutation-hook.sh set $started_dir $release_file $side_effects")"
+    unset_hook_id="$("$agent_store_bin" hook add unset 'kind=task and batch=hook-lifecycle-mutation and not flag=present' -- "./slow-mutation-hook.sh unset $started_dir $release_file $side_effects")"
+    rm_hook_id="$("$agent_store_bin" hook add rm 'kind=task and batch=hook-lifecycle-mutation and action=remove' -- "./slow-mutation-hook.sh rm $started_dir $release_file $side_effects")"
+    link_hook_id="$("$agent_store_bin" hook add link 'kind=task and batch=hook-lifecycle-mutation' -- "./slow-mutation-hook.sh link $started_dir $release_file $side_effects")"
+    unlink_hook_id="$("$agent_store_bin" hook add unlink 'kind=task and batch=hook-lifecycle-mutation' -- "./slow-mutation-hook.sh unlink $started_dir $release_file $side_effects")"
+
+    event_marker="$(python3 - .agent-store/store.sqlite <<'PY'
+import sqlite3
+import sys
+
+con = sqlite3.connect(sys.argv[1])
+print(con.execute("select coalesce(max(id), 0) from store_events").fetchone()[0])
+PY
+)"
+    hook_marker="$(python3 - .agent-store/store.sqlite <<'PY'
+import sqlite3
+import sys
+
+con = sqlite3.connect(sys.argv[1])
+print(con.execute("select coalesce(max(id), 0) from hook_runs").fetchone()[0])
+PY
+)"
+
+    run_mutation() {
+      local name="$1"
+      set +e
+      case "$name" in
+        set)
+          "$agent_store_bin" set "$set_record" status=done >"$tmp/mutation-$name.out" 2>"$tmp/mutation-$name.err"
+          ;;
+        unset)
+          "$agent_store_bin" unset "$unset_record" flag >"$tmp/mutation-$name.out" 2>"$tmp/mutation-$name.err"
+          ;;
+        rm)
+          "$agent_store_bin" rm "$rm_record" >"$tmp/mutation-$name.out" 2>"$tmp/mutation-$name.err"
+          ;;
+        link)
+          "$agent_store_bin" link "$link_source" blocks "$link_target" >"$tmp/mutation-$name.out" 2>"$tmp/mutation-$name.err"
+          ;;
+        unlink)
+          "$agent_store_bin" unlink "$unlink_source" blocks "$unlink_target" >"$tmp/mutation-$name.out" 2>"$tmp/mutation-$name.err"
+          ;;
+      esac
+      code="$?"
+      set -e
+      printf "%s" "$code" >"$tmp/mutation-$name.status"
+    }
+
+    mutation_names=(set unset rm link unlink)
+    mutation_pids=()
+    for name in "${mutation_names[@]}"; do
+      (run_mutation "$name") &
+      mutation_pids+=("$!")
+    done
+
+    if ! wait_for_file_count "$started_dir" "${#mutation_names[@]}"; then
+      cat "$tmp"/mutation-*.err >&2
+      exit 1
+    fi
+
+    declare -A hook_ids=(
+      [set]="$set_hook_id"
+      [unset]="$unset_hook_id"
+      [rm]="$rm_hook_id"
+      [link]="$link_hook_id"
+      [unlink]="$unlink_hook_id"
+    )
+
+    hook_rm_pids=()
+    for name in "${mutation_names[@]}"; do
+      "$agent_store_bin" hook rm "${hook_ids[$name]}" >"$tmp/hook-rm-$name.out" 2>"$tmp/hook-rm-$name.err" &
+      hook_rm_pids+=("$!")
+    done
+    hook_rm_status=0
+    for pid in "${hook_rm_pids[@]}"; do
+      if ! wait "$pid"; then
+        hook_rm_status=1
+      fi
+    done
+    if [ "$hook_rm_status" -ne 0 ]; then
+      cat "$tmp"/hook-rm-*.err >&2
+      exit 1
+    fi
+    for name in "${mutation_names[@]}"; do
+      grep -Fxq "Removed ${hook_ids[$name]}" "$tmp/hook-rm-$name.out"
+    done
+
+    touch "$release_file"
+
+    mutation_status=0
+    for pid in "${mutation_pids[@]}"; do
+      if ! wait "$pid"; then
+        mutation_status=1
+      fi
+    done
+    if [ "$mutation_status" -ne 0 ]; then
+      cat "$tmp"/mutation-*.err >&2
+      exit 1
+    fi
+
+    for name in "${mutation_names[@]}"; do
+      test "$(cat "$tmp/mutation-$name.status")" = "0"
+    done
+    grep -Fxq "Updated $set_record" "$tmp/mutation-set.out"
+    grep -Fxq "Updated $unset_record" "$tmp/mutation-unset.out"
+    grep -Fxq "Removed $rm_record" "$tmp/mutation-rm.out"
+    grep -Fxq "Linked $link_source blocks $link_target" "$tmp/mutation-link.out"
+    grep -Fxq "Unlinked $unlink_source blocks $unlink_target" "$tmp/mutation-unlink.out"
+
+    if grep -R "database is locked" "$tmp"/*.err; then
+      exit 1
+    fi
+    if grep -R "failed to run hooks after Store mutation already committed" "$tmp"/*.err; then
+      exit 1
+    fi
+    if grep -R "failed to record hook" "$tmp"/*.err; then
+      exit 1
+    fi
+    if grep -R "Query returned no rows" "$tmp"/*.err; then
+      exit 1
+    fi
+    if grep -R "panicked at" "$tmp"/*.err; then
+      exit 1
+    fi
+
+    "$agent_store_bin" hook ls >"$tmp/hook-ls.out" 2>"$tmp/hook-ls.err"
+    for name in "${mutation_names[@]}"; do
+      if grep -Fq "${hook_ids[$name]} " "$tmp/hook-ls.out"; then
+        exit 1
+      fi
+    done
+
+    summary="$(python3 - \
+      .agent-store/store.sqlite \
+      "$event_marker" \
+      "$hook_marker" \
+      "$set_hook_id" \
+      "$unset_hook_id" \
+      "$rm_hook_id" \
+      "$link_hook_id" \
+      "$unlink_hook_id" \
+      "$set_record" \
+      "$unset_record" \
+      "$rm_record" \
+      "$link_source" \
+      "$link_target" \
+      "$unlink_source" \
+      "$unlink_target" <<'PY'
+import sqlite3
+import sys
+
+(
+    db,
+    event_marker_s,
+    hook_marker_s,
+    set_hook_id,
+    unset_hook_id,
+    rm_hook_id,
+    link_hook_id,
+    unlink_hook_id,
+    set_record,
+    unset_record,
+    rm_record,
+    link_source,
+    link_target,
+    unlink_source,
+    unlink_target,
+) = sys.argv[1:]
+event_marker = int(event_marker_s)
+hook_marker = int(hook_marker_s)
+hook_ids = [set_hook_id, unset_hook_id, rm_hook_id, link_hook_id, unlink_hook_id]
+con = sqlite3.connect(db)
+
+placeholders = ",".join("?" for _ in hook_ids)
+remaining_hooks = con.execute(
+    f"select count(*) from hooks where id in ({placeholders})",
+    hook_ids,
+).fetchone()[0]
+assert remaining_hooks == 0, remaining_hooks
+
+rows = con.execute(
+    f"""
+    select hook_id, event_type, record_id, exit_status, stdout_summary, stderr_summary
+    from hook_runs
+    where id > ? and hook_id in ({placeholders})
+    """,
+    [hook_marker, *hook_ids],
+).fetchall()
+observed_runs = {row[0]: row[1:] for row in rows}
+expected_runs = {
+    set_hook_id: ("set", set_record, 0, "set", ""),
+    unset_hook_id: ("unset", unset_record, 0, "unset", ""),
+    rm_hook_id: ("rm", rm_record, 0, "rm", ""),
+    link_hook_id: ("link", link_source, 0, "link", ""),
+    unlink_hook_id: ("unlink", unlink_source, 0, "unlink", ""),
+}
+assert observed_runs == expected_runs, (observed_runs, expected_runs)
+
+event_counts = dict(
+    con.execute(
+        """
+        select event_type, count(*)
+        from store_events
+        where id > ? and event_type in ('set', 'unset', 'rm', 'link', 'unlink')
+        group by event_type
+        """,
+        (event_marker,),
+    ).fetchall()
+)
+expected_event_counts = {"set": 1, "unset": 1, "rm": 1, "link": 1, "unlink": 1}
+assert event_counts == expected_event_counts, event_counts
+
+set_status = con.execute(
+    "select raw_value from record_fields where record_id = ? and key = 'status'",
+    (set_record,),
+).fetchone()
+assert set_status == ("done",), set_status
+unset_flag_count = con.execute(
+    "select count(*) from record_fields where record_id = ? and key = 'flag'",
+    (unset_record,),
+).fetchone()[0]
+assert unset_flag_count == 0, unset_flag_count
+rm_remaining = con.execute(
+    "select count(*) from records where id = ?",
+    (rm_record,),
+).fetchone()[0]
+assert rm_remaining == 0, rm_remaining
+link_rows = con.execute(
+    """
+    select count(*)
+    from record_links
+    where from_record_id = ? and rel = 'blocks' and to_record_id = ?
+    """,
+    (link_source, link_target),
+).fetchone()[0]
+assert link_rows == 1, link_rows
+unlink_rows = con.execute(
+    """
+    select count(*)
+    from record_links
+    where from_record_id = ? and rel = 'blocks' and to_record_id = ?
+    """,
+    (unlink_source, unlink_target),
+).fetchone()[0]
+assert unlink_rows == 0, unlink_rows
+
+print(
+    "removed_hooks={removed_hooks} hook_runs={hook_runs} events={events} link_rows={link_rows} unlink_rows={unlink_rows}".format(
+        removed_hooks=len(hook_ids),
+        hook_runs=len(observed_runs),
+        events=sum(event_counts.values()),
+        link_rows=link_rows,
+        unlink_rows=unlink_rows,
+    )
+)
+PY
+)"
+
+    side_effect_count="$(find "$side_effects" -type f | wc -l | tr -d ' ')"
+    test "$side_effect_count" = "${#mutation_names[@]}"
+
+    if [ -n "$evidence_root" ]; then
+      find "$tmp" -maxdepth 1 -type f \
+        \( -name 'mutation-*' -o -name 'hook-rm-*' -o -name 'hook-ls.*' -o -name 'setup-unlink-link.*' \) \
+        -exec cp {} "$evidence_root/logs/" \;
+      find "$side_effects" -maxdepth 1 -type f -exec cp {} "$evidence_root/logs/" \;
+      cp .agent-store/store.sqlite "$evidence_root/store.sqlite"
+      cat > "$evidence_root/reports/concurrent-hook-lifecycle-mutation-races.md" <<EOF
+# Concurrent Hook Lifecycle Mutation Race Evidence
+
+- set_record: $set_record
+- unset_record: $unset_record
+- rm_record: $rm_record
+- link_source: $link_source
+- link_target: $link_target
+- unlink_source: $unlink_source
+- unlink_target: $unlink_target
+- removed_hook_ids: $set_hook_id $unset_hook_id $rm_hook_id $link_hook_id $unlink_hook_id
+- $summary
+- hook_side_effects: $side_effect_count
+- database: $evidence_root/store.sqlite
+- logs: $evidence_root/logs
+EOF
+    fi
+    ;;
+
   concurrent_link_record_disappearance_races)
     CARGO_TARGET_DIR="$target_dir" cargo build --quiet --manifest-path "$repo/Cargo.toml"
     agent_store_bin="$target_dir/debug/agent-store"
@@ -2041,7 +2382,7 @@ EOF
     ;;
 
   *)
-    echo "usage: $0 {store_is_project_local|migrations_apply_on_open|initial_schema_tables|records_columns|record_fields_typed_columns|record_links_cardinality_shape|record_links_columns_unique|record_delete_cascades_links|hard_delete_store_event_snapshot|record_mutations_transactional|persistence_open_errors_actionable|migration_checksum_mismatch|concurrent_process_writers|concurrent_process_writers_with_hooks|concurrent_process_mutations_with_hooks|concurrent_hook_lifecycle_races|concurrent_link_record_disappearance_races|concurrent_set_unset_link_snapshot_races|create_rm_link_snapshot_hooks|concurrent_same_record_and_link_races}" >&2
+    echo "usage: $0 {store_is_project_local|migrations_apply_on_open|initial_schema_tables|records_columns|record_fields_typed_columns|record_links_cardinality_shape|record_links_columns_unique|record_delete_cascades_links|hard_delete_store_event_snapshot|record_mutations_transactional|persistence_open_errors_actionable|migration_checksum_mismatch|concurrent_process_writers|concurrent_process_writers_with_hooks|concurrent_process_mutations_with_hooks|concurrent_hook_lifecycle_races|concurrent_hook_lifecycle_mutation_races|concurrent_link_record_disappearance_races|concurrent_set_unset_link_snapshot_races|create_rm_link_snapshot_hooks|concurrent_same_record_and_link_races}" >&2
     exit 2
     ;;
 esac

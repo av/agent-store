@@ -17,3 +17,7 @@
   id: hkr
   command: bash tests/facts/store_schema_migrations.sh concurrent_hook_lifecycle_races
   tags: [implemented]
+- label: simultaneous hook rm with already-selected set, unset, rm, link, and unlink mutations finishes without database lock errors or post-commit Hook persistence failures, removes the Hooks from hook ls, and persists Hook Runs for each committed mutation selected before removal
+  id: hmr
+  command: bash tests/facts/store_schema_migrations.sh concurrent_hook_lifecycle_mutation_races
+  tags: [implemented]
