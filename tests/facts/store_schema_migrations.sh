@@ -4154,8 +4154,315 @@ EOF
     fi
     ;;
 
+  concurrent_json_mutation_prefix_races)
+    CARGO_TARGET_DIR="$target_dir" cargo build --quiet --manifest-path "$repo/Cargo.toml"
+    agent_store_bin="$target_dir/debug/agent-store"
+    cd "$tmp"
+    "$agent_store_bin" init >/tmp/agent-store-json-mutation-prefix-race-init.out
+    "$agent_store_bin" ctx >/tmp/agent-store-json-mutation-prefix-race-schema.out
+
+    evidence_root="${AGENT_STORE_E2E_DIR:-}"
+    if [ -n "$evidence_root" ]; then
+      mkdir -p "$evidence_root/logs" "$evidence_root/reports"
+    fi
+
+    source_prefix="ee"
+    source_one="ee1001"
+    source_two="ee2002"
+    worker_count=4
+    iterations=16
+
+    stop_file="$tmp/churn.stop"
+    ready_file="$tmp/churn.ready"
+    python3 - \
+      .agent-store/store.sqlite \
+      "$source_one" \
+      "$source_two" \
+      "$tmp/churn.log" \
+      "$stop_file" \
+      "$ready_file" <<'PY' >"$tmp/churn.out" 2>"$tmp/churn.err" &
+import os
+import pathlib
+import sqlite3
+import sys
+import time
+
+db, source_one, source_two, log_path, stop_path, ready_path = sys.argv[1:]
+source_ids = [source_one, source_two]
+states = [
+    [],
+    [source_one],
+    [source_one, source_two],
+    [source_one],
+    [],
+]
+
+con = sqlite3.connect(db, timeout=10.0, isolation_level=None)
+con.execute("PRAGMA foreign_keys = ON")
+con.execute("PRAGMA busy_timeout = 10000")
+
+def insert_record(record_id, state):
+    con.execute("INSERT INTO records (id, kind) VALUES (?, 'task')", (record_id,))
+    fields = {
+        "batch": "json-mutation-prefix-race",
+        "role": "source",
+        "state": state,
+    }
+    for key, value in fields.items():
+        con.execute(
+            "INSERT INTO record_fields (record_id, key, raw_value, text_value) VALUES (?, ?, ?, ?)",
+            (record_id, key, value, value),
+        )
+
+def replace_records(active_ids, state):
+    con.execute(
+        "DELETE FROM records WHERE id IN ({})".format(",".join("?" for _ in source_ids)),
+        source_ids,
+    )
+    for record_id in active_ids:
+        insert_record(record_id, state)
+
+pathlib.Path(ready_path).write_text("ready", encoding="utf-8")
+with open(log_path, "w", encoding="utf-8") as log:
+    cycle = 0
+    while cycle < 1000 and (cycle < 100 or not os.path.exists(stop_path)):
+        active_ids = states[cycle % len(states)]
+        state = f"cycle-{cycle}"
+        con.execute("BEGIN IMMEDIATE")
+        replace_records(active_ids, state)
+        con.execute("COMMIT")
+        log.write(f"{cycle}:sources={','.join(active_ids) or '-'}\n")
+        log.flush()
+        cycle += 1
+        time.sleep(0.006)
+
+    con.execute("BEGIN IMMEDIATE")
+    replace_records([source_one], "final")
+    con.execute("COMMIT")
+PY
+    churn_pid="$!"
+
+    ready_attempts=500
+    while [ ! -f "$ready_file" ]; do
+      ready_attempts=$((ready_attempts - 1))
+      if [ "$ready_attempts" -le 0 ]; then
+        cat "$tmp/churn.err" >&2 || true
+        exit 1
+      fi
+      sleep 0.01
+    done
+
+    run_json_mutation_prefix_worker() {
+      local op="$1"
+      local worker="$2"
+      local index
+
+      for index in $(seq 1 "$iterations"); do
+        local prefix="$tmp/jsonmutation-$op-$worker-$index"
+        set +e
+        case "$op" in
+          set)
+            "$agent_store_bin" --json set "$source_prefix" "race_status=$worker-$index" "race_marker=set-$worker-$index" >"$prefix.out" 2>"$prefix.err"
+            ;;
+          unset)
+            "$agent_store_bin" --json unset "$source_prefix" race_status >"$prefix.out" 2>"$prefix.err"
+            ;;
+          rm)
+            "$agent_store_bin" --json rm "$source_prefix" >"$prefix.out" 2>"$prefix.err"
+            ;;
+        esac
+        local code="$?"
+        set -e
+        printf "%s" "$code" >"$prefix.status"
+        sleep 0.004
+      done
+    }
+
+    pids=()
+    for op in set unset rm; do
+      for worker in $(seq 1 "$worker_count"); do
+        (run_json_mutation_prefix_worker "$op" "$worker") &
+        pids+=("$!")
+      done
+    done
+
+    for pid in "${pids[@]}"; do
+      wait "$pid"
+    done
+
+    touch "$stop_file"
+    if ! wait "$churn_pid"; then
+      cat "$tmp/churn.err" >&2
+      exit 1
+    fi
+
+    summary="$(python3 - \
+      "$tmp" \
+      .agent-store/store.sqlite \
+      "$worker_count" \
+      "$iterations" \
+      "$source_one" \
+      "$source_two" <<'PY'
+from collections import Counter
+import json
+import pathlib
+import sqlite3
+import sys
+
+tmp = pathlib.Path(sys.argv[1])
+db = sys.argv[2]
+worker_count = int(sys.argv[3])
+iterations = int(sys.argv[4])
+source_ids = set(sys.argv[5:7])
+ops = ["set", "unset", "rm"]
+bad_fragments = [
+    "database is locked",
+    "panicked",
+    "thread 'main'",
+    "foreign key constraint",
+    "constraint failed",
+    "query returned no rows",
+]
+counts = {
+    op: {"success": 0, "ambiguous": 0, "not_found": 0}
+    for op in ops
+}
+success_ids = {op: Counter() for op in ops}
+
+def read(path):
+    return path.read_text(encoding="utf-8") if path.exists() else ""
+
+def classify_error(err):
+    if "matches multiple records" in err:
+        return "ambiguous"
+    if "was not found" in err:
+        return "not_found"
+    raise AssertionError(err)
+
+for op in ops:
+    for worker in range(1, worker_count + 1):
+        for index in range(1, iterations + 1):
+            base = tmp / f"jsonmutation-{op}-{worker}-{index}"
+            status = read(base.with_suffix(".status")).strip()
+            out = read(base.with_suffix(".out"))
+            err = read(base.with_suffix(".err"))
+            combined = (out + "\n" + err).lower()
+            assert status, base
+            assert not any(fragment in combined for fragment in bad_fragments), (
+                op,
+                worker,
+                index,
+                out,
+                err,
+            )
+
+            if status == "0":
+                assert err == "", (op, worker, index, err)
+                payload = json.loads(out)
+                expected_status = "removed" if op == "rm" else "updated"
+                assert payload["status"] == expected_status, payload
+                record = payload["record"]
+                record_id = record["id"]
+                fields = record["fields"]
+                assert record_id in source_ids, payload
+                assert record["kind"] == "task", payload
+                assert fields["batch"] == "json-mutation-prefix-race", payload
+                assert fields["role"] == "source", payload
+                if op == "set":
+                    assert fields["race_status"] == f"{worker}-{index}", payload
+                    assert fields["race_marker"] == f"set-{worker}-{index}", payload
+                elif op == "unset":
+                    assert "race_status" not in fields, payload
+                counts[op]["success"] += 1
+                success_ids[op][record_id] += 1
+            else:
+                assert out == "", (op, worker, index, out)
+                counts[op][classify_error(err)] += 1
+
+for op in ops:
+    total = sum(counts[op].values())
+    assert total == worker_count * iterations, (op, total, counts[op])
+    assert counts[op]["success"] > 0, (op, counts[op])
+    assert counts[op]["ambiguous"] > 0, (op, counts[op])
+    assert counts[op]["not_found"] > 0, (op, counts[op])
+
+con = sqlite3.connect(db)
+event_rows = con.execute(
+    """
+    SELECT event_type, record_id, record_snapshot
+    FROM store_events
+    WHERE event_type IN ('set', 'unset', 'rm')
+    ORDER BY id
+    """
+).fetchall()
+event_counts = Counter(row[0] for row in event_rows)
+for op in ops:
+    assert event_counts[op] == counts[op]["success"], (op, event_counts, counts[op])
+
+for event_type, record_id, snapshot_raw in event_rows:
+    assert record_id in source_ids, (event_type, record_id)
+    snapshot = json.loads(snapshot_raw)
+    assert snapshot["id"] == record_id, snapshot
+    assert snapshot["kind"] == "task", snapshot
+    fields = snapshot["fields"]
+    assert fields["batch"] == "json-mutation-prefix-race", snapshot
+    assert fields["role"] == "source", snapshot
+    if event_type == "set":
+        assert "race_status" in fields, snapshot
+        assert "race_marker" in fields, snapshot
+    elif event_type == "unset":
+        assert "race_status" not in fields, snapshot
+
+record_ids = {row[0] for row in con.execute("SELECT id FROM records ORDER BY id")}
+assert record_ids == {sorted(source_ids)[0]}, record_ids
+final_fields = dict(
+    con.execute(
+        "SELECT key, raw_value FROM record_fields WHERE record_id = ?",
+        (sorted(source_ids)[0],),
+    ).fetchall()
+)
+assert final_fields == {
+    "batch": "json-mutation-prefix-race",
+    "role": "source",
+    "state": "final",
+}, final_fields
+
+print(
+    " ".join(
+        f"{op}=success:{counts[op]['success']},ambiguous:{counts[op]['ambiguous']},not_found:{counts[op]['not_found']}"
+        for op in ops
+    )
+)
+print(
+    "events={} success_ids={}".format(
+        dict(event_counts),
+        {op: dict(success_ids[op]) for op in ops},
+    )
+)
+PY
+)"
+
+    if [ -n "$evidence_root" ]; then
+      find "$tmp" -maxdepth 1 -type f \
+        \( -name 'jsonmutation-*' -o -name 'churn.*' \) \
+        -exec cp {} "$evidence_root/logs/" \;
+      cp .agent-store/store.sqlite "$evidence_root/store.sqlite"
+      cat > "$evidence_root/reports/concurrent-json-mutation-prefix-races.md" <<EOF
+# Concurrent JSON Mutation Prefix Race Evidence
+
+- source_prefix: $source_prefix
+- source_records: $source_one $source_two
+- workers_per_command: $worker_count
+- iterations_per_worker: $iterations
+- $summary
+- database: $evidence_root/store.sqlite
+- logs: $evidence_root/logs
+EOF
+    fi
+    ;;
+
   *)
-    echo "usage: $0 {store_is_project_local|migrations_apply_on_open|initial_schema_tables|records_columns|record_fields_typed_columns|record_links_cardinality_shape|record_links_columns_unique|record_delete_cascades_links|hard_delete_store_event_snapshot|record_mutations_transactional|persistence_open_errors_actionable|migration_checksum_mismatch|concurrent_process_writers|concurrent_process_writers_with_hooks|concurrent_process_mutations_with_hooks|concurrent_hook_lifecycle_races|concurrent_hook_lifecycle_mutation_races|concurrent_hook_churn_reads|concurrent_record_readers_with_hooked_mutations|concurrent_json_record_readers_with_hooked_mutations|concurrent_link_record_disappearance_races|concurrent_set_unset_link_snapshot_races|create_rm_link_snapshot_hooks|concurrent_same_record_and_link_races|concurrent_id_prefix_resolution_races|concurrent_json_prefix_and_hook_rm_races}" >&2
+    echo "usage: $0 {store_is_project_local|migrations_apply_on_open|initial_schema_tables|records_columns|record_fields_typed_columns|record_links_cardinality_shape|record_links_columns_unique|record_delete_cascades_links|hard_delete_store_event_snapshot|record_mutations_transactional|persistence_open_errors_actionable|migration_checksum_mismatch|concurrent_process_writers|concurrent_process_writers_with_hooks|concurrent_process_mutations_with_hooks|concurrent_hook_lifecycle_races|concurrent_hook_lifecycle_mutation_races|concurrent_hook_churn_reads|concurrent_record_readers_with_hooked_mutations|concurrent_json_record_readers_with_hooked_mutations|concurrent_link_record_disappearance_races|concurrent_set_unset_link_snapshot_races|create_rm_link_snapshot_hooks|concurrent_same_record_and_link_races|concurrent_id_prefix_resolution_races|concurrent_json_prefix_and_hook_rm_races|concurrent_json_mutation_prefix_races}" >&2
     exit 2
     ;;
 esac

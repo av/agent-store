@@ -36,3 +36,7 @@
 - label: simultaneous --json get, --json link, --json unlink, --json links, and hook rm commands resolving short Record or Hook ID prefixes while matching Records or Hooks are created or removed either operate on exactly one resolved entity or fail with clear ambiguous or not-found errors, never report lock errors or panics, always print valid JSON on success, and do not mutate Records, Links, or Hooks on resolution failures
   command: bash tests/facts/store_schema_migrations.sh concurrent_json_prefix_and_hook_rm_races
   tags: [implemented]
+- label: simultaneous --json set, --json unset, and --json rm commands resolving short Record ID prefixes while matching Records are created or removed either mutate exactly one resolved Record and print valid JSON naming that Record or fail with clear ambiguous or not-found errors, never report lock errors or panics, and do not mutate Records or write Store Events on prefix resolution failures
+  id: jpr
+  command: bash tests/facts/store_schema_migrations.sh concurrent_json_mutation_prefix_races
+  tags: [implemented]
