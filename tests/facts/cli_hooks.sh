@@ -2012,62 +2012,142 @@ sleep 1
 SH
     chmod +x signal-hook.sh
 
+    assert_signal_failure() {
+      local name="$1"
+      local expected_stderr="$2"
+      local status
+      status="$(cat "$tmp/hook-signal-$name.status")"
+
+      test "$status" -ne 0
+      test ! -s "$tmp/hook-signal-$name.out"
+      grep -Fq "Store mutation already committed" "$tmp/hook-signal-$name.err"
+      grep -Fq "terminated by signal 15" "$tmp/hook-signal-$name.err"
+      grep -Fq "SIGTERM" "$tmp/hook-signal-$name.err"
+      grep -Fq "$expected_stderr" "$tmp/hook-signal-$name.err"
+    }
+
     plain_hook_id="$("$agent_store_bin" hook add create title=SignalPlain -- './signal-hook.sh plain')"
     set +e
     "$agent_store_bin" create task title=SignalPlain >"$tmp/hook-signal-plain.out" 2>"$tmp/hook-signal-plain.err"
     plain_status="$?"
     set -e
     printf "%s" "$plain_status" >"$tmp/hook-signal-plain.status"
+    assert_signal_failure plain plain-signal-stderr
 
-    test "$plain_status" -ne 0
-    test ! -s "$tmp/hook-signal-plain.out"
-    grep -Fq "Store mutation already committed" "$tmp/hook-signal-plain.err"
-    grep -Fq "terminated by signal 15" "$tmp/hook-signal-plain.err"
-    grep -Fq "SIGTERM" "$tmp/hook-signal-plain.err"
-    grep -Fq "plain-signal-stderr" "$tmp/hook-signal-plain.err"
-
-    json_record="$("$agent_store_bin" create task title=SignalJson status=pending)"
-    json_hook_id="$("$agent_store_bin" hook add set 'kind=task and title=SignalJson and status=done' -- './signal-hook.sh json')"
+    json_create_hook_id="$("$agent_store_bin" hook add create title=SignalJsonCreate -- './signal-hook.sh json-create')"
     set +e
-    "$agent_store_bin" --json set "$json_record" status=done >"$tmp/hook-signal-json.out" 2>"$tmp/hook-signal-json.err"
-    json_status="$?"
+    "$agent_store_bin" --json create task title=SignalJsonCreate status=committed >"$tmp/hook-signal-json-create.out" 2>"$tmp/hook-signal-json-create.err"
+    json_create_status="$?"
     set -e
-    printf "%s" "$json_status" >"$tmp/hook-signal-json.status"
+    printf "%s" "$json_create_status" >"$tmp/hook-signal-json-create.status"
+    assert_signal_failure json-create json-create-signal-stderr
 
-    test "$json_status" -ne 0
-    test ! -s "$tmp/hook-signal-json.out"
-    grep -Fq "Store mutation already committed" "$tmp/hook-signal-json.err"
-    grep -Fq "terminated by signal 15" "$tmp/hook-signal-json.err"
-    grep -Fq "SIGTERM" "$tmp/hook-signal-json.err"
-    grep -Fq "json-signal-stderr" "$tmp/hook-signal-json.err"
+    json_set_record="$("$agent_store_bin" create task title=SignalJsonSet status=pending)"
+    json_set_hook_id="$("$agent_store_bin" hook add set 'kind=task and title=SignalJsonSet and status=done' -- './signal-hook.sh json-set')"
+    set +e
+    "$agent_store_bin" --json set "$json_set_record" status=done >"$tmp/hook-signal-json-set.out" 2>"$tmp/hook-signal-json-set.err"
+    json_set_status="$?"
+    set -e
+    printf "%s" "$json_set_status" >"$tmp/hook-signal-json-set.status"
+    assert_signal_failure json-set json-set-signal-stderr
+
+    json_link_source="$("$agent_store_bin" create task title=SignalJsonLinkSource status=open)"
+    json_link_target="$("$agent_store_bin" create note title=SignalJsonLinkTarget status=open)"
+    json_link_hook_id="$("$agent_store_bin" hook add link 'kind=task and title=SignalJsonLinkSource' -- './signal-hook.sh json-link')"
+    set +e
+    "$agent_store_bin" --json link "$json_link_source" blocks "$json_link_target" >"$tmp/hook-signal-json-link.out" 2>"$tmp/hook-signal-json-link.err"
+    json_link_status="$?"
+    set -e
+    printf "%s" "$json_link_status" >"$tmp/hook-signal-json-link.status"
+    assert_signal_failure json-link json-link-signal-stderr
+
+    "$agent_store_bin" --json create task title=SignalAfter status=ok >"$tmp/hook-signal-after.out" 2>"$tmp/hook-signal-after.err"
+    later_record="$(python3 - "$tmp/hook-signal-after.out" <<'PY'
+import json
+import pathlib
+import sys
+
+payload = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+record_id = payload["record"]["id"]
+assert isinstance(record_id, str) and record_id
+print(record_id)
+PY
+)"
+    "$agent_store_bin" --json get "$later_record" >"$tmp/hook-signal-after-get.out" 2>"$tmp/hook-signal-after-get.err"
 
     summary="$(python3 - \
+      "$tmp" \
       .agent-store/store.sqlite \
       "$plain_hook_id" \
-      "$json_hook_id" \
-      "$json_record" <<'PY'
+      "$json_create_hook_id" \
+      "$json_set_hook_id" \
+      "$json_link_hook_id" \
+      "$json_set_record" \
+      "$json_link_source" \
+      "$json_link_target" \
+      "$later_record" <<'PY'
+import json
+import pathlib
 import sqlite3
 import sys
 
-db, plain_hook_id, json_hook_id, json_record = sys.argv[1:]
+(
+    tmp_s,
+    db,
+    plain_hook_id,
+    json_create_hook_id,
+    json_set_hook_id,
+    json_link_hook_id,
+    json_set_record,
+    json_link_source,
+    json_link_target,
+    later_record,
+) = sys.argv[1:]
+tmp = pathlib.Path(tmp_s)
 con = sqlite3.connect(db)
 
-records = {
-    row[1]: row[0]
-    for row in con.execute(
+for name, expected in [
+    ("plain", "plain-signal-stderr"),
+    ("json-create", "json-create-signal-stderr"),
+    ("json-set", "json-set-signal-stderr"),
+    ("json-link", "json-link-signal-stderr"),
+]:
+    stdout = (tmp / f"hook-signal-{name}.out").read_text(encoding="utf-8")
+    stderr = (tmp / f"hook-signal-{name}.err").read_text(encoding="utf-8")
+    status = int((tmp / f"hook-signal-{name}.status").read_text(encoding="utf-8"))
+    assert stdout == "", (name, stdout)
+    assert status != 0, (name, status)
+    assert "Store mutation already committed" in stderr, (name, stderr)
+    assert "terminated by signal 15" in stderr, (name, stderr)
+    assert "SIGTERM" in stderr, (name, stderr)
+    assert expected in stderr, (name, stderr)
+
+after_payload = json.loads((tmp / "hook-signal-after.out").read_text(encoding="utf-8"))
+after_get_payload = json.loads((tmp / "hook-signal-after-get.out").read_text(encoding="utf-8"))
+assert after_payload["record"]["id"] == later_record, after_payload
+assert after_get_payload["record"]["id"] == later_record, after_get_payload
+
+def record_by_title(title):
+    rows = con.execute(
         """
         select records.id, record_fields.raw_value
         from records
         join record_fields on record_fields.record_id = records.id
         where records.kind = 'task'
           and record_fields.key = 'title'
-          and record_fields.raw_value in ('SignalPlain', 'SignalJson')
-        """
-    )
-}
-assert set(records) == {"SignalPlain", "SignalJson"}, records
-plain_record = records["SignalPlain"]
-assert records["SignalJson"] == json_record, records
+          and record_fields.raw_value = ?
+        order by records.id
+        """,
+        (title,),
+    ).fetchall()
+    assert len(rows) == 1, (title, rows)
+    return rows[0][0]
+
+plain_record = record_by_title("SignalPlain")
+json_create_record = record_by_title("SignalJsonCreate")
+assert record_by_title("SignalJsonSet") == json_set_record
+assert record_by_title("SignalJsonLinkSource") == json_link_source
+assert record_by_title("SignalAfter") == later_record
 
 json_status = con.execute(
     """
@@ -2075,30 +2155,60 @@ json_status = con.execute(
     from record_fields
     where record_id = ? and key = 'status'
     """,
-    (json_record,),
+    (json_set_record,),
 ).fetchone()
 assert json_status == ("done",), json_status
+json_create_status = con.execute(
+    """
+    select raw_value
+    from record_fields
+    where record_id = ? and key = 'status'
+    """,
+    (json_create_record,),
+).fetchone()
+assert json_create_status == ("committed",), json_create_status
+assert con.execute(
+    """
+    select count(*) from record_links
+    where from_record_id = ? and rel = 'blocks' and to_record_id = ?
+    """,
+    (json_link_source, json_link_target),
+).fetchone()[0] == 1
 
 event_rows = con.execute(
     """
     select event_type, record_id
     from store_events
-    where record_id in (?, ?)
+    where record_id in (?, ?, ?, ?, ?)
     order by id
     """,
-    (plain_record, json_record),
+    (
+        plain_record,
+        json_create_record,
+        json_set_record,
+        json_link_source,
+        later_record,
+    ),
 ).fetchall()
 assert ("create", plain_record) in event_rows, event_rows
-assert ("set", json_record) in event_rows, event_rows
+assert ("create", json_create_record) in event_rows, event_rows
+assert ("set", json_set_record) in event_rows, event_rows
+assert ("link", json_link_source) in event_rows, event_rows
+assert ("create", later_record) in event_rows, event_rows
 
 rows = con.execute(
     """
     select hook_id, event_type, record_id, exit_status, stdout_summary, stderr_summary
     from hook_runs
-    where hook_id in (?, ?)
+    where hook_id in (?, ?, ?, ?)
     order by id
     """,
-    (plain_hook_id, json_hook_id),
+    (
+        plain_hook_id,
+        json_create_hook_id,
+        json_set_hook_id,
+        json_link_hook_id,
+    ),
 ).fetchall()
 assert rows == [
     (
@@ -2110,22 +2220,40 @@ assert rows == [
         "plain-signal-stderr",
     ),
     (
-        json_hook_id,
-        "set",
-        json_record,
+        json_create_hook_id,
+        "create",
+        json_create_record,
         -15,
-        "json-signal-stdout",
-        "json-signal-stderr",
+        "json-create-signal-stdout",
+        "json-create-signal-stderr",
+    ),
+    (
+        json_set_hook_id,
+        "set",
+        json_set_record,
+        -15,
+        "json-set-signal-stdout",
+        "json-set-signal-stderr",
+    ),
+    (
+        json_link_hook_id,
+        "link",
+        json_link_source,
+        -15,
+        "json-link-signal-stdout",
+        "json-link-signal-stderr",
     ),
 ], rows
 
 print(
-    "signal_hook_runs={} plain_record={} json_record={} statuses={} {}".format(
+    "signal_hook_runs={} plain_record={} json_create_record={} json_set_record={} json_link_source={} later_record={} statuses={}".format(
         len(rows),
         plain_record,
-        json_record,
-        rows[0][3],
-        rows[1][3],
+        json_create_record,
+        json_set_record,
+        json_link_source,
+        later_record,
+        ",".join(str(row[3]) for row in rows),
     )
 )
 PY
@@ -2139,9 +2267,14 @@ PY
 # Hook Signal Termination Evidence
 
 - plain_hook_id: $plain_hook_id
-- json_hook_id: $json_hook_id
+- json_create_hook_id: $json_create_hook_id
+- json_set_hook_id: $json_set_hook_id
+- json_link_hook_id: $json_link_hook_id
 - plain_status: $plain_status
-- json_status: $json_status
+- json_create_status: $json_create_status
+- json_set_status: $json_set_status
+- json_link_status: $json_link_status
+- later_record: $later_record
 - $summary
 - database: $evidence_root/store.sqlite
 - logs: $evidence_root/logs
