@@ -2207,6 +2207,61 @@ exit 33
 SH
     chmod +x fail-special-context-hook.sh
 
+    cat > multi-context-hook.sh <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+label="$1"
+state_dir="multi-context-state"
+mkdir -p "$state_dir"
+count_file="$state_dir/$label.count"
+count=0
+if [ -f "$count_file" ]; then
+  count="$(cat "$count_file")"
+fi
+count=$((count + 1))
+printf "%s" "$count" >"$count_file"
+
+python3 - "$label" "$count" <<'PY'
+import json
+import os
+import sys
+
+keys = [
+    "AGENT_STORE_EVENT",
+    "AGENT_STORE_ID",
+    "AGENT_STORE_KIND",
+    "AGENT_STORE_REL",
+    "AGENT_STORE_TARGET_ID",
+    "AGENT_STORE_FIELD",
+    "AGENT_STORE_KEY",
+    "AGENT_STORE_VALUE",
+    "AGENT_STORE_OLD_VALUE",
+    "AGENT_STORE_NEW_VALUE",
+]
+row = {"label": sys.argv[1], "count": int(sys.argv[2])}
+row.update({key: os.environ.get(key, "") for key in keys})
+with open("multi-context-env.jsonl", "a", encoding="utf-8") as handle:
+    json.dump(row, handle, ensure_ascii=False)
+    handle.write("\n")
+PY
+
+if [ "$count" -le 2 ]; then
+  printf "%s-success-%s-stdout" "$label" "$count"
+  printf "%s-success-%s-stderr" "$label" "$count" >&2
+  exit 0
+fi
+
+if [ "$count" -eq 3 ]; then
+  printf "%s-failure-stdout" "$label"
+  printf "%s-failure-stderr" "$label" >&2
+  exit 37
+fi
+
+printf "%s-after-failure-ran" "$label" >"$state_dir/$label.after-failure-ran"
+printf "%s-late-stdout" "$label"
+SH
+    chmod +x multi-context-hook.sh
+
     plain_special_old=$'old value=alpha "quoted" \\\\path\nline-old'
     plain_special_new=$'new value=beta "quoted" \\\\path\nline-new'
     json_special_old=$'unset value=gamma "quoted" \\\\path\nline-unset'
@@ -2223,6 +2278,9 @@ SH
     plain_special_set_id="$("$agent_store_bin" create task title=PlainSpecialSetContext details="$plain_special_old")"
     json_special_unset_id="$("$agent_store_bin" create task title=JsonSpecialUnsetContext details="$json_special_old")"
     json_rm_id="$("$agent_store_bin" create task title=JsonRmContext status=remove)"
+    plain_multi_context_set_id="$("$agent_store_bin" create task title=PlainMultiContextSet status=pending)"
+    json_multi_context_link_source="$("$agent_store_bin" create task title=JsonMultiContextLink status=open)"
+    json_multi_context_link_target="$("$agent_store_bin" create note title=JsonMultiContextTarget status=open)"
 
     plain_create_hook_id="$("$agent_store_bin" hook add create 'kind=task and title=PlainCreateContext' -- './fail-context-hook.sh plain-create')"
     plain_hook_id="$("$agent_store_bin" hook add link 'kind=task and title=PlainLinkContext' -- './fail-context-hook.sh plain-link')"
@@ -2234,6 +2292,22 @@ SH
     json_multi_unset_hook_id="$("$agent_store_bin" hook add unset 'kind=task and title=JsonMultiUnsetContext and not flag=remove-me and not extra=remove-too' -- './fail-context-hook.sh json-unset-multi')"
     plain_special_set_hook_id="$("$agent_store_bin" hook add set 'kind=task and title=PlainSpecialSetContext' -- './fail-special-context-hook.sh plain-set-special')"
     json_special_unset_hook_id="$("$agent_store_bin" hook add unset 'kind=task and title=JsonSpecialUnsetContext and not details=anything' -- './fail-special-context-hook.sh json-unset-special')"
+    add_multi_context_hooks() {
+      local event="$1"
+      local query="$2"
+      local label="$3"
+      local ids=""
+      local hook_id
+
+      for _ in 1 2 3 4; do
+        hook_id="$("$agent_store_bin" hook add "$event" "$query" -- "./multi-context-hook.sh $label")"
+        ids="${ids}${ids:+,}$hook_id"
+      done
+
+      printf "%s" "$ids"
+    }
+    plain_multi_context_set_hook_ids="$(add_multi_context_hooks set 'kind=task and title=PlainMultiContextSet and status=done' plain-multi-context-set)"
+    json_multi_context_link_hook_ids="$(add_multi_context_hooks link 'kind=task and title=JsonMultiContextLink' json-multi-context-link)"
 
     event_marker="$(python3 - .agent-store/store.sqlite <<'PY'
 import sqlite3
@@ -2382,10 +2456,33 @@ PY
     grep -Fq "exit status 33" "$tmp/hook-context-json-unset-special.err"
     grep -Fq "json-unset-special-stderr" "$tmp/hook-context-json-unset-special.err"
 
+    set +e
+    "$agent_store_bin" set "$plain_multi_context_set_id" status=done >"$tmp/hook-context-plain-multi-context-set.out" 2>"$tmp/hook-context-plain-multi-context-set.err"
+    plain_multi_context_set_status="$?"
+    set -e
+    printf "%s" "$plain_multi_context_set_status" >"$tmp/hook-context-plain-multi-context-set.status"
+    test "$plain_multi_context_set_status" -ne 0
+    test ! -s "$tmp/hook-context-plain-multi-context-set.out"
+    grep -Fq "Store mutation already committed" "$tmp/hook-context-plain-multi-context-set.err"
+    grep -Fq "exit status 37" "$tmp/hook-context-plain-multi-context-set.err"
+    grep -Fq "plain-multi-context-set-failure-stderr" "$tmp/hook-context-plain-multi-context-set.err"
+
+    set +e
+    "$agent_store_bin" --json link "$json_multi_context_link_source" blocks "$json_multi_context_link_target" >"$tmp/hook-context-json-multi-context-link.out" 2>"$tmp/hook-context-json-multi-context-link.err"
+    json_multi_context_link_status="$?"
+    set -e
+    printf "%s" "$json_multi_context_link_status" >"$tmp/hook-context-json-multi-context-link.status"
+    test "$json_multi_context_link_status" -ne 0
+    test ! -s "$tmp/hook-context-json-multi-context-link.out"
+    grep -Fq "Store mutation already committed" "$tmp/hook-context-json-multi-context-link.err"
+    grep -Fq "exit status 37" "$tmp/hook-context-json-multi-context-link.err"
+    grep -Fq "json-multi-context-link-failure-stderr" "$tmp/hook-context-json-multi-context-link.err"
+
     summary="$(
       python3 - .agent-store/store.sqlite \
         context-env.log \
         special-context-env.jsonl \
+        multi-context-env.jsonl \
         "$event_marker" \
         "$hook_marker" \
         "$plain_create_hook_id" \
@@ -2398,6 +2495,8 @@ PY
         "$json_multi_unset_hook_id" \
         "$plain_special_set_hook_id" \
         "$json_special_unset_hook_id" \
+        "$plain_multi_context_set_hook_ids" \
+        "$json_multi_context_link_hook_ids" \
         "$plain_create_id" \
         "$json_rm_id" \
         "$plain_source_id" \
@@ -2410,6 +2509,9 @@ PY
         "$json_multi_unset_id" \
         "$plain_special_set_id" \
         "$json_special_unset_id" \
+        "$plain_multi_context_set_id" \
+        "$json_multi_context_link_source" \
+        "$json_multi_context_link_target" \
         "$plain_special_old" \
         "$plain_special_new" \
         "$json_special_old" <<'PY'
@@ -2422,6 +2524,7 @@ import sys
     db,
     env_log,
     special_env_log,
+    multi_context_env_log,
     event_marker,
     hook_marker,
     plain_create_hook_id,
@@ -2434,6 +2537,8 @@ import sys
     json_multi_unset_hook_id,
     plain_special_set_hook_id,
     json_special_unset_hook_id,
+    plain_multi_context_set_hook_ids_s,
+    json_multi_context_link_hook_ids_s,
     plain_create_id,
     json_rm_id,
     plain_source_id,
@@ -2446,6 +2551,9 @@ import sys
     json_multi_unset_id,
     plain_special_set_id,
     json_special_unset_id,
+    plain_multi_context_set_id,
+    json_multi_context_link_source,
+    json_multi_context_link_target,
     plain_special_old,
     plain_special_new,
     json_special_old,
@@ -2498,6 +2606,45 @@ expected_special_env = [
 ]
 assert special_env_rows == expected_special_env, special_env_rows
 
+multi_context_env_rows = [
+    json.loads(line)
+    for line in pathlib.Path(multi_context_env_log).read_text(encoding="utf-8").splitlines()
+]
+expected_plain_multi_context = {
+    "label": "plain-multi-context-set",
+    "AGENT_STORE_EVENT": "set",
+    "AGENT_STORE_ID": plain_multi_context_set_id,
+    "AGENT_STORE_KIND": "task",
+    "AGENT_STORE_REL": "",
+    "AGENT_STORE_TARGET_ID": "",
+    "AGENT_STORE_FIELD": "status",
+    "AGENT_STORE_KEY": "status",
+    "AGENT_STORE_VALUE": "done",
+    "AGENT_STORE_OLD_VALUE": "pending",
+    "AGENT_STORE_NEW_VALUE": "done",
+}
+expected_json_multi_context = {
+    "label": "json-multi-context-link",
+    "AGENT_STORE_EVENT": "link",
+    "AGENT_STORE_ID": json_multi_context_link_source,
+    "AGENT_STORE_KIND": "task",
+    "AGENT_STORE_REL": "blocks",
+    "AGENT_STORE_TARGET_ID": json_multi_context_link_target,
+    "AGENT_STORE_FIELD": "",
+    "AGENT_STORE_KEY": "",
+    "AGENT_STORE_VALUE": "",
+    "AGENT_STORE_OLD_VALUE": "",
+    "AGENT_STORE_NEW_VALUE": "",
+}
+expected_multi_context_env = []
+for count in (1, 2, 3):
+    row = {"count": count, **expected_plain_multi_context}
+    expected_multi_context_env.append(row)
+for count in (1, 2, 3):
+    row = {"count": count, **expected_json_multi_context}
+    expected_multi_context_env.append(row)
+assert multi_context_env_rows == expected_multi_context_env, multi_context_env_rows
+
 con = sqlite3.connect(db)
 event_rows = con.execute(
     """
@@ -2520,6 +2667,8 @@ assert event_rows == [
     ("unset", json_multi_unset_id),
     ("set", plain_special_set_id),
     ("unset", json_special_unset_id),
+    ("set", plain_multi_context_set_id),
+    ("link", json_multi_context_link_source),
 ], event_rows
 
 link_rows = set(
@@ -2534,6 +2683,17 @@ link_rows = set(
 )
 assert (plain_source_id, "blocks", plain_target_id) in link_rows, link_rows
 assert (json_source_id, "relates", json_target_id) not in link_rows, link_rows
+json_multi_context_link = con.execute(
+    """
+    select count(*)
+    from record_links
+    where from_record_id = ?
+      and rel = 'blocks'
+      and to_record_id = ?
+    """,
+    (json_multi_context_link_source, json_multi_context_link_target),
+).fetchone()
+assert json_multi_context_link == (1,), json_multi_context_link
 plain_create_title = con.execute(
     """
     select raw_value
@@ -2593,6 +2753,16 @@ plain_special_details = con.execute(
     (plain_special_set_id,),
 ).fetchone()
 assert plain_special_details == (plain_special_new,), plain_special_details
+plain_multi_context_status = con.execute(
+    """
+    select raw_value
+    from record_fields
+    where record_id = ?
+      and key = 'status'
+    """,
+    (plain_multi_context_set_id,),
+).fetchone()
+assert plain_multi_context_status == ("done",), plain_multi_context_status
 json_unset_flag = con.execute(
     """
     select raw_value
@@ -2634,51 +2804,101 @@ json_special_details = con.execute(
 ).fetchone()
 assert json_special_details is None, json_special_details
 
+def split_hook_ids(ids):
+    values = [value for value in ids.split(",") if value]
+    assert len(values) == 4, values
+    return sorted(values)
+
+plain_multi_context_set_hook_ids = split_hook_ids(plain_multi_context_set_hook_ids_s)
+json_multi_context_link_hook_ids = split_hook_ids(json_multi_context_link_hook_ids_s)
+
+expected = {
+    plain_create_hook_id: ("create", plain_create_id, 33, "plain-create-stdout", "plain-create-stderr"),
+    plain_hook_id: ("link", plain_source_id, 33, "plain-link-stdout", "plain-link-stderr"),
+    json_hook_id: ("unlink", json_source_id, 33, "json-unlink-stdout", "json-unlink-stderr"),
+    json_rm_hook_id: ("rm", json_rm_id, 33, "json-rm-stdout", "json-rm-stderr"),
+    plain_set_hook_id: ("set", plain_set_id, 33, "plain-set-stdout", "plain-set-stderr"),
+    json_unset_hook_id: ("unset", json_unset_id, 33, "json-unset-field-stdout", "json-unset-field-stderr"),
+    plain_multi_set_hook_id: ("set", plain_multi_set_id, 33, "plain-set-multi-stdout", "plain-set-multi-stderr"),
+    json_multi_unset_hook_id: ("unset", json_multi_unset_id, 33, "json-unset-multi-stdout", "json-unset-multi-stderr"),
+    plain_special_set_hook_id: ("set", plain_special_set_id, 33, "plain-set-special-stdout", "plain-set-special-stderr"),
+    json_special_unset_hook_id: ("unset", json_special_unset_id, 33, "json-unset-special-stdout", "json-unset-special-stderr"),
+    plain_multi_context_set_hook_ids[0]: (
+        "set",
+        plain_multi_context_set_id,
+        0,
+        "plain-multi-context-set-success-1-stdout",
+        "plain-multi-context-set-success-1-stderr",
+    ),
+    plain_multi_context_set_hook_ids[1]: (
+        "set",
+        plain_multi_context_set_id,
+        0,
+        "plain-multi-context-set-success-2-stdout",
+        "plain-multi-context-set-success-2-stderr",
+    ),
+    plain_multi_context_set_hook_ids[2]: (
+        "set",
+        plain_multi_context_set_id,
+        37,
+        "plain-multi-context-set-failure-stdout",
+        "plain-multi-context-set-failure-stderr",
+    ),
+    json_multi_context_link_hook_ids[0]: (
+        "link",
+        json_multi_context_link_source,
+        0,
+        "json-multi-context-link-success-1-stdout",
+        "json-multi-context-link-success-1-stderr",
+    ),
+    json_multi_context_link_hook_ids[1]: (
+        "link",
+        json_multi_context_link_source,
+        0,
+        "json-multi-context-link-success-2-stdout",
+        "json-multi-context-link-success-2-stderr",
+    ),
+    json_multi_context_link_hook_ids[2]: (
+        "link",
+        json_multi_context_link_source,
+        37,
+        "json-multi-context-link-failure-stdout",
+        "json-multi-context-link-failure-stderr",
+    ),
+}
+skipped_hook_ids = {
+    plain_multi_context_set_hook_ids[3],
+    json_multi_context_link_hook_ids[3],
+}
+all_hook_ids = list(expected) + sorted(skipped_hook_ids)
+placeholders = ",".join("?" for _ in all_hook_ids)
 rows = con.execute(
-    """
+    f"""
     select hook_id, event_type, record_id, exit_status, stdout_summary, stderr_summary
     from hook_runs
     where id > ?
-      and hook_id in (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      and hook_id in ({placeholders})
     order by id
     """,
-    (
-        hook_marker,
-        plain_create_hook_id,
-        plain_hook_id,
-        json_hook_id,
-        json_rm_hook_id,
-        plain_set_hook_id,
-        json_unset_hook_id,
-        plain_multi_set_hook_id,
-        json_multi_unset_hook_id,
-        plain_special_set_hook_id,
-        json_special_unset_hook_id,
-    ),
+    [hook_marker, *all_hook_ids],
 ).fetchall()
-expected = {
-    plain_create_hook_id: ("create", plain_create_id, "plain-create-stdout", "plain-create-stderr"),
-    plain_hook_id: ("link", plain_source_id, "plain-link-stdout", "plain-link-stderr"),
-    json_hook_id: ("unlink", json_source_id, "json-unlink-stdout", "json-unlink-stderr"),
-    json_rm_hook_id: ("rm", json_rm_id, "json-rm-stdout", "json-rm-stderr"),
-    plain_set_hook_id: ("set", plain_set_id, "plain-set-stdout", "plain-set-stderr"),
-    json_unset_hook_id: ("unset", json_unset_id, "json-unset-field-stdout", "json-unset-field-stderr"),
-    plain_multi_set_hook_id: ("set", plain_multi_set_id, "plain-set-multi-stdout", "plain-set-multi-stderr"),
-    json_multi_unset_hook_id: ("unset", json_multi_unset_id, "json-unset-multi-stdout", "json-unset-multi-stderr"),
-    plain_special_set_hook_id: ("set", plain_special_set_id, "plain-set-special-stdout", "plain-set-special-stderr"),
-    json_special_unset_hook_id: ("unset", json_special_unset_id, "json-unset-special-stdout", "json-unset-special-stderr"),
-}
-assert len(rows) == 10, rows
+assert len(rows) == 16, rows
+assert not skipped_hook_ids.intersection(row[0] for row in rows), rows
 for hook_id, event_type, record_id, exit_status, stdout_summary, stderr_summary in rows:
-    expected_event, expected_record, expected_stdout, expected_stderr = expected[hook_id]
+    expected_event, expected_record, expected_status, expected_stdout, expected_stderr = expected[hook_id]
     assert event_type == expected_event, rows
     assert record_id == expected_record, rows
-    assert exit_status == 33, rows
+    assert exit_status == expected_status, rows
     assert stdout_summary == expected_stdout, rows
     assert expected_stderr in stderr_summary, rows
 
+for label in ("plain-multi-context-set", "json-multi-context-link"):
+    count_text = pathlib.Path("multi-context-state", f"{label}.count").read_text(encoding="utf-8")
+    assert count_text == "3", (label, count_text)
+    assert not pathlib.Path("multi-context-state", f"{label}.after-failure-ran").exists(), label
+
 print(
-    "context_failure_hook_runs={} plain_create={} json_rm={} plain_source={} json_source={} plain_set={} json_unset={} plain_multi_set={} json_multi_unset={} plain_special_set={} json_special_unset={} env_lines={} special_env_lines={}".format(
+    "context_failure_hook_runs={} skipped_multi_context_hooks=2 plain_create={} json_rm={} plain_source={} json_source={} plain_set={} json_unset={} plain_multi_set={} json_multi_unset={} plain_special_set={} json_special_unset={} plain_multi_context_set={} json_multi_context_link_source={} env_lines={} special_env_lines={} multi_context_env_lines={}".format(
         len(rows),
         plain_create_id,
         json_rm_id,
@@ -2690,8 +2910,11 @@ print(
         json_multi_unset_id,
         plain_special_set_id,
         json_special_unset_id,
+        plain_multi_context_set_id,
+        json_multi_context_link_source,
         len(env_lines),
         len(special_env_rows),
+        len(multi_context_env_rows),
     )
 )
 PY
@@ -2700,8 +2923,11 @@ PY
     if [ -n "$evidence_root" ]; then
       cp fail-context-hook.sh "$evidence_root/logs/"
       cp fail-special-context-hook.sh "$evidence_root/logs/"
+      cp multi-context-hook.sh "$evidence_root/logs/"
       cp context-env.log "$evidence_root/logs/"
       cp special-context-env.jsonl "$evidence_root/logs/"
+      cp multi-context-env.jsonl "$evidence_root/logs/"
+      cp -R multi-context-state "$evidence_root/logs/"
       find "$tmp" -maxdepth 1 -type f \
         \( -name 'hook-context-*' \) \
         -exec cp {} "$evidence_root/logs/" \;
@@ -2719,6 +2945,8 @@ PY
 - json_multi_unset_hook_id: $json_multi_unset_hook_id
 - plain_special_set_hook_id: $plain_special_set_hook_id
 - json_special_unset_hook_id: $json_special_unset_hook_id
+- plain_multi_context_set_hook_ids: $plain_multi_context_set_hook_ids
+- json_multi_context_link_hook_ids: $json_multi_context_link_hook_ids
 - plain_create_id: $plain_create_id
 - json_rm_id: $json_rm_id
 - plain_source_id: $plain_source_id
@@ -2731,6 +2959,9 @@ PY
 - json_multi_unset_id: $json_multi_unset_id
 - plain_special_set_id: $plain_special_set_id
 - json_special_unset_id: $json_special_unset_id
+- plain_multi_context_set_id: $plain_multi_context_set_id
+- json_multi_context_link_source: $json_multi_context_link_source
+- json_multi_context_link_target: $json_multi_context_link_target
 - plain_create_status: $plain_create_status
 - plain_status: $plain_status
 - json_status: $json_status
@@ -2741,6 +2972,8 @@ PY
 - json_multi_unset_status: $json_multi_unset_status
 - plain_special_set_status: $plain_special_set_status
 - json_special_unset_status: $json_special_unset_status
+- plain_multi_context_set_status: $plain_multi_context_set_status
+- json_multi_context_link_status: $json_multi_context_link_status
 - $summary
 - database: $evidence_root/store.sqlite
 - logs: $evidence_root/logs
