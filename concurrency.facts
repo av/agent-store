@@ -27,3 +27,6 @@
 - label: simultaneous find, get, and links reads while create, rm, link, and unlink mutations with matching Hooks are running finish without database lock errors or panics, keep every read output parseable, keep stable get and links reads consistent, and persist Hook Runs for committed mutations
   command: bash tests/facts/store_schema_migrations.sh concurrent_record_readers_with_hooked_mutations
   tags: [implemented]
+- label: simultaneous --json find, --json get, and --json links reads while create, rm, link, and unlink mutations with matching Hooks are running finish without database lock errors or panics, always print valid JSON with stable top-level shapes, tolerate concurrently disappearing Records or Links as either a consistent JSON snapshot or a not-found error, and persist Hook Runs for committed mutations
+  command: bash tests/facts/store_schema_migrations.sh concurrent_json_record_readers_with_hooked_mutations
+  tags: [implemented]
