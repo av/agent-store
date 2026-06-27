@@ -2142,6 +2142,204 @@ assert not any(row[0] in skipped for row in rows), rows
 PY
     ;;
 
+  hook_failure_preserves_link_context_env)
+    cd "$tmp"
+    run_agent_store init >/tmp/agent-store-hook-context-failure-06p-init.out
+    agent_store_bin="$target_dir/debug/agent-store"
+
+    evidence_root="${AGENT_STORE_E2E_DIR:-}"
+    if [ -n "$evidence_root" ]; then
+      mkdir -p "$evidence_root/logs" "$evidence_root/reports"
+    fi
+
+    cat > fail-context-hook.sh <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+label="$1"
+printf "%s:%s:%s:%s:%s:%s\n" \
+  "$label" \
+  "${AGENT_STORE_EVENT:-}" \
+  "${AGENT_STORE_ID:-}" \
+  "${AGENT_STORE_KIND:-}" \
+  "${AGENT_STORE_REL:-}" \
+  "${AGENT_STORE_TARGET_ID:-}" >> context-env.log
+printf "%s-stdout" "$label"
+printf "%s-stderr" "$label" >&2
+exit 33
+SH
+    chmod +x fail-context-hook.sh
+
+    plain_source_id="$("$agent_store_bin" create task title=PlainLinkContext status=open)"
+    plain_target_id="$("$agent_store_bin" create note title=PlainLinkTarget status=open)"
+    json_source_id="$("$agent_store_bin" create task title=JsonUnlinkContext status=open)"
+    json_target_id="$("$agent_store_bin" create note title=JsonUnlinkTarget status=open)"
+    "$agent_store_bin" link "$json_source_id" relates "$json_target_id" >/tmp/agent-store-hook-context-failure-06p-seed-link.out
+
+    plain_hook_id="$("$agent_store_bin" hook add link 'kind=task and title=PlainLinkContext' -- './fail-context-hook.sh plain-link')"
+    json_hook_id="$("$agent_store_bin" hook add unlink 'kind=task and title=JsonUnlinkContext' -- './fail-context-hook.sh json-unlink')"
+
+    event_marker="$(python3 - .agent-store/store.sqlite <<'PY'
+import sqlite3
+import sys
+
+con = sqlite3.connect(sys.argv[1])
+print(con.execute("select coalesce(max(id), 0) from store_events").fetchone()[0])
+PY
+)"
+    hook_marker="$(python3 - .agent-store/store.sqlite <<'PY'
+import sqlite3
+import sys
+
+con = sqlite3.connect(sys.argv[1])
+print(con.execute("select coalesce(max(id), 0) from hook_runs").fetchone()[0])
+PY
+)"
+
+    set +e
+    "$agent_store_bin" link "$plain_source_id" blocks "$plain_target_id" >"$tmp/hook-context-plain-link.out" 2>"$tmp/hook-context-plain-link.err"
+    plain_status="$?"
+    set -e
+    printf "%s" "$plain_status" >"$tmp/hook-context-plain-link.status"
+    test "$plain_status" -ne 0
+    test ! -s "$tmp/hook-context-plain-link.out"
+    grep -Fq "Store mutation already committed" "$tmp/hook-context-plain-link.err"
+    grep -Fq "exit status 33" "$tmp/hook-context-plain-link.err"
+    grep -Fq "plain-link-stderr" "$tmp/hook-context-plain-link.err"
+
+    set +e
+    "$agent_store_bin" --json unlink "$json_source_id" relates "$json_target_id" >"$tmp/hook-context-json-unlink.out" 2>"$tmp/hook-context-json-unlink.err"
+    json_status="$?"
+    set -e
+    printf "%s" "$json_status" >"$tmp/hook-context-json-unlink.status"
+    test "$json_status" -ne 0
+    test ! -s "$tmp/hook-context-json-unlink.out"
+    grep -Fq "Store mutation already committed" "$tmp/hook-context-json-unlink.err"
+    grep -Fq "exit status 33" "$tmp/hook-context-json-unlink.err"
+    grep -Fq "json-unlink-stderr" "$tmp/hook-context-json-unlink.err"
+
+    summary="$(
+      python3 - .agent-store/store.sqlite \
+        context-env.log \
+        "$event_marker" \
+        "$hook_marker" \
+        "$plain_hook_id" \
+        "$json_hook_id" \
+        "$plain_source_id" \
+        "$plain_target_id" \
+        "$json_source_id" \
+        "$json_target_id" <<'PY'
+import pathlib
+import sqlite3
+import sys
+
+(
+    db,
+    env_log,
+    event_marker,
+    hook_marker,
+    plain_hook_id,
+    json_hook_id,
+    plain_source_id,
+    plain_target_id,
+    json_source_id,
+    json_target_id,
+) = sys.argv[1:]
+
+env_lines = pathlib.Path(env_log).read_text().splitlines()
+expected_env = [
+    f"plain-link:link:{plain_source_id}:task:blocks:{plain_target_id}",
+    f"json-unlink:unlink:{json_source_id}:task:relates:{json_target_id}",
+]
+assert env_lines == expected_env, env_lines
+
+con = sqlite3.connect(db)
+event_rows = con.execute(
+    """
+    select event_type, record_id
+    from store_events
+    where id > ?
+      and event_type in ('link', 'unlink')
+    order by id
+    """,
+    (event_marker,),
+).fetchall()
+assert event_rows == [
+    ("link", plain_source_id),
+    ("unlink", json_source_id),
+], event_rows
+
+link_rows = set(
+    con.execute(
+        """
+        select from_record_id, rel, to_record_id
+        from record_links
+        where from_record_id in (?, ?)
+        """,
+        (plain_source_id, json_source_id),
+    ).fetchall()
+)
+assert (plain_source_id, "blocks", plain_target_id) in link_rows, link_rows
+assert (json_source_id, "relates", json_target_id) not in link_rows, link_rows
+
+rows = con.execute(
+    """
+    select hook_id, event_type, record_id, exit_status, stdout_summary, stderr_summary
+    from hook_runs
+    where id > ?
+      and hook_id in (?, ?)
+    order by id
+    """,
+    (hook_marker, plain_hook_id, json_hook_id),
+).fetchall()
+expected = {
+    plain_hook_id: ("link", plain_source_id, "plain-link-stdout", "plain-link-stderr"),
+    json_hook_id: ("unlink", json_source_id, "json-unlink-stdout", "json-unlink-stderr"),
+}
+assert len(rows) == 2, rows
+for hook_id, event_type, record_id, exit_status, stdout_summary, stderr_summary in rows:
+    expected_event, expected_record, expected_stdout, expected_stderr = expected[hook_id]
+    assert event_type == expected_event, rows
+    assert record_id == expected_record, rows
+    assert exit_status == 33, rows
+    assert stdout_summary == expected_stdout, rows
+    assert expected_stderr in stderr_summary, rows
+
+print(
+    "context_failure_hook_runs={} plain_source={} json_source={} env_lines={}".format(
+        len(rows),
+        plain_source_id,
+        json_source_id,
+        len(env_lines),
+    )
+)
+PY
+)"
+
+    if [ -n "$evidence_root" ]; then
+      cp fail-context-hook.sh "$evidence_root/logs/"
+      cp context-env.log "$evidence_root/logs/"
+      find "$tmp" -maxdepth 1 -type f \
+        \( -name 'hook-context-*' \) \
+        -exec cp {} "$evidence_root/logs/" \;
+      cp .agent-store/store.sqlite "$evidence_root/store.sqlite"
+      cat > "$evidence_root/reports/hook-failure-context-env.md" <<EOF
+# Hook Failure Context Environment Evidence
+
+- plain_hook_id: $plain_hook_id
+- json_hook_id: $json_hook_id
+- plain_source_id: $plain_source_id
+- plain_target_id: $plain_target_id
+- json_source_id: $json_source_id
+- json_target_id: $json_target_id
+- plain_status: $plain_status
+- json_status: $json_status
+- $summary
+- database: $evidence_root/store.sqlite
+- logs: $evidence_root/logs
+EOF
+    fi
+    ;;
+
   hook_output_capture_caps_and_help)
     cd "$tmp"
     run_agent_store --help >/tmp/agent-store-hook-caps-lc1-help.out
@@ -3063,7 +3261,7 @@ EOF
     ;;
 
   *)
-    echo "usage: $0 {hook_add_stores_metadata|hook_ls_deterministic|hook_rm_deletes_metadata|hooks_run_after_commit|hook_query_filters_records|hook_query_uses_mutation_snapshot|hook_stdin_receives_record_snapshot|hook_failure_reports_details|hook_failure_or_timeout_reports_committed_mutation|hook_command_launch_or_execution_failure_reports_committed_mutation|json_mutation_hook_failure_or_timeout_reports_committed_without_success_json|json_multiple_matching_hooks_stop_after_failure_or_timeout|hooks_run_sequentially_from_project_root_with_timeout|hook_env_vars_for_record_events|link_hook_query_source_and_relation_env|hook_output_capture_caps_and_help|hook_signal_termination_reports_committed_mutation|hook_timeout_terminates_process_group}" >&2
+    echo "usage: $0 {hook_add_stores_metadata|hook_ls_deterministic|hook_rm_deletes_metadata|hooks_run_after_commit|hook_query_filters_records|hook_query_uses_mutation_snapshot|hook_stdin_receives_record_snapshot|hook_failure_reports_details|hook_failure_or_timeout_reports_committed_mutation|hook_command_launch_or_execution_failure_reports_committed_mutation|json_mutation_hook_failure_or_timeout_reports_committed_without_success_json|json_multiple_matching_hooks_stop_after_failure_or_timeout|hooks_run_sequentially_from_project_root_with_timeout|hook_env_vars_for_record_events|link_hook_query_source_and_relation_env|hook_failure_preserves_link_context_env|hook_output_capture_caps_and_help|hook_signal_termination_reports_committed_mutation|hook_timeout_terminates_process_group}" >&2
     exit 2
     ;;
 esac
