@@ -488,6 +488,288 @@ assert "timed out after 30 seconds" in timeout_row[4], timeout_row
 PY
     ;;
 
+  json_mutation_hook_failure_or_timeout_reports_committed_without_success_json)
+    cd "$tmp"
+    run_agent_store init >/tmp/agent-store-json-hook-failure-jhf-init.out
+    agent_store_bin="$target_dir/debug/agent-store"
+
+    evidence_root="${AGENT_STORE_E2E_DIR:-}"
+    if [ -n "$evidence_root" ]; then
+      mkdir -p "$evidence_root/logs" "$evidence_root/reports"
+    fi
+
+    cat > fail-hook.sh <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+name="$1"
+printf "%s-failure-stdout" "$name"
+printf "%s-failure-stderr" "$name" >&2
+exit 31
+SH
+    chmod +x fail-hook.sh
+
+    cat > timeout-hook.sh <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+name="$1"
+printf "%s-timeout-stderr" "$name" >&2
+while :; do
+  sleep 1
+done
+SH
+    chmod +x timeout-hook.sh
+
+    set_record="$("$agent_store_bin" create task op=json-fail-set status=pending)"
+    unset_record="$("$agent_store_bin" create task op=json-fail-unset flag=present)"
+    rm_record="$("$agent_store_bin" create task op=json-fail-rm action=remove)"
+    link_source="$("$agent_store_bin" create task op=json-fail-link status=open)"
+    link_target="$("$agent_store_bin" create note op=json-fail-link-target status=open)"
+    unlink_source="$("$agent_store_bin" create task op=json-fail-unlink status=open)"
+    unlink_target="$("$agent_store_bin" create note op=json-fail-unlink-target status=open)"
+    timeout_record="$("$agent_store_bin" create task op=json-timeout-set status=pending)"
+    "$agent_store_bin" link "$unlink_source" blocks "$unlink_target" >/tmp/agent-store-json-hook-failure-jhf-seed-unlink.out
+
+    set_hook_id="$("$agent_store_bin" hook add set 'kind=task and op=json-fail-set and status=done' -- './fail-hook.sh set')"
+    unset_hook_id="$("$agent_store_bin" hook add unset 'kind=task and op=json-fail-unset and not flag=present' -- './fail-hook.sh unset')"
+    rm_hook_id="$("$agent_store_bin" hook add rm 'kind=task and op=json-fail-rm and action=remove' -- './fail-hook.sh rm')"
+    link_hook_id="$("$agent_store_bin" hook add link 'kind=task and op=json-fail-link' -- './fail-hook.sh link')"
+    unlink_hook_id="$("$agent_store_bin" hook add unlink 'kind=task and op=json-fail-unlink' -- './fail-hook.sh unlink')"
+    timeout_hook_id="$("$agent_store_bin" hook add set 'kind=task and op=json-timeout-set and status=timeout' -- './timeout-hook.sh set')"
+
+    event_marker="$(python3 - .agent-store/store.sqlite <<'PY'
+import sqlite3
+import sys
+
+con = sqlite3.connect(sys.argv[1])
+print(con.execute("select coalesce(max(id), 0) from store_events").fetchone()[0])
+PY
+)"
+    hook_marker="$(python3 - .agent-store/store.sqlite <<'PY'
+import sqlite3
+import sys
+
+con = sqlite3.connect(sys.argv[1])
+print(con.execute("select coalesce(max(id), 0) from hook_runs").fetchone()[0])
+PY
+)"
+
+    run_json_failure() {
+      local name="$1"
+      shift
+      set +e
+      "$agent_store_bin" --json "$@" >"$tmp/json-hook-$name.out" 2>"$tmp/json-hook-$name.err"
+      local status="$?"
+      set -e
+      printf "%s" "$status" >"$tmp/json-hook-$name.status"
+      test "$status" -ne 0
+      test ! -s "$tmp/json-hook-$name.out"
+      grep -Fq "Store mutation already committed" "$tmp/json-hook-$name.err"
+      grep -Fq "exit status 31" "$tmp/json-hook-$name.err"
+      grep -Fq "$name-failure-stderr" "$tmp/json-hook-$name.err"
+    }
+
+    run_json_failure set set "$set_record" status=done
+    run_json_failure unset unset "$unset_record" flag
+    run_json_failure rm rm "$rm_record"
+    run_json_failure link link "$link_source" blocks "$link_target"
+    run_json_failure unlink unlink "$unlink_source" blocks "$unlink_target"
+
+    set +e
+    timeout 40s "$agent_store_bin" --json set "$timeout_record" status=timeout >"$tmp/json-hook-timeout.out" 2>"$tmp/json-hook-timeout.err"
+    timeout_status="$?"
+    set -e
+    printf "%s" "$timeout_status" >"$tmp/json-hook-timeout.status"
+    test "$timeout_status" -ne 0
+    test "$timeout_status" -ne 124
+    test ! -s "$tmp/json-hook-timeout.out"
+    grep -Fq "Store mutation already committed" "$tmp/json-hook-timeout.err"
+    grep -Fq "timed out after 30 seconds" "$tmp/json-hook-timeout.err"
+    grep -Fq "set-timeout-stderr" "$tmp/json-hook-timeout.err"
+
+    summary="$(python3 - \
+      "$tmp" \
+      .agent-store/store.sqlite \
+      "$event_marker" \
+      "$hook_marker" \
+      "$set_record" \
+      "$unset_record" \
+      "$rm_record" \
+      "$link_source" \
+      "$link_target" \
+      "$unlink_source" \
+      "$unlink_target" \
+      "$timeout_record" \
+      "$set_hook_id" \
+      "$unset_hook_id" \
+      "$rm_hook_id" \
+      "$link_hook_id" \
+      "$unlink_hook_id" \
+      "$timeout_hook_id" <<'PY'
+from collections import Counter
+import pathlib
+import sqlite3
+import sys
+
+(
+    tmp_s,
+    db,
+    event_marker_s,
+    hook_marker_s,
+    set_record,
+    unset_record,
+    rm_record,
+    link_source,
+    link_target,
+    unlink_source,
+    unlink_target,
+    timeout_record,
+    set_hook_id,
+    unset_hook_id,
+    rm_hook_id,
+    link_hook_id,
+    unlink_hook_id,
+    timeout_hook_id,
+) = sys.argv[1:]
+tmp = pathlib.Path(tmp_s)
+event_marker = int(event_marker_s)
+hook_marker = int(hook_marker_s)
+
+for name in ["set", "unset", "rm", "link", "unlink", "timeout"]:
+    stdout = (tmp / f"json-hook-{name}.out").read_text(encoding="utf-8")
+    stderr = (tmp / f"json-hook-{name}.err").read_text(encoding="utf-8")
+    status = int((tmp / f"json-hook-{name}.status").read_text(encoding="utf-8"))
+    assert stdout == "", (name, stdout)
+    assert status != 0, (name, status)
+    assert "Store mutation already committed" in stderr, (name, stderr)
+    if name == "timeout":
+        assert status != 124, status
+        assert "timed out after 30 seconds" in stderr, stderr
+        assert "set-timeout-stderr" in stderr, stderr
+    else:
+        assert "exit status 31" in stderr, (name, stderr)
+        assert f"{name}-failure-stderr" in stderr, (name, stderr)
+
+con = sqlite3.connect(db)
+
+def fields(record_id):
+    return dict(
+        con.execute(
+            "select key, raw_value from record_fields where record_id = ?",
+            (record_id,),
+        ).fetchall()
+    )
+
+assert fields(set_record)["status"] == "done", fields(set_record)
+assert "flag" not in fields(unset_record), fields(unset_record)
+assert fields(timeout_record)["status"] == "timeout", fields(timeout_record)
+assert con.execute("select count(*) from records where id = ?", (rm_record,)).fetchone()[0] == 0
+assert con.execute(
+    """
+    select count(*) from record_links
+    where from_record_id = ? and rel = 'blocks' and to_record_id = ?
+    """,
+    (link_source, link_target),
+).fetchone()[0] == 1
+assert con.execute(
+    """
+    select count(*) from record_links
+    where from_record_id = ? and rel = 'blocks' and to_record_id = ?
+    """,
+    (unlink_source, unlink_target),
+).fetchone()[0] == 0
+
+event_rows = con.execute(
+    """
+    select event_type, record_id
+    from store_events
+    where id > ?
+    order by id
+    """,
+    (event_marker,),
+).fetchall()
+assert Counter(row[0] for row in event_rows) == {
+    "set": 2,
+    "unset": 1,
+    "rm": 1,
+    "link": 1,
+    "unlink": 1,
+}, event_rows
+assert ("set", set_record) in event_rows, event_rows
+assert ("unset", unset_record) in event_rows, event_rows
+assert ("rm", rm_record) in event_rows, event_rows
+assert ("link", link_source) in event_rows, event_rows
+assert ("unlink", unlink_source) in event_rows, event_rows
+assert ("set", timeout_record) in event_rows, event_rows
+
+hook_ids = [
+    set_hook_id,
+    unset_hook_id,
+    rm_hook_id,
+    link_hook_id,
+    unlink_hook_id,
+    timeout_hook_id,
+]
+placeholders = ",".join("?" for _ in hook_ids)
+rows = con.execute(
+    f"""
+    select hook_id, event_type, record_id, exit_status, stdout_summary, stderr_summary
+    from hook_runs
+    where id > ? and hook_id in ({placeholders})
+    order by id
+    """,
+    [hook_marker, *hook_ids],
+).fetchall()
+assert len(rows) == len(hook_ids), rows
+by_hook = {row[0]: row[1:] for row in rows}
+expected_failures = {
+    set_hook_id: ("set", set_record, 31, "set-failure-stdout", "set-failure-stderr"),
+    unset_hook_id: ("unset", unset_record, 31, "unset-failure-stdout", "unset-failure-stderr"),
+    rm_hook_id: ("rm", rm_record, 31, "rm-failure-stdout", "rm-failure-stderr"),
+    link_hook_id: ("link", link_source, 31, "link-failure-stdout", "link-failure-stderr"),
+    unlink_hook_id: ("unlink", unlink_source, 31, "unlink-failure-stdout", "unlink-failure-stderr"),
+}
+for hook_id, expected in expected_failures.items():
+    assert by_hook[hook_id] == expected, (hook_id, by_hook[hook_id], expected)
+
+timeout_row = by_hook[timeout_hook_id]
+assert timeout_row[:4] == ("set", timeout_record, -1, ""), timeout_row
+assert "set-timeout-stderr" in timeout_row[4], timeout_row
+assert "timed out after 30 seconds" in timeout_row[4], timeout_row
+
+print(
+    "json_failures=5 json_timeouts=1 stdout_empty=6 hook_runs={} events={}".format(
+        len(rows),
+        len(event_rows),
+    )
+)
+PY
+)"
+
+    if [ -n "$evidence_root" ]; then
+      find "$tmp" -maxdepth 1 -type f \
+        \( -name 'json-hook-*' -o -name 'fail-hook.sh' -o -name 'timeout-hook.sh' \) \
+        -exec cp {} "$evidence_root/logs/" \;
+      cp .agent-store/store.sqlite "$evidence_root/store.sqlite"
+      cat > "$evidence_root/reports/json-mutation-hook-failure-timeout.md" <<EOF
+# JSON Mutation Hook Failure/Timeout Evidence
+
+- set_record: $set_record
+- unset_record: $unset_record
+- rm_record: $rm_record
+- link_source: $link_source
+- link_target: $link_target
+- unlink_source: $unlink_source
+- unlink_target: $unlink_target
+- timeout_record: $timeout_record
+- failing_hook_ids: $set_hook_id $unset_hook_id $rm_hook_id $link_hook_id $unlink_hook_id
+- timeout_hook_id: $timeout_hook_id
+- $summary
+- database: $evidence_root/store.sqlite
+- logs: $evidence_root/logs
+EOF
+    fi
+    ;;
+
   hooks_run_sequentially_from_project_root_with_timeout)
     cd "$tmp"
     run_agent_store init >/tmp/agent-store-hook-runtime-4as-init.out
@@ -799,7 +1081,7 @@ PY
     ;;
 
   *)
-    echo "usage: $0 {hook_add_stores_metadata|hook_ls_deterministic|hook_rm_deletes_metadata|hooks_run_after_commit|hook_query_filters_records|hook_query_uses_mutation_snapshot|hook_stdin_receives_record_snapshot|hook_failure_reports_details|hook_failure_or_timeout_reports_committed_mutation|hooks_run_sequentially_from_project_root_with_timeout|hook_env_vars_for_record_events|link_hook_query_source_and_relation_env|hook_output_capture_caps_and_help}" >&2
+    echo "usage: $0 {hook_add_stores_metadata|hook_ls_deterministic|hook_rm_deletes_metadata|hooks_run_after_commit|hook_query_filters_records|hook_query_uses_mutation_snapshot|hook_stdin_receives_record_snapshot|hook_failure_reports_details|hook_failure_or_timeout_reports_committed_mutation|json_mutation_hook_failure_or_timeout_reports_committed_without_success_json|hooks_run_sequentially_from_project_root_with_timeout|hook_env_vars_for_record_events|link_hook_query_source_and_relation_env|hook_output_capture_caps_and_help}" >&2
     exit 2
     ;;
 esac

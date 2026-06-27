@@ -541,7 +541,8 @@ fn run_matching_hooks_after_commit(
             output.status.code().unwrap_or(1)
         };
         let stdout_summary = String::from_utf8_lossy(&output.stdout).into_owned();
-        let mut stderr_summary = String::from_utf8_lossy(&output.stderr).into_owned();
+        let hook_stderr_summary = String::from_utf8_lossy(&output.stderr).into_owned();
+        let mut stderr_summary = hook_stderr_summary.clone();
         if output.timed_out {
             let timeout_summary =
                 format!("timed out after {} seconds", DEFAULT_HOOK_TIMEOUT.as_secs());
@@ -565,11 +566,17 @@ fn run_matching_hooks_after_commit(
             .map_err(|error| format!("failed to record hook {} run: {error}", hook.id))?;
 
         if output.timed_out {
+            let stderr_detail = if hook_stderr_summary.is_empty() {
+                String::new()
+            } else {
+                format!("; stderr: {hook_stderr_summary}")
+            };
             return Err(format!(
-                "hook {} command '{}' timed out after {} seconds",
+                "hook {} command '{}' timed out after {} seconds{}",
                 hook.id,
                 hook.command,
-                DEFAULT_HOOK_TIMEOUT.as_secs()
+                DEFAULT_HOOK_TIMEOUT.as_secs(),
+                stderr_detail
             ));
         }
 
