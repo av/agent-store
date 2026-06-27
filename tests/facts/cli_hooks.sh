@@ -1991,8 +1991,137 @@ assert rows == [
 PY
     ;;
 
+  hook_timeout_terminates_process_group)
+    cd "$tmp"
+    run_agent_store init >/tmp/agent-store-hook-timeout-pgrp-ecj-init.out
+    agent_store_bin="$target_dir/debug/agent-store"
+
+    evidence_root="${AGENT_STORE_E2E_DIR:-}"
+    if [ -n "$evidence_root" ]; then
+      mkdir -p "$evidence_root/logs" "$evidence_root/reports"
+    fi
+
+    side_effect="late-descendant-side-effect.log"
+    child_pid_file="timeout-descendant.pid"
+
+    cat > timeout-descendant-hook.sh <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+side_effect="$1"
+child_pid_file="$2"
+printf "timeout-hook-started" >&2
+(
+  trap "" TERM INT HUP
+  sleep 32
+  printf "late-descendant-side-effect\n" >>"$side_effect"
+) >/dev/null 2>&1 < /dev/null &
+printf "%s" "$!" >"$child_pid_file"
+while :; do
+  sleep 1
+done
+SH
+    chmod +x timeout-descendant-hook.sh
+
+    hook_id="$("$agent_store_bin" hook add create title=TimeoutProcessGroup -- "./timeout-descendant-hook.sh $side_effect $child_pid_file")"
+
+    set +e
+    timeout 40s "$agent_store_bin" create task title=TimeoutProcessGroup >"$tmp/hook-timeout-pgrp.out" 2>"$tmp/hook-timeout-pgrp.err"
+    timeout_status="$?"
+    set -e
+    printf "%s" "$timeout_status" >"$tmp/hook-timeout-pgrp.status"
+
+    test "$timeout_status" -ne 0
+    test "$timeout_status" -ne 124
+    test ! -s "$tmp/hook-timeout-pgrp.out"
+    grep -Fq "Store mutation already committed" "$tmp/hook-timeout-pgrp.err"
+    grep -Fq "timed out after 30 seconds" "$tmp/hook-timeout-pgrp.err"
+    grep -Fq "timeout-hook-started" "$tmp/hook-timeout-pgrp.err"
+    test -s "$child_pid_file"
+
+    for _ in $(seq 1 30); do
+      if [ -e "$side_effect" ]; then
+        child_pid="$(cat "$child_pid_file")"
+        kill -KILL "$child_pid" 2>/dev/null || true
+        echo "timed-out hook descendant produced a late side effect" >&2
+        exit 1
+      fi
+      sleep 0.2
+    done
+
+    summary="$(python3 - \
+      .agent-store/store.sqlite \
+      "$hook_id" \
+      "$side_effect" <<'PY'
+import pathlib
+import sqlite3
+import sys
+
+db, hook_id, side_effect = sys.argv[1:]
+assert not pathlib.Path(side_effect).exists(), side_effect
+
+con = sqlite3.connect(db)
+record_row = con.execute(
+    """
+    select records.id
+    from records
+    join record_fields on record_fields.record_id = records.id
+    where records.kind = 'task'
+      and record_fields.key = 'title'
+      and record_fields.raw_value = 'TimeoutProcessGroup'
+    """
+).fetchone()
+assert record_row is not None
+record_id = record_row[0]
+
+rows = con.execute(
+    """
+    select hook_id, event_type, record_id, exit_status, stdout_summary, stderr_summary
+    from hook_runs
+    where hook_id = ?
+    order by id
+    """,
+    (hook_id,),
+).fetchall()
+assert rows == [
+    (
+        hook_id,
+        "create",
+        record_id,
+        -1,
+        "",
+        "timeout-hook-started; timed out after 30 seconds",
+    )
+], rows
+
+print(f"timeout_hook_runs={len(rows)} record={record_id} late_side_effect=absent")
+PY
+)"
+
+    child_pid="$(cat "$child_pid_file")"
+    kill -KILL "$child_pid" 2>/dev/null || true
+
+    if [ -n "$evidence_root" ]; then
+      cp timeout-descendant-hook.sh "$evidence_root/logs/"
+      cp "$tmp/hook-timeout-pgrp.out" "$evidence_root/logs/"
+      cp "$tmp/hook-timeout-pgrp.err" "$evidence_root/logs/"
+      cp "$tmp/hook-timeout-pgrp.status" "$evidence_root/logs/"
+      cp "$child_pid_file" "$evidence_root/logs/"
+      cp .agent-store/store.sqlite "$evidence_root/store.sqlite"
+      cat > "$evidence_root/reports/hook-timeout-process-group.md" <<EOF
+# Hook Timeout Process Group Evidence
+
+- hook_id: $hook_id
+- child_pid: $child_pid
+- timeout_status: $timeout_status
+- $summary
+- database: $evidence_root/store.sqlite
+- logs: $evidence_root/logs
+EOF
+    fi
+    ;;
+
   *)
-    echo "usage: $0 {hook_add_stores_metadata|hook_ls_deterministic|hook_rm_deletes_metadata|hooks_run_after_commit|hook_query_filters_records|hook_query_uses_mutation_snapshot|hook_stdin_receives_record_snapshot|hook_failure_reports_details|hook_failure_or_timeout_reports_committed_mutation|json_mutation_hook_failure_or_timeout_reports_committed_without_success_json|json_multiple_matching_hooks_stop_after_failure_or_timeout|hooks_run_sequentially_from_project_root_with_timeout|hook_env_vars_for_record_events|link_hook_query_source_and_relation_env|hook_output_capture_caps_and_help}" >&2
+    echo "usage: $0 {hook_add_stores_metadata|hook_ls_deterministic|hook_rm_deletes_metadata|hooks_run_after_commit|hook_query_filters_records|hook_query_uses_mutation_snapshot|hook_stdin_receives_record_snapshot|hook_failure_reports_details|hook_failure_or_timeout_reports_committed_mutation|json_mutation_hook_failure_or_timeout_reports_committed_without_success_json|json_multiple_matching_hooks_stop_after_failure_or_timeout|hooks_run_sequentially_from_project_root_with_timeout|hook_env_vars_for_record_events|link_hook_query_source_and_relation_env|hook_output_capture_caps_and_help|hook_timeout_terminates_process_group}" >&2
     exit 2
     ;;
 esac

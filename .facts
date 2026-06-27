@@ -272,6 +272,9 @@
   id: grk
   command: bash tests/facts/cli_hooks.sh link_hook_query_source_and_relation_env
   tags: [implemented]
+- label: Timed-out Hook Bash commands terminate their process group so descendant processes do not keep running or produce side effects after the triggering CLI returns; the committed mutation and timeout Hook Run remain persisted
+  command: bash tests/facts/cli_hooks.sh hook_timeout_terminates_process_group
+  tags: [implemented]
 
 # context
 - label: Quick Context output includes total Record count, per-kind Record counts sorted by kind, Hook count, and the most recent Store activity timestamp when available
