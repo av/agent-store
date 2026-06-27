@@ -3369,8 +3369,327 @@ EOF
     fi
     ;;
 
+  concurrent_id_prefix_resolution_races)
+    CARGO_TARGET_DIR="$target_dir" cargo build --quiet --manifest-path "$repo/Cargo.toml"
+    agent_store_bin="$target_dir/debug/agent-store"
+    cd "$tmp"
+    "$agent_store_bin" init >/tmp/agent-store-id-prefix-race-init.out
+
+    evidence_root="${AGENT_STORE_E2E_DIR:-}"
+    if [ -n "$evidence_root" ]; then
+      mkdir -p "$evidence_root/logs" "$evidence_root/reports"
+    fi
+
+    source_prefix="aa"
+    target_prefix="bb"
+    source_one="aa1001"
+    source_two="aa2002"
+    target_one="bb1001"
+    target_two="bb2002"
+    worker_count=3
+    iterations=10
+
+    stop_file="$tmp/churn.stop"
+    python3 - .agent-store/store.sqlite "$source_one" "$source_two" "$target_one" "$target_two" "$tmp/churn.log" "$stop_file" <<'PY' >"$tmp/churn.out" 2>"$tmp/churn.err" &
+import os
+import sqlite3
+import sys
+import time
+
+db, source_one, source_two, target_one, target_two, log_path, stop_path = sys.argv[1:]
+source_ids = [source_one, source_two]
+target_ids = [target_one, target_two]
+all_ids = source_ids + target_ids
+states = [
+    ([], []),
+    ([source_one], []),
+    ([], [target_one]),
+    ([source_one], [target_one]),
+    ([source_one, source_two], [target_one]),
+    ([source_one], [target_one, target_two]),
+    ([source_one, source_two], [target_one, target_two]),
+]
+
+con = sqlite3.connect(db, timeout=10.0)
+con.execute("PRAGMA foreign_keys = ON")
+con.execute("PRAGMA busy_timeout = 10000")
+
+def insert_record(record_id, kind, role, state):
+    con.execute(
+        "insert into records (id, kind) values (?, ?)",
+        (record_id, kind),
+    )
+    fields = {
+        "batch": "prefix-resolution-race",
+        "role": role,
+        "state": state,
+    }
+    for key, value in fields.items():
+        con.execute(
+            "insert into record_fields (record_id, key, raw_value, text_value) values (?, ?, ?, ?)",
+            (record_id, key, value, value),
+        )
+
+with open(log_path, "w", encoding="utf-8") as log:
+    cycle = 0
+    while cycle < 1000 and (cycle < 80 or not os.path.exists(stop_path)):
+        sources, targets = states[cycle % len(states)]
+        state = f"cycle-{cycle}"
+        con.execute("begin immediate")
+        con.execute(
+            "delete from records where id in ({})".format(",".join("?" for _ in all_ids)),
+            all_ids,
+        )
+        for record_id in sources:
+            insert_record(record_id, "task", "source", state)
+        for record_id in targets:
+            insert_record(record_id, "note", "target", state)
+        con.commit()
+        log.write(
+            f"{cycle}:sources={','.join(sources) or '-'} targets={','.join(targets) or '-'}\n"
+        )
+        log.flush()
+        cycle += 1
+        time.sleep(0.01)
+
+    con.execute("begin immediate")
+    con.execute(
+        "delete from records where id in ({})".format(",".join("?" for _ in all_ids)),
+        all_ids,
+    )
+    insert_record(source_one, "task", "source", "final")
+    insert_record(target_one, "note", "target", "final")
+    con.commit()
+PY
+    churn_pid="$!"
+
+    run_prefix_worker() {
+      local op="$1"
+      local worker="$2"
+      local index
+
+      for index in $(seq 1 "$iterations"); do
+        local prefix="$tmp/prefix-$op-$worker-$index"
+        set +e
+        case "$op" in
+          get)
+            "$agent_store_bin" get "$source_prefix" >"$prefix.out" 2>"$prefix.err"
+            ;;
+          set)
+            "$agent_store_bin" set "$source_prefix" "status=$worker-$index" >"$prefix.out" 2>"$prefix.err"
+            ;;
+          unset)
+            "$agent_store_bin" unset "$source_prefix" status >"$prefix.out" 2>"$prefix.err"
+            ;;
+          rm)
+            "$agent_store_bin" rm "$source_prefix" >"$prefix.out" 2>"$prefix.err"
+            ;;
+          link)
+            "$agent_store_bin" link "$source_prefix" blocks "$target_prefix" >"$prefix.out" 2>"$prefix.err"
+            ;;
+          unlink)
+            "$agent_store_bin" unlink "$source_prefix" blocks "$target_prefix" >"$prefix.out" 2>"$prefix.err"
+            ;;
+          links)
+            "$agent_store_bin" links "$source_prefix" >"$prefix.out" 2>"$prefix.err"
+            ;;
+        esac
+        local code="$?"
+        set -e
+        printf "%s" "$code" >"$prefix.status"
+        sleep 0.005
+      done
+    }
+
+    pids=()
+    for op in get set unset rm link unlink links; do
+      for worker in $(seq 1 "$worker_count"); do
+        (run_prefix_worker "$op" "$worker") &
+        pids+=("$!")
+      done
+    done
+
+    for pid in "${pids[@]}"; do
+      wait "$pid"
+    done
+
+    touch "$stop_file"
+    if ! wait "$churn_pid"; then
+      cat "$tmp/churn.err" >&2
+      exit 1
+    fi
+
+    summary="$(python3 - \
+      "$tmp" \
+      .agent-store/store.sqlite \
+      "$worker_count" \
+      "$iterations" \
+      "$source_one" \
+      "$source_two" \
+      "$target_one" \
+      "$target_two" <<'PY'
+import pathlib
+import re
+import sqlite3
+import sys
+
+tmp = pathlib.Path(sys.argv[1])
+db = sys.argv[2]
+worker_count = int(sys.argv[3])
+iterations = int(sys.argv[4])
+source_ids = set(sys.argv[5:7])
+target_ids = set(sys.argv[7:9])
+all_ids = source_ids | target_ids
+ops = ["get", "set", "unset", "rm", "link", "unlink", "links"]
+bad_fragments = [
+    "database is locked",
+    "panicked",
+    "thread 'main'",
+    "foreign key constraint",
+    "constraint failed",
+]
+counts = {
+    op: {"success": 0, "ambiguous": 0, "not_found": 0}
+    for op in ops
+}
+link_success_pairs = set()
+
+def read(path):
+    return path.read_text(encoding="utf-8") if path.exists() else ""
+
+for op in ops:
+    for worker in range(1, worker_count + 1):
+        for index in range(1, iterations + 1):
+            base = tmp / f"prefix-{op}-{worker}-{index}"
+            status = read(base.with_suffix(".status")).strip()
+            out = read(base.with_suffix(".out"))
+            err = read(base.with_suffix(".err"))
+            combined = (out + "\n" + err).lower()
+            assert status, base
+            assert not any(fragment in combined for fragment in bad_fragments), (op, worker, index, out, err)
+
+            if status == "0":
+                assert err == "", (op, worker, index, err)
+                counts[op]["success"] += 1
+                line = out.strip()
+                if op == "get":
+                    match = re.match(r"^(aa[0-9]{4}) task(?: |$)", line)
+                    assert match and match.group(1) in source_ids, (op, line)
+                elif op in {"set", "unset"}:
+                    assert line.startswith("Updated "), (op, line)
+                    assert line.split(" ", 1)[1] in source_ids, (op, line)
+                elif op == "rm":
+                    assert line.startswith("Removed "), (op, line)
+                    assert line.split(" ", 1)[1] in source_ids, (op, line)
+                elif op == "link":
+                    parts = line.split()
+                    assert len(parts) == 4 and parts[0] == "Linked" and parts[2] == "blocks", (op, line)
+                    assert parts[1] in source_ids and parts[3] in target_ids, (op, line)
+                    link_success_pairs.add((parts[1], parts[2], parts[3]))
+                elif op == "unlink":
+                    parts = line.split()
+                    assert len(parts) == 4 and parts[0] == "Unlinked" and parts[2] == "blocks", (op, line)
+                    assert parts[1] in source_ids and parts[3] in target_ids, (op, line)
+                elif op == "links":
+                    if line:
+                        for link_line in line.splitlines():
+                            parts = link_line.split()
+                            assert len(parts) == 3, (op, link_line)
+                            assert parts[0] in {"out", "in"} and parts[1] == "blocks", (op, link_line)
+                            assert parts[2] in all_ids, (op, link_line)
+            else:
+                assert out == "", (op, worker, index, out)
+                if "matches multiple records" in err:
+                    counts[op]["ambiguous"] += 1
+                elif "was not found" in err:
+                    counts[op]["not_found"] += 1
+                else:
+                    raise AssertionError((op, worker, index, status, err))
+
+for op in ops:
+    total = sum(counts[op].values())
+    assert total == worker_count * iterations, (op, total, counts[op])
+
+assert sum(item["success"] for item in counts.values()) > 0, counts
+assert sum(item["ambiguous"] for item in counts.values()) > 0, counts
+assert sum(item["not_found"] for item in counts.values()) > 0, counts
+
+con = sqlite3.connect(db)
+record_ids = {
+    row[0]
+    for row in con.execute("select id from records order by id")
+}
+assert record_ids <= all_ids, record_ids
+
+event_counts = dict(
+    con.execute(
+        """
+        select event_type, count(*)
+        from store_events
+        where event_type in ('set', 'unset', 'rm', 'link', 'unlink')
+        group by event_type
+        """
+    ).fetchall()
+)
+for op in ["set", "unset", "rm", "link", "unlink"]:
+    assert event_counts.get(op, 0) == counts[op]["success"], (op, event_counts, counts[op])
+
+dangling_links = con.execute(
+    """
+    select count(*)
+    from record_links l
+    left join records source on source.id = l.from_record_id
+    left join records target on target.id = l.to_record_id
+    where source.id is null or target.id is null
+    """
+).fetchone()[0]
+assert dangling_links == 0, dangling_links
+
+link_rows = set(
+    con.execute(
+        """
+        select from_record_id, rel, to_record_id
+        from record_links
+        order by from_record_id, rel, to_record_id
+        """
+    ).fetchall()
+)
+assert all(row[0] in source_ids and row[1] == "blocks" and row[2] in target_ids for row in link_rows), link_rows
+assert link_rows <= link_success_pairs, (link_rows, link_success_pairs)
+
+print(
+    " ".join(
+        f"{op}=success:{counts[op]['success']},ambiguous:{counts[op]['ambiguous']},not_found:{counts[op]['not_found']}"
+        for op in ops
+    )
+)
+print(f"events={event_counts} final_records={sorted(record_ids)} final_links={sorted(link_rows)}")
+PY
+)"
+
+    if [ -n "$evidence_root" ]; then
+      find "$tmp" -maxdepth 1 -type f \
+        \( -name 'prefix-*' -o -name 'churn.*' \) \
+        -exec cp {} "$evidence_root/logs/" \;
+      cp .agent-store/store.sqlite "$evidence_root/store.sqlite"
+      cat > "$evidence_root/reports/concurrent-id-prefix-resolution-races.md" <<EOF
+# Concurrent ID Prefix Resolution Race Evidence
+
+- source_prefix: $source_prefix
+- target_prefix: $target_prefix
+- source_records: $source_one $source_two
+- target_records: $target_one $target_two
+- workers_per_command: $worker_count
+- iterations_per_worker: $iterations
+- $summary
+- database: $evidence_root/store.sqlite
+- logs: $evidence_root/logs
+EOF
+    fi
+    ;;
+
   *)
-    echo "usage: $0 {store_is_project_local|migrations_apply_on_open|initial_schema_tables|records_columns|record_fields_typed_columns|record_links_cardinality_shape|record_links_columns_unique|record_delete_cascades_links|hard_delete_store_event_snapshot|record_mutations_transactional|persistence_open_errors_actionable|migration_checksum_mismatch|concurrent_process_writers|concurrent_process_writers_with_hooks|concurrent_process_mutations_with_hooks|concurrent_hook_lifecycle_races|concurrent_hook_lifecycle_mutation_races|concurrent_hook_churn_reads|concurrent_record_readers_with_hooked_mutations|concurrent_json_record_readers_with_hooked_mutations|concurrent_link_record_disappearance_races|concurrent_set_unset_link_snapshot_races|create_rm_link_snapshot_hooks|concurrent_same_record_and_link_races}" >&2
+    echo "usage: $0 {store_is_project_local|migrations_apply_on_open|initial_schema_tables|records_columns|record_fields_typed_columns|record_links_cardinality_shape|record_links_columns_unique|record_delete_cascades_links|hard_delete_store_event_snapshot|record_mutations_transactional|persistence_open_errors_actionable|migration_checksum_mismatch|concurrent_process_writers|concurrent_process_writers_with_hooks|concurrent_process_mutations_with_hooks|concurrent_hook_lifecycle_races|concurrent_hook_lifecycle_mutation_races|concurrent_hook_churn_reads|concurrent_record_readers_with_hooked_mutations|concurrent_json_record_readers_with_hooked_mutations|concurrent_link_record_disappearance_races|concurrent_set_unset_link_snapshot_races|create_rm_link_snapshot_hooks|concurrent_same_record_and_link_races|concurrent_id_prefix_resolution_races}" >&2
     exit 2
     ;;
 esac

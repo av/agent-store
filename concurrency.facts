@@ -30,3 +30,6 @@
 - label: simultaneous --json find, --json get, and --json links reads while create, rm, link, and unlink mutations with matching Hooks are running finish without database lock errors or panics, always print valid JSON with stable top-level shapes, tolerate concurrently disappearing Records or Links as either a consistent JSON snapshot or a not-found error, and persist Hook Runs for committed mutations
   command: bash tests/facts/store_schema_migrations.sh concurrent_json_record_readers_with_hooked_mutations
   tags: [implemented]
+- label: simultaneous get, set, unset, rm, link, unlink, and links commands resolving short Record ID prefixes while matching Records are created or removed either operate on exactly one resolved Record or fail with ambiguous or not-found errors, never report lock errors or panics, and do not create unintended Records or Links on resolution failures
+  command: bash tests/facts/store_schema_migrations.sh concurrent_id_prefix_resolution_races
+  tags: [implemented]
