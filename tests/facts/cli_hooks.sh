@@ -2061,6 +2061,35 @@ SH
     printf "%s" "$json_link_status" >"$tmp/hook-signal-json-link.status"
     assert_signal_failure json-link json-link-signal-stderr
 
+    json_unset_record="$("$agent_store_bin" create task title=SignalJsonUnset status=present)"
+    json_unset_hook_id="$("$agent_store_bin" hook add unset 'kind=task and title=SignalJsonUnset' -- './signal-hook.sh json-unset')"
+    set +e
+    "$agent_store_bin" --json unset "$json_unset_record" status >"$tmp/hook-signal-json-unset.out" 2>"$tmp/hook-signal-json-unset.err"
+    json_unset_status="$?"
+    set -e
+    printf "%s" "$json_unset_status" >"$tmp/hook-signal-json-unset.status"
+    assert_signal_failure json-unset json-unset-signal-stderr
+
+    json_rm_record="$("$agent_store_bin" create task title=SignalJsonRm status=present)"
+    json_rm_hook_id="$("$agent_store_bin" hook add rm 'kind=task and title=SignalJsonRm' -- './signal-hook.sh json-rm')"
+    set +e
+    "$agent_store_bin" --json rm "$json_rm_record" >"$tmp/hook-signal-json-rm.out" 2>"$tmp/hook-signal-json-rm.err"
+    json_rm_status="$?"
+    set -e
+    printf "%s" "$json_rm_status" >"$tmp/hook-signal-json-rm.status"
+    assert_signal_failure json-rm json-rm-signal-stderr
+
+    json_unlink_source="$("$agent_store_bin" create task title=SignalJsonUnlinkSource status=open)"
+    json_unlink_target="$("$agent_store_bin" create note title=SignalJsonUnlinkTarget status=open)"
+    "$agent_store_bin" link "$json_unlink_source" blocks "$json_unlink_target" >/dev/null
+    json_unlink_hook_id="$("$agent_store_bin" hook add unlink 'kind=task and title=SignalJsonUnlinkSource' -- './signal-hook.sh json-unlink')"
+    set +e
+    "$agent_store_bin" --json unlink "$json_unlink_source" blocks "$json_unlink_target" >"$tmp/hook-signal-json-unlink.out" 2>"$tmp/hook-signal-json-unlink.err"
+    json_unlink_status="$?"
+    set -e
+    printf "%s" "$json_unlink_status" >"$tmp/hook-signal-json-unlink.status"
+    assert_signal_failure json-unlink json-unlink-signal-stderr
+
     "$agent_store_bin" --json create task title=SignalAfter status=ok >"$tmp/hook-signal-after.out" 2>"$tmp/hook-signal-after.err"
     later_record="$(python3 - "$tmp/hook-signal-after.out" <<'PY'
 import json
@@ -2082,9 +2111,16 @@ PY
       "$json_create_hook_id" \
       "$json_set_hook_id" \
       "$json_link_hook_id" \
+      "$json_unset_hook_id" \
+      "$json_rm_hook_id" \
+      "$json_unlink_hook_id" \
       "$json_set_record" \
       "$json_link_source" \
       "$json_link_target" \
+      "$json_unset_record" \
+      "$json_rm_record" \
+      "$json_unlink_source" \
+      "$json_unlink_target" \
       "$later_record" <<'PY'
 import json
 import pathlib
@@ -2098,9 +2134,16 @@ import sys
     json_create_hook_id,
     json_set_hook_id,
     json_link_hook_id,
+    json_unset_hook_id,
+    json_rm_hook_id,
+    json_unlink_hook_id,
     json_set_record,
     json_link_source,
     json_link_target,
+    json_unset_record,
+    json_rm_record,
+    json_unlink_source,
+    json_unlink_target,
     later_record,
 ) = sys.argv[1:]
 tmp = pathlib.Path(tmp_s)
@@ -2111,6 +2154,9 @@ for name, expected in [
     ("json-create", "json-create-signal-stderr"),
     ("json-set", "json-set-signal-stderr"),
     ("json-link", "json-link-signal-stderr"),
+    ("json-unset", "json-unset-signal-stderr"),
+    ("json-rm", "json-rm-signal-stderr"),
+    ("json-unlink", "json-unlink-signal-stderr"),
 ]:
     stdout = (tmp / f"hook-signal-{name}.out").read_text(encoding="utf-8")
     stderr = (tmp / f"hook-signal-{name}.err").read_text(encoding="utf-8")
@@ -2147,6 +2193,8 @@ plain_record = record_by_title("SignalPlain")
 json_create_record = record_by_title("SignalJsonCreate")
 assert record_by_title("SignalJsonSet") == json_set_record
 assert record_by_title("SignalJsonLinkSource") == json_link_source
+assert record_by_title("SignalJsonUnset") == json_unset_record
+assert record_by_title("SignalJsonUnlinkSource") == json_unlink_source
 assert record_by_title("SignalAfter") == later_record
 
 json_status = con.execute(
@@ -2167,6 +2215,19 @@ json_create_status = con.execute(
     (json_create_record,),
 ).fetchone()
 assert json_create_status == ("committed",), json_create_status
+json_unset_status = con.execute(
+    """
+    select raw_value
+    from record_fields
+    where record_id = ? and key = 'status'
+    """,
+    (json_unset_record,),
+).fetchone()
+assert json_unset_status is None, json_unset_status
+assert con.execute(
+    "select count(*) from records where id = ?",
+    (json_rm_record,),
+).fetchone()[0] == 0
 assert con.execute(
     """
     select count(*) from record_links
@@ -2174,12 +2235,19 @@ assert con.execute(
     """,
     (json_link_source, json_link_target),
 ).fetchone()[0] == 1
+assert con.execute(
+    """
+    select count(*) from record_links
+    where from_record_id = ? and rel = 'blocks' and to_record_id = ?
+    """,
+    (json_unlink_source, json_unlink_target),
+).fetchone()[0] == 0
 
 event_rows = con.execute(
     """
     select event_type, record_id
     from store_events
-    where record_id in (?, ?, ?, ?, ?)
+    where record_id in (?, ?, ?, ?, ?, ?, ?, ?)
     order by id
     """,
     (
@@ -2187,6 +2255,9 @@ event_rows = con.execute(
         json_create_record,
         json_set_record,
         json_link_source,
+        json_unset_record,
+        json_rm_record,
+        json_unlink_source,
         later_record,
     ),
 ).fetchall()
@@ -2194,13 +2265,16 @@ assert ("create", plain_record) in event_rows, event_rows
 assert ("create", json_create_record) in event_rows, event_rows
 assert ("set", json_set_record) in event_rows, event_rows
 assert ("link", json_link_source) in event_rows, event_rows
+assert ("unset", json_unset_record) in event_rows, event_rows
+assert ("rm", json_rm_record) in event_rows, event_rows
+assert ("unlink", json_unlink_source) in event_rows, event_rows
 assert ("create", later_record) in event_rows, event_rows
 
 rows = con.execute(
     """
     select hook_id, event_type, record_id, exit_status, stdout_summary, stderr_summary
     from hook_runs
-    where hook_id in (?, ?, ?, ?)
+    where hook_id in (?, ?, ?, ?, ?, ?, ?)
     order by id
     """,
     (
@@ -2208,6 +2282,9 @@ rows = con.execute(
         json_create_hook_id,
         json_set_hook_id,
         json_link_hook_id,
+        json_unset_hook_id,
+        json_rm_hook_id,
+        json_unlink_hook_id,
     ),
 ).fetchall()
 assert rows == [
@@ -2243,15 +2320,42 @@ assert rows == [
         "json-link-signal-stdout",
         "json-link-signal-stderr",
     ),
+    (
+        json_unset_hook_id,
+        "unset",
+        json_unset_record,
+        -15,
+        "json-unset-signal-stdout",
+        "json-unset-signal-stderr",
+    ),
+    (
+        json_rm_hook_id,
+        "rm",
+        json_rm_record,
+        -15,
+        "json-rm-signal-stdout",
+        "json-rm-signal-stderr",
+    ),
+    (
+        json_unlink_hook_id,
+        "unlink",
+        json_unlink_source,
+        -15,
+        "json-unlink-signal-stdout",
+        "json-unlink-signal-stderr",
+    ),
 ], rows
 
 print(
-    "signal_hook_runs={} plain_record={} json_create_record={} json_set_record={} json_link_source={} later_record={} statuses={}".format(
+    "signal_hook_runs={} plain_record={} json_create_record={} json_set_record={} json_link_source={} json_unset_record={} json_rm_record={} json_unlink_source={} later_record={} statuses={}".format(
         len(rows),
         plain_record,
         json_create_record,
         json_set_record,
         json_link_source,
+        json_unset_record,
+        json_rm_record,
+        json_unlink_source,
         later_record,
         ",".join(str(row[3]) for row in rows),
     )
@@ -2270,10 +2374,16 @@ PY
 - json_create_hook_id: $json_create_hook_id
 - json_set_hook_id: $json_set_hook_id
 - json_link_hook_id: $json_link_hook_id
+- json_unset_hook_id: $json_unset_hook_id
+- json_rm_hook_id: $json_rm_hook_id
+- json_unlink_hook_id: $json_unlink_hook_id
 - plain_status: $plain_status
 - json_create_status: $json_create_status
 - json_set_status: $json_set_status
 - json_link_status: $json_link_status
+- json_unset_status: $json_unset_status
+- json_rm_status: $json_rm_status
+- json_unlink_status: $json_unlink_status
 - later_record: $later_record
 - $summary
 - database: $evidence_root/store.sqlite
