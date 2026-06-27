@@ -2156,13 +2156,18 @@ PY
 #!/usr/bin/env bash
 set -euo pipefail
 label="$1"
-printf "%s:%s:%s:%s:%s:%s\n" \
+printf "%s:%s:%s:%s:%s:%s:%s:%s:%s:%s:%s\n" \
   "$label" \
   "${AGENT_STORE_EVENT:-}" \
   "${AGENT_STORE_ID:-}" \
   "${AGENT_STORE_KIND:-}" \
   "${AGENT_STORE_REL:-}" \
-  "${AGENT_STORE_TARGET_ID:-}" >> context-env.log
+  "${AGENT_STORE_TARGET_ID:-}" \
+  "${AGENT_STORE_FIELD:-}" \
+  "${AGENT_STORE_KEY:-}" \
+  "${AGENT_STORE_VALUE:-}" \
+  "${AGENT_STORE_OLD_VALUE:-}" \
+  "${AGENT_STORE_NEW_VALUE:-}" >> context-env.log
 printf "%s-stdout" "$label"
 printf "%s-stderr" "$label" >&2
 exit 33
@@ -2174,9 +2179,13 @@ SH
     json_source_id="$("$agent_store_bin" create task title=JsonUnlinkContext status=open)"
     json_target_id="$("$agent_store_bin" create note title=JsonUnlinkTarget status=open)"
     "$agent_store_bin" link "$json_source_id" relates "$json_target_id" >/tmp/agent-store-hook-context-failure-06p-seed-link.out
+    plain_set_id="$("$agent_store_bin" create task title=PlainSetContext status=pending)"
+    json_unset_id="$("$agent_store_bin" create task title=JsonUnsetContext flag=remove-me status=open)"
 
     plain_hook_id="$("$agent_store_bin" hook add link 'kind=task and title=PlainLinkContext' -- './fail-context-hook.sh plain-link')"
     json_hook_id="$("$agent_store_bin" hook add unlink 'kind=task and title=JsonUnlinkContext' -- './fail-context-hook.sh json-unlink')"
+    plain_set_hook_id="$("$agent_store_bin" hook add set 'kind=task and title=PlainSetContext and status=done' -- './fail-context-hook.sh plain-set')"
+    json_unset_hook_id="$("$agent_store_bin" hook add unset 'kind=task and title=JsonUnsetContext and not flag=remove-me' -- './fail-context-hook.sh json-unset-field')"
 
     event_marker="$(python3 - .agent-store/store.sqlite <<'PY'
 import sqlite3
@@ -2217,6 +2226,28 @@ PY
     grep -Fq "exit status 33" "$tmp/hook-context-json-unlink.err"
     grep -Fq "json-unlink-stderr" "$tmp/hook-context-json-unlink.err"
 
+    set +e
+    "$agent_store_bin" set "$plain_set_id" status=done >"$tmp/hook-context-plain-set.out" 2>"$tmp/hook-context-plain-set.err"
+    plain_set_status="$?"
+    set -e
+    printf "%s" "$plain_set_status" >"$tmp/hook-context-plain-set.status"
+    test "$plain_set_status" -ne 0
+    test ! -s "$tmp/hook-context-plain-set.out"
+    grep -Fq "Store mutation already committed" "$tmp/hook-context-plain-set.err"
+    grep -Fq "exit status 33" "$tmp/hook-context-plain-set.err"
+    grep -Fq "plain-set-stderr" "$tmp/hook-context-plain-set.err"
+
+    set +e
+    "$agent_store_bin" --json unset "$json_unset_id" flag >"$tmp/hook-context-json-unset.out" 2>"$tmp/hook-context-json-unset.err"
+    json_unset_status="$?"
+    set -e
+    printf "%s" "$json_unset_status" >"$tmp/hook-context-json-unset.status"
+    test "$json_unset_status" -ne 0
+    test ! -s "$tmp/hook-context-json-unset.out"
+    grep -Fq "Store mutation already committed" "$tmp/hook-context-json-unset.err"
+    grep -Fq "exit status 33" "$tmp/hook-context-json-unset.err"
+    grep -Fq "json-unset-field-stderr" "$tmp/hook-context-json-unset.err"
+
     summary="$(
       python3 - .agent-store/store.sqlite \
         context-env.log \
@@ -2224,10 +2255,14 @@ PY
         "$hook_marker" \
         "$plain_hook_id" \
         "$json_hook_id" \
+        "$plain_set_hook_id" \
+        "$json_unset_hook_id" \
         "$plain_source_id" \
         "$plain_target_id" \
         "$json_source_id" \
-        "$json_target_id" <<'PY'
+        "$json_target_id" \
+        "$plain_set_id" \
+        "$json_unset_id" <<'PY'
 import pathlib
 import sqlite3
 import sys
@@ -2239,16 +2274,22 @@ import sys
     hook_marker,
     plain_hook_id,
     json_hook_id,
+    plain_set_hook_id,
+    json_unset_hook_id,
     plain_source_id,
     plain_target_id,
     json_source_id,
     json_target_id,
+    plain_set_id,
+    json_unset_id,
 ) = sys.argv[1:]
 
 env_lines = pathlib.Path(env_log).read_text().splitlines()
 expected_env = [
-    f"plain-link:link:{plain_source_id}:task:blocks:{plain_target_id}",
-    f"json-unlink:unlink:{json_source_id}:task:relates:{json_target_id}",
+    f"plain-link:link:{plain_source_id}:task:blocks:{plain_target_id}:::::",
+    f"json-unlink:unlink:{json_source_id}:task:relates:{json_target_id}:::::",
+    f"plain-set:set:{plain_set_id}:task:::status:status:done:pending:done",
+    f"json-unset-field:unset:{json_unset_id}:task:::flag:flag:remove-me:remove-me:",
 ]
 assert env_lines == expected_env, env_lines
 
@@ -2258,7 +2299,7 @@ event_rows = con.execute(
     select event_type, record_id
     from store_events
     where id > ?
-      and event_type in ('link', 'unlink')
+      and event_type in ('link', 'unlink', 'set', 'unset')
     order by id
     """,
     (event_marker,),
@@ -2266,6 +2307,8 @@ event_rows = con.execute(
 assert event_rows == [
     ("link", plain_source_id),
     ("unlink", json_source_id),
+    ("set", plain_set_id),
+    ("unset", json_unset_id),
 ], event_rows
 
 link_rows = set(
@@ -2280,22 +2323,44 @@ link_rows = set(
 )
 assert (plain_source_id, "blocks", plain_target_id) in link_rows, link_rows
 assert (json_source_id, "relates", json_target_id) not in link_rows, link_rows
+plain_set_status = con.execute(
+    """
+    select raw_value
+    from record_fields
+    where record_id = ?
+      and key = 'status'
+    """,
+    (plain_set_id,),
+).fetchone()
+assert plain_set_status == ("done",), plain_set_status
+json_unset_flag = con.execute(
+    """
+    select raw_value
+    from record_fields
+    where record_id = ?
+      and key = 'flag'
+    """,
+    (json_unset_id,),
+).fetchone()
+assert json_unset_flag is None, json_unset_flag
 
 rows = con.execute(
     """
     select hook_id, event_type, record_id, exit_status, stdout_summary, stderr_summary
     from hook_runs
     where id > ?
-      and hook_id in (?, ?)
+      and hook_id in (?, ?, ?, ?)
     order by id
     """,
-    (hook_marker, plain_hook_id, json_hook_id),
+    (hook_marker, plain_hook_id, json_hook_id, plain_set_hook_id, json_unset_hook_id),
 ).fetchall()
 expected = {
     plain_hook_id: ("link", plain_source_id, "plain-link-stdout", "plain-link-stderr"),
     json_hook_id: ("unlink", json_source_id, "json-unlink-stdout", "json-unlink-stderr"),
+    plain_set_hook_id: ("set", plain_set_id, "plain-set-stdout", "plain-set-stderr"),
+    json_unset_hook_id: ("unset", json_unset_id, "json-unset-field-stdout", "json-unset-field-stderr"),
 }
-assert len(rows) == 2, rows
+assert len(rows) == 4, rows
 for hook_id, event_type, record_id, exit_status, stdout_summary, stderr_summary in rows:
     expected_event, expected_record, expected_stdout, expected_stderr = expected[hook_id]
     assert event_type == expected_event, rows
@@ -2305,10 +2370,12 @@ for hook_id, event_type, record_id, exit_status, stdout_summary, stderr_summary 
     assert expected_stderr in stderr_summary, rows
 
 print(
-    "context_failure_hook_runs={} plain_source={} json_source={} env_lines={}".format(
+    "context_failure_hook_runs={} plain_source={} json_source={} plain_set={} json_unset={} env_lines={}".format(
         len(rows),
         plain_source_id,
         json_source_id,
+        plain_set_id,
+        json_unset_id,
         len(env_lines),
     )
 )
@@ -2327,12 +2394,18 @@ PY
 
 - plain_hook_id: $plain_hook_id
 - json_hook_id: $json_hook_id
+- plain_set_hook_id: $plain_set_hook_id
+- json_unset_hook_id: $json_unset_hook_id
 - plain_source_id: $plain_source_id
 - plain_target_id: $plain_target_id
 - json_source_id: $json_source_id
 - json_target_id: $json_target_id
+- plain_set_id: $plain_set_id
+- json_unset_id: $json_unset_id
 - plain_status: $plain_status
 - json_status: $json_status
+- plain_set_status: $plain_set_status
+- json_unset_status: $json_unset_status
 - $summary
 - database: $evidence_root/store.sqlite
 - logs: $evidence_root/logs

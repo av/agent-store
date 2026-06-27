@@ -167,9 +167,17 @@ pub struct LinkMutation {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FieldChange {
+    pub key: String,
+    pub old_value: Option<String>,
+    pub new_value: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RecordMutation {
     pub record: Record,
     pub record_links: Vec<LinkEdge>,
+    pub field_changes: Vec<FieldChange>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -695,6 +703,15 @@ impl Store {
             .conn
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         let id = resolve_id(&tx, id_prefix)?;
+        let before = get_record_by_id(&tx, &id)?;
+        let field_changes = fields
+            .iter()
+            .map(|(key, value)| FieldChange {
+                key: key.clone(),
+                old_value: before.fields.get(key).cloned(),
+                new_value: Some(value.clone()),
+            })
+            .collect();
 
         for (key, value) in &fields {
             upsert_field(&tx, &id, key, value)?;
@@ -711,6 +728,7 @@ impl Store {
         Ok(RecordMutation {
             record,
             record_links,
+            field_changes,
         })
     }
 
@@ -728,11 +746,20 @@ impl Store {
             .conn
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         let id = resolve_id(&tx, id_prefix)?;
+        let before = get_record_by_id(&tx, &id)?;
+        let field_changes = keys
+            .iter()
+            .map(|key| FieldChange {
+                key: key.clone(),
+                old_value: before.fields.get(key).cloned(),
+                new_value: None,
+            })
+            .collect();
 
-        for key in keys {
+        for key in &keys {
             tx.execute(
                 "DELETE FROM record_fields WHERE record_id = ?1 AND key = ?2",
-                params![&id, &key],
+                params![&id, key],
             )?;
         }
         tx.execute(
@@ -747,6 +774,7 @@ impl Store {
         Ok(RecordMutation {
             record,
             record_links,
+            field_changes,
         })
     }
 
@@ -770,6 +798,7 @@ impl Store {
         Ok(RecordMutation {
             record,
             record_links,
+            field_changes: Vec::new(),
         })
     }
 

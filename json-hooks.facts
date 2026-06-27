@@ -7,7 +7,7 @@
   id: 9ev
   command: bash tests/facts/cli_hooks.sh json_multiple_matching_hooks_stop_after_failure_or_timeout
   tags: [implemented]
-- label: Plain link and --json unlink mutations whose matching Hook fails after commit still invoke the Hook with stable source Record ID, kind, relation, and target Record ID environment variables, leave stdout empty, and persist the Store mutation and Hook Run
+- label: Plain link, --json unlink, plain single-field set, and --json single-field unset mutations whose matching Hook fails after commit still invoke the Hook with stable AGENT_STORE_EVENT, AGENT_STORE_ID, AGENT_STORE_KIND, and either link relation/target or field key/value old/new environment, leave stdout empty, and persist the Store mutation and Hook Run
   id: 06p
   command: bash tests/facts/cli_hooks.sh hook_failure_preserves_link_context_env
   tags: [implemented]

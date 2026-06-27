@@ -2,7 +2,7 @@ mod cli;
 mod output;
 
 use agent_store::query::Query;
-use agent_store::store::{Hook, Link, LinkEdge, Record, Store, STORE_DIR};
+use agent_store::store::{FieldChange, Hook, Link, LinkEdge, Record, Store, STORE_DIR};
 use cli::{CliCommand, HookCliCommand};
 use output::{
     format_hook, format_quick_context, format_record, help_text, init_json, link_mutation_json,
@@ -34,6 +34,11 @@ const HOOK_ENV_KEYS: &[&str] = &[
     "AGENT_STORE_KIND",
     "AGENT_STORE_REL",
     "AGENT_STORE_TARGET_ID",
+    "AGENT_STORE_FIELD",
+    "AGENT_STORE_KEY",
+    "AGENT_STORE_VALUE",
+    "AGENT_STORE_OLD_VALUE",
+    "AGENT_STORE_NEW_VALUE",
 ];
 const INSTRUCTIONS_BLOCK: &str = "\
 <!-- agent-store:start -->
@@ -187,7 +192,7 @@ fn main() {
             let mut store = open_store_or_exit();
             match store.create_record(&kind, fields) {
                 Ok(record) => {
-                    run_hooks_or_exit(&mut store, "create", &record, Some(&[]));
+                    run_hooks_or_exit(&mut store, "create", &record, Some(&[]), &[]);
                     if cli.json_output {
                         print_json(mutation_json("created", &record));
                     } else {
@@ -250,6 +255,7 @@ fn main() {
                         "set",
                         &mutation.record,
                         Some(&mutation.record_links),
+                        &mutation.field_changes,
                     );
                     if cli.json_output {
                         print_json(mutation_json("updated", &mutation.record));
@@ -272,6 +278,7 @@ fn main() {
                         "unset",
                         &mutation.record,
                         Some(&mutation.record_links),
+                        &mutation.field_changes,
                     );
                     if cli.json_output {
                         print_json(mutation_json("updated", &mutation.record));
@@ -294,6 +301,7 @@ fn main() {
                         "rm",
                         &mutation.record,
                         Some(&mutation.record_links),
+                        &[],
                     );
                     if cli.json_output {
                         print_json(mutation_json("removed", &mutation.record));
@@ -479,10 +487,16 @@ fn run_hooks_or_exit(
     event_type: &str,
     record: &Record,
     link_context: Option<&[LinkEdge]>,
+    field_changes: &[FieldChange],
 ) {
-    if let Err(error) =
-        run_matching_hooks_after_commit(store, event_type, record, None, link_context)
-    {
+    if let Err(error) = run_matching_hooks_after_commit(
+        store,
+        event_type,
+        record,
+        None,
+        link_context,
+        field_changes,
+    ) {
         eprintln!(
             "error: failed to run hooks after Store mutation already committed for {event_type} {}: {error}",
             record.id
@@ -498,9 +512,14 @@ fn run_link_hooks_or_exit(
     link: &Link,
     link_context: &[LinkEdge],
 ) {
-    if let Err(error) =
-        run_matching_hooks_after_commit(store, event_type, record, Some(link), Some(link_context))
-    {
+    if let Err(error) = run_matching_hooks_after_commit(
+        store,
+        event_type,
+        record,
+        Some(link),
+        Some(link_context),
+        &[],
+    ) {
         eprintln!(
             "error: failed to run hooks after Store mutation already committed for {event_type} {}: {error}",
             record.id
@@ -515,6 +534,7 @@ fn run_matching_hooks_after_commit(
     record: &Record,
     link: Option<&Link>,
     link_context: Option<&[LinkEdge]>,
+    field_changes: &[FieldChange],
 ) -> Result<(), String> {
     let project_root = store.project_root().to_path_buf();
     let hooks = store
@@ -527,7 +547,7 @@ fn run_matching_hooks_after_commit(
         }
 
         let stdin_payload = format!("{}\n", format_record(record));
-        let env_vars = hook_env_vars(event_type, record, link);
+        let env_vars = hook_env_vars(event_type, record, link, field_changes);
         let output = run_hook_command(
             &hook,
             &stdin_payload,
@@ -722,6 +742,7 @@ fn hook_env_vars(
     event_type: &str,
     record: &Record,
     link: Option<&Link>,
+    field_changes: &[FieldChange],
 ) -> Vec<(&'static str, String)> {
     let mut env_vars = vec![
         ("AGENT_STORE_EVENT", event_type.to_owned()),
@@ -731,6 +752,25 @@ fn hook_env_vars(
     if let Some(link) = link {
         env_vars.push(("AGENT_STORE_REL", link.rel.clone()));
         env_vars.push(("AGENT_STORE_TARGET_ID", link.to_record_id.clone()));
+    }
+    if let [field_change] = field_changes {
+        let value = field_change
+            .new_value
+            .as_ref()
+            .or(field_change.old_value.as_ref())
+            .cloned()
+            .unwrap_or_default();
+        env_vars.push(("AGENT_STORE_FIELD", field_change.key.clone()));
+        env_vars.push(("AGENT_STORE_KEY", field_change.key.clone()));
+        env_vars.push(("AGENT_STORE_VALUE", value));
+        env_vars.push((
+            "AGENT_STORE_OLD_VALUE",
+            field_change.old_value.clone().unwrap_or_default(),
+        ));
+        env_vars.push((
+            "AGENT_STORE_NEW_VALUE",
+            field_change.new_value.clone().unwrap_or_default(),
+        ));
     }
     env_vars
 }
