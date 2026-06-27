@@ -743,8 +743,392 @@ assert remaining_targets == 0, remaining_targets
 PY
     ;;
 
+  concurrent_same_record_and_link_races)
+    CARGO_TARGET_DIR="$target_dir" cargo build --quiet --manifest-path "$repo/Cargo.toml"
+    agent_store_bin="$target_dir/debug/agent-store"
+    cd "$tmp"
+    "$agent_store_bin" init >/tmp/agent-store-same-target-races-init.out
+
+    evidence_root="${AGENT_STORE_E2E_DIR:-}"
+    if [ -n "$evidence_root" ]; then
+      mkdir -p "$evidence_root/logs" "$evidence_root/reports"
+    fi
+
+    hook_side_effects="$tmp/hook-side-effects"
+    mkdir "$hook_side_effects"
+    cat > hook-touch.sh <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+dir="$1"
+sleep 0.02
+rel="${AGENT_STORE_REL:-none}"
+target="${AGENT_STORE_TARGET_ID:-none}"
+touch "$dir/${AGENT_STORE_EVENT}-${AGENT_STORE_ID}-${rel}-${target}-$$-${RANDOM:-0}"
+printf "%s" "$AGENT_STORE_EVENT"
+SH
+    chmod +x hook-touch.sh
+
+    "$agent_store_bin" hook add link 'kind=task and batch=same-target-link' -- './hook-touch.sh hook-side-effects' >/tmp/agent-store-same-target-link-hook.out
+    "$agent_store_bin" hook add unlink 'kind=task and batch=same-target-link' -- './hook-touch.sh hook-side-effects' >/tmp/agent-store-same-target-unlink-hook.out
+    "$agent_store_bin" hook add set 'kind=task and batch=same-target-record' -- './hook-touch.sh hook-side-effects' >/tmp/agent-store-same-target-set-hook.out
+    "$agent_store_bin" hook add unset 'kind=task and batch=same-target-record' -- './hook-touch.sh hook-side-effects' >/tmp/agent-store-same-target-unset-hook.out
+    "$agent_store_bin" hook add rm 'kind=task and batch=same-target-record' -- './hook-touch.sh hook-side-effects' >/tmp/agent-store-same-target-rm-hook.out
+
+    source_id="$("$agent_store_bin" create task title=source batch=same-target-link status=open)"
+    target_id="$("$agent_store_bin" create note title=target batch=same-target-link)"
+    record_id="$("$agent_store_bin" create task title=victim batch=same-target-record status=pending flag=present)"
+
+    run_started_workers() {
+      local prefix="$1"
+      local expected="$2"
+      local ready_dir="$tmp/$prefix-ready"
+      local start_file="$tmp/$prefix-start"
+
+      while [ "$(find "$ready_dir" -type f | wc -l | tr -d ' ')" -lt "$expected" ]; do
+        sleep 0.01
+      done
+      touch "$start_file"
+    }
+
+    run_link_worker() {
+      local prefix="$1"
+      local name="$2"
+      local command_name="$3"
+      local ready_dir="$tmp/$prefix-ready"
+      local start_file="$tmp/$prefix-start"
+
+      touch "$ready_dir/$name"
+      while [ ! -f "$start_file" ]; do
+        sleep 0.01
+      done
+      set +e
+      "$agent_store_bin" "$command_name" "$source_id" blocks "$target_id" >"$tmp/$prefix-$name.out" 2>"$tmp/$prefix-$name.err"
+      code="$?"
+      set -e
+      printf "%s" "$code" >"$tmp/$prefix-$name.status"
+    }
+
+    link_workers=(alpha beta gamma delta epsilon zeta eta theta)
+    mkdir "$tmp/link-ready"
+    pids=()
+    for name in "${link_workers[@]}"; do
+      (run_link_worker link "$name" link) &
+      pids+=("$!")
+    done
+    run_started_workers link "${#link_workers[@]}"
+    for pid in "${pids[@]}"; do
+      wait "$pid"
+    done
+    if grep -R "database is locked" "$tmp"/link-*.err; then
+      exit 1
+    fi
+    for name in "${link_workers[@]}"; do
+      test "$(cat "$tmp/link-$name.status")" = "0"
+      grep -Fxq "Linked $source_id blocks $target_id" "$tmp/link-$name.out"
+    done
+    python3 - .agent-store/store.sqlite "$source_id" "$target_id" "${#link_workers[@]}" <<'PY'
+import sqlite3
+import sys
+
+db, source_id, target_id, expected_s = sys.argv[1:]
+expected = int(expected_s)
+con = sqlite3.connect(db)
+link_rows = con.execute(
+    """
+    select count(*)
+    from record_links
+    where from_record_id = ? and rel = 'blocks' and to_record_id = ?
+    """,
+    (source_id, target_id),
+).fetchone()[0]
+assert link_rows == 1, link_rows
+event_count = con.execute(
+    "select count(*) from store_events where event_type = 'link' and record_id = ?",
+    (source_id,),
+).fetchone()[0]
+assert event_count == expected, (event_count, expected)
+hook_count = con.execute(
+    "select count(*) from hook_runs where event_type = 'link' and record_id = ?",
+    (source_id,),
+).fetchone()[0]
+assert hook_count == expected, (hook_count, expected)
+PY
+
+    unlink_workers=(alpha beta gamma delta epsilon zeta eta theta)
+    mkdir "$tmp/unlink-ready"
+    pids=()
+    for name in "${unlink_workers[@]}"; do
+      (run_link_worker unlink "$name" unlink) &
+      pids+=("$!")
+    done
+    run_started_workers unlink "${#unlink_workers[@]}"
+    for pid in "${pids[@]}"; do
+      wait "$pid"
+    done
+    if grep -R "database is locked" "$tmp"/unlink-*.err; then
+      exit 1
+    fi
+    for name in "${unlink_workers[@]}"; do
+      test "$(cat "$tmp/unlink-$name.status")" = "0"
+      grep -Fxq "Unlinked $source_id blocks $target_id" "$tmp/unlink-$name.out"
+    done
+    python3 - .agent-store/store.sqlite "$source_id" "$target_id" "${#unlink_workers[@]}" <<'PY'
+import sqlite3
+import sys
+
+db, source_id, target_id, expected_s = sys.argv[1:]
+expected = int(expected_s)
+con = sqlite3.connect(db)
+link_rows = con.execute(
+    """
+    select count(*)
+    from record_links
+    where from_record_id = ? and rel = 'blocks' and to_record_id = ?
+    """,
+    (source_id, target_id),
+).fetchone()[0]
+assert link_rows == 0, link_rows
+event_count = con.execute(
+    "select count(*) from store_events where event_type = 'unlink' and record_id = ?",
+    (source_id,),
+).fetchone()[0]
+assert event_count == expected, (event_count, expected)
+hook_count = con.execute(
+    "select count(*) from hook_runs where event_type = 'unlink' and record_id = ?",
+    (source_id,),
+).fetchone()[0]
+assert hook_count == expected, (hook_count, expected)
+PY
+
+    run_record_worker() {
+      local prefix="$1"
+      local name="$2"
+      local op="$3"
+      local ready_dir="$tmp/$prefix-ready"
+      local start_file="$tmp/$prefix-start"
+
+      touch "$ready_dir/$name"
+      while [ ! -f "$start_file" ]; do
+        sleep 0.01
+      done
+      set +e
+      case "$op" in
+        set)
+          "$agent_store_bin" set "$record_id" status="$prefix-$name" "worker_$name=done" >"$tmp/$prefix-$name.out" 2>"$tmp/$prefix-$name.err"
+          ;;
+        unset)
+          "$agent_store_bin" unset "$record_id" flag >"$tmp/$prefix-$name.out" 2>"$tmp/$prefix-$name.err"
+          ;;
+        rm)
+          "$agent_store_bin" rm "$record_id" >"$tmp/$prefix-$name.out" 2>"$tmp/$prefix-$name.err"
+          ;;
+      esac
+      code="$?"
+      set -e
+      printf "%s" "$code" >"$tmp/$prefix-$name.status"
+    }
+
+    record_workers=(set_a set_b set_c set_d unset_a unset_b unset_c unset_d)
+    mkdir "$tmp/record-ready"
+    pids=()
+    for name in "${record_workers[@]}"; do
+      case "$name" in
+        set_*) op=set ;;
+        unset_*) op=unset ;;
+      esac
+      (run_record_worker record "$name" "$op") &
+      pids+=("$!")
+    done
+    run_started_workers record "${#record_workers[@]}"
+    for pid in "${pids[@]}"; do
+      wait "$pid"
+    done
+    if grep -R "database is locked" "$tmp"/record-*.err; then
+      exit 1
+    fi
+    for name in "${record_workers[@]}"; do
+      test "$(cat "$tmp/record-$name.status")" = "0"
+      grep -Fxq "Updated $record_id" "$tmp/record-$name.out"
+    done
+
+    mixed_workers=(set_e set_f set_g unset_e unset_f unset_g rm_a rm_b rm_c)
+    mkdir "$tmp/mixed-ready"
+    pids=()
+    for name in "${mixed_workers[@]}"; do
+      case "$name" in
+        set_*) op=set ;;
+        unset_*) op=unset ;;
+        rm_*) op=rm ;;
+      esac
+      (run_record_worker mixed "$name" "$op") &
+      pids+=("$!")
+    done
+    run_started_workers mixed "${#mixed_workers[@]}"
+    for pid in "${pids[@]}"; do
+      wait "$pid"
+    done
+    if grep -R "database is locked" "$tmp"/mixed-*.err; then
+      exit 1
+    fi
+
+    record_set_successes=4
+    record_unset_successes=4
+    mixed_set_successes=0
+    mixed_unset_successes=0
+    rm_successes=0
+    for name in "${mixed_workers[@]}"; do
+      code="$(cat "$tmp/mixed-$name.status")"
+      case "$name" in
+        set_*)
+          if [ "$code" = "0" ]; then
+            grep -Fxq "Updated $record_id" "$tmp/mixed-$name.out"
+            mixed_set_successes=$((mixed_set_successes + 1))
+          else
+            grep -Fq "was not found" "$tmp/mixed-$name.err"
+          fi
+          ;;
+        unset_*)
+          if [ "$code" = "0" ]; then
+            grep -Fxq "Updated $record_id" "$tmp/mixed-$name.out"
+            mixed_unset_successes=$((mixed_unset_successes + 1))
+          else
+            grep -Fq "was not found" "$tmp/mixed-$name.err"
+          fi
+          ;;
+        rm_*)
+          if [ "$code" = "0" ]; then
+            grep -Fxq "Removed $record_id" "$tmp/mixed-$name.out"
+            rm_successes=$((rm_successes + 1))
+          else
+            grep -Fq "was not found" "$tmp/mixed-$name.err"
+          fi
+          ;;
+      esac
+    done
+    test "$rm_successes" = "1"
+
+    expected_set=$((record_set_successes + mixed_set_successes))
+    expected_unset=$((record_unset_successes + mixed_unset_successes))
+    expected_total_hooks=$((${#link_workers[@]} + ${#unlink_workers[@]} + expected_set + expected_unset + rm_successes))
+
+    python3 - \
+      .agent-store/store.sqlite \
+      "$source_id" \
+      "$target_id" \
+      "$record_id" \
+      "${#link_workers[@]}" \
+      "${#unlink_workers[@]}" \
+      "$expected_set" \
+      "$expected_unset" \
+      "$rm_successes" \
+      "$expected_total_hooks" <<'PY'
+import sqlite3
+import sys
+
+(
+    db,
+    source_id,
+    target_id,
+    record_id,
+    expected_link_s,
+    expected_unlink_s,
+    expected_set_s,
+    expected_unset_s,
+    expected_rm_s,
+    expected_total_hooks_s,
+) = sys.argv[1:]
+expected = {
+    "link": int(expected_link_s),
+    "unlink": int(expected_unlink_s),
+    "set": int(expected_set_s),
+    "unset": int(expected_unset_s),
+    "rm": int(expected_rm_s),
+}
+expected_total_hooks = int(expected_total_hooks_s)
+con = sqlite3.connect(db)
+
+link_rows = con.execute(
+    """
+    select count(*)
+    from record_links
+    where from_record_id = ? and rel = 'blocks' and to_record_id = ?
+    """,
+    (source_id, target_id),
+).fetchone()[0]
+assert link_rows == 0, link_rows
+remaining_record = con.execute(
+    "select count(*) from records where id = ?",
+    (record_id,),
+).fetchone()[0]
+assert remaining_record == 0, remaining_record
+
+event_counts = dict(
+    con.execute(
+        """
+        select event_type, count(*)
+        from store_events
+        where (record_id = ? and event_type in ('link', 'unlink'))
+           or (record_id = ? and event_type in ('set', 'unset', 'rm'))
+        group by event_type
+        """,
+        (source_id, record_id),
+    ).fetchall()
+)
+assert event_counts == expected, (event_counts, expected)
+
+hook_counts = dict(
+    con.execute(
+        """
+        select event_type, count(*)
+        from hook_runs
+        where (record_id = ? and event_type in ('link', 'unlink'))
+           or (record_id = ? and event_type in ('set', 'unset', 'rm'))
+        group by event_type
+        """,
+        (source_id, record_id),
+    ).fetchall()
+)
+assert hook_counts == expected, (hook_counts, expected)
+total_hook_runs = con.execute(
+    """
+    select count(*)
+    from hook_runs
+    where (record_id = ? and event_type in ('link', 'unlink'))
+       or (record_id = ? and event_type in ('set', 'unset', 'rm'))
+    """,
+    (source_id, record_id),
+).fetchone()[0]
+assert total_hook_runs == expected_total_hooks, (total_hook_runs, expected_total_hooks)
+PY
+
+    side_effect_count="$(find "$hook_side_effects" -type f | wc -l | tr -d ' ')"
+    test "$side_effect_count" = "$expected_total_hooks"
+
+    if [ -n "$evidence_root" ]; then
+      find "$tmp" -maxdepth 1 -type f \
+        \( -name 'link-*' -o -name 'unlink-*' -o -name 'record-*' -o -name 'mixed-*' \) \
+        -exec cp {} "$evidence_root/logs/" \;
+      cp .agent-store/store.sqlite "$evidence_root/store.sqlite"
+      cat > "$evidence_root/reports/concurrent-same-record-link-races.md" <<EOF
+# Concurrent Same-Target Race Evidence
+
+- source_record: $source_id
+- target_record: $target_id
+- raced_record: $record_id
+- link_attempts: ${#link_workers[@]}
+- unlink_attempts: ${#unlink_workers[@]}
+- committed_set_events: $expected_set
+- committed_unset_events: $expected_unset
+- committed_rm_events: $rm_successes
+- hook_side_effects: $side_effect_count
+- database: $evidence_root/store.sqlite
+- logs: $evidence_root/logs
+EOF
+    fi
+    ;;
+
   *)
-    echo "usage: $0 {store_is_project_local|migrations_apply_on_open|initial_schema_tables|records_columns|record_fields_typed_columns|record_links_cardinality_shape|record_links_columns_unique|record_delete_cascades_links|hard_delete_store_event_snapshot|record_mutations_transactional|persistence_open_errors_actionable|migration_checksum_mismatch|concurrent_process_writers|concurrent_process_writers_with_hooks|concurrent_process_mutations_with_hooks}" >&2
+    echo "usage: $0 {store_is_project_local|migrations_apply_on_open|initial_schema_tables|records_columns|record_fields_typed_columns|record_links_cardinality_shape|record_links_columns_unique|record_delete_cascades_links|hard_delete_store_event_snapshot|record_mutations_transactional|persistence_open_errors_actionable|migration_checksum_mismatch|concurrent_process_writers|concurrent_process_writers_with_hooks|concurrent_process_mutations_with_hooks|concurrent_same_record_and_link_races}" >&2
     exit 2
     ;;
 esac
