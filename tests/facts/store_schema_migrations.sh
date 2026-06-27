@@ -1362,6 +1362,381 @@ EOF
     fi
     ;;
 
+  concurrent_json_mutation_hook_lifecycle_races)
+    CARGO_TARGET_DIR="$target_dir" cargo build --quiet --manifest-path "$repo/Cargo.toml"
+    agent_store_bin="$target_dir/debug/agent-store"
+    cd "$tmp"
+    "$agent_store_bin" init >/tmp/agent-store-json-mutation-hook-lifecycle-init.out
+
+    evidence_root="${AGENT_STORE_E2E_DIR:-}"
+    if [ -n "$evidence_root" ]; then
+      mkdir -p "$evidence_root/logs" "$evidence_root/reports"
+    fi
+
+    started_dir="$tmp/hook-started"
+    side_effects="$tmp/hook-side-effects"
+    release_file="$tmp/hook-release"
+    churn_ids="$tmp/churn-hook-ids.txt"
+    mkdir "$started_dir" "$side_effects"
+    : >"$churn_ids"
+
+    cat > slow-json-mutation-hook.sh <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+name="$1"
+started_dir="$2"
+release_file="$3"
+side_effects="$4"
+touch "$started_dir/$name-$AGENT_STORE_ID"
+while [ ! -f "$release_file" ]; do
+  sleep 0.01
+done
+touch "$side_effects/$name-$AGENT_STORE_ID"
+printf "%s" "$name"
+SH
+    chmod +x slow-json-mutation-hook.sh
+
+    wait_for_file_count() {
+      local dir="$1"
+      local expected="$2"
+      local attempts=500
+      while [ "$(find "$dir" -type f | wc -l | tr -d ' ')" -lt "$expected" ]; do
+        attempts=$((attempts - 1))
+        if [ "$attempts" -le 0 ]; then
+          find "$dir" -type f -print >&2
+          return 1
+        fi
+        sleep 0.01
+      done
+    }
+
+    set_record="$("$agent_store_bin" create task title=json-set-record batch=json-mutation-hook-lifecycle status=pending)"
+    unset_record="$("$agent_store_bin" create task title=json-unset-record batch=json-mutation-hook-lifecycle flag=present)"
+    rm_record="$("$agent_store_bin" create task title=json-rm-record batch=json-mutation-hook-lifecycle action=remove)"
+
+    set_hook_id="$("$agent_store_bin" hook add set 'kind=task and batch=json-mutation-hook-lifecycle and status=done' -- "./slow-json-mutation-hook.sh set $started_dir $release_file $side_effects")"
+    unset_hook_id="$("$agent_store_bin" hook add unset 'kind=task and batch=json-mutation-hook-lifecycle and not flag=present' -- "./slow-json-mutation-hook.sh unset $started_dir $release_file $side_effects")"
+    rm_hook_id="$("$agent_store_bin" hook add rm 'kind=task and batch=json-mutation-hook-lifecycle and action=remove' -- "./slow-json-mutation-hook.sh rm $started_dir $release_file $side_effects")"
+
+    event_marker="$(python3 - .agent-store/store.sqlite <<'PY'
+import sqlite3
+import sys
+
+con = sqlite3.connect(sys.argv[1])
+print(con.execute("select coalesce(max(id), 0) from store_events").fetchone()[0])
+PY
+)"
+    hook_marker="$(python3 - .agent-store/store.sqlite <<'PY'
+import sqlite3
+import sys
+
+con = sqlite3.connect(sys.argv[1])
+print(con.execute("select coalesce(max(id), 0) from hook_runs").fetchone()[0])
+PY
+)"
+
+    run_json_mutation() {
+      local name="$1"
+      set +e
+      case "$name" in
+        set)
+          "$agent_store_bin" --json set "$set_record" status=done marker=json-set >"$tmp/json-mutation-$name.out" 2>"$tmp/json-mutation-$name.err"
+          ;;
+        unset)
+          "$agent_store_bin" --json unset "$unset_record" flag >"$tmp/json-mutation-$name.out" 2>"$tmp/json-mutation-$name.err"
+          ;;
+        rm)
+          "$agent_store_bin" --json rm "$rm_record" >"$tmp/json-mutation-$name.out" 2>"$tmp/json-mutation-$name.err"
+          ;;
+      esac
+      code="$?"
+      set -e
+      printf "%s" "$code" >"$tmp/json-mutation-$name.status"
+    }
+
+    mutation_names=(set unset rm)
+    mutation_pids=()
+    for name in "${mutation_names[@]}"; do
+      (run_json_mutation "$name") &
+      mutation_pids+=("$!")
+    done
+
+    if ! wait_for_file_count "$started_dir" "${#mutation_names[@]}"; then
+      cat "$tmp"/json-mutation-*.err >&2
+      exit 1
+    fi
+
+    declare -A hook_ids=(
+      [set]="$set_hook_id"
+      [unset]="$unset_hook_id"
+      [rm]="$rm_hook_id"
+    )
+
+    hook_rm_pids=()
+    for name in "${mutation_names[@]}"; do
+      "$agent_store_bin" hook rm "${hook_ids[$name]}" >"$tmp/hook-rm-$name.out" 2>"$tmp/hook-rm-$name.err" &
+      hook_rm_pids+=("$!")
+    done
+
+    churn_hook() {
+      local op="$1"
+      local index="$2"
+      local hook_id
+      hook_id="$("$agent_store_bin" hook add "$op" 'kind=task and batch=json-mutation-hook-lifecycle' -- 'true')"
+      printf "%s\n" "$hook_id" >>"$churn_ids"
+      "$agent_store_bin" hook rm "$hook_id"
+    }
+
+    churn_pids=()
+    for name in "${mutation_names[@]}"; do
+      for index in 1 2 3; do
+        (churn_hook "$name" "$index") >"$tmp/hook-churn-$name-$index.out" 2>"$tmp/hook-churn-$name-$index.err" &
+        churn_pids+=("$!")
+      done
+    done
+
+    hook_rm_status=0
+    for pid in "${hook_rm_pids[@]}"; do
+      if ! wait "$pid"; then
+        hook_rm_status=1
+      fi
+    done
+    if [ "$hook_rm_status" -ne 0 ]; then
+      cat "$tmp"/hook-rm-*.err >&2
+      exit 1
+    fi
+    for name in "${mutation_names[@]}"; do
+      grep -Fxq "Removed ${hook_ids[$name]}" "$tmp/hook-rm-$name.out"
+    done
+
+    churn_status=0
+    for pid in "${churn_pids[@]}"; do
+      if ! wait "$pid"; then
+        churn_status=1
+      fi
+    done
+    if [ "$churn_status" -ne 0 ]; then
+      cat "$tmp"/hook-churn-*.err >&2
+      exit 1
+    fi
+
+    touch "$release_file"
+
+    mutation_status=0
+    for pid in "${mutation_pids[@]}"; do
+      if ! wait "$pid"; then
+        mutation_status=1
+      fi
+    done
+    if [ "$mutation_status" -ne 0 ]; then
+      cat "$tmp"/json-mutation-*.err >&2
+      exit 1
+    fi
+
+    for name in "${mutation_names[@]}"; do
+      test "$(cat "$tmp/json-mutation-$name.status")" = "0"
+    done
+
+    if grep -R "database is locked" "$tmp"/*.err; then
+      exit 1
+    fi
+    if grep -R "failed to run hooks after Store mutation already committed" "$tmp"/*.err; then
+      exit 1
+    fi
+    if grep -R "failed to record hook" "$tmp"/*.err; then
+      exit 1
+    fi
+    if grep -R "Query returned no rows" "$tmp"/*.err; then
+      exit 1
+    fi
+    if grep -R "panicked at" "$tmp"/*.err; then
+      exit 1
+    fi
+    if grep -R "constraint" "$tmp"/*.err; then
+      exit 1
+    fi
+
+    "$agent_store_bin" hook ls >"$tmp/hook-ls.out" 2>"$tmp/hook-ls.err"
+    for name in "${mutation_names[@]}"; do
+      if grep -Fq "${hook_ids[$name]} " "$tmp/hook-ls.out"; then
+        exit 1
+      fi
+    done
+
+    summary="$(python3 - \
+      "$tmp" \
+      .agent-store/store.sqlite \
+      "$event_marker" \
+      "$hook_marker" \
+      "$set_hook_id" \
+      "$unset_hook_id" \
+      "$rm_hook_id" \
+      "$set_record" \
+      "$unset_record" \
+      "$rm_record" <<'PY'
+from collections import Counter
+import json
+import pathlib
+import sqlite3
+import sys
+
+(
+    tmp_s,
+    db,
+    event_marker_s,
+    hook_marker_s,
+    set_hook_id,
+    unset_hook_id,
+    rm_hook_id,
+    set_record,
+    unset_record,
+    rm_record,
+) = sys.argv[1:]
+tmp = pathlib.Path(tmp_s)
+event_marker = int(event_marker_s)
+hook_marker = int(hook_marker_s)
+hook_ids = [set_hook_id, unset_hook_id, rm_hook_id]
+record_ids = {
+    "set": set_record,
+    "unset": unset_record,
+    "rm": rm_record,
+}
+
+payloads = {}
+for op in ["set", "unset", "rm"]:
+    out = (tmp / f"json-mutation-{op}.out").read_text(encoding="utf-8")
+    err = (tmp / f"json-mutation-{op}.err").read_text(encoding="utf-8")
+    assert err == "", (op, err)
+    payload = json.loads(out)
+    expected_status = "removed" if op == "rm" else "updated"
+    assert payload["status"] == expected_status, payload
+    record = payload["record"]
+    assert record["id"] == record_ids[op], payload
+    assert record["kind"] == "task", payload
+    fields = record["fields"]
+    assert fields["batch"] == "json-mutation-hook-lifecycle", payload
+    if op == "set":
+        assert fields["status"] == "done", payload
+        assert fields["marker"] == "json-set", payload
+    elif op == "unset":
+        assert "flag" not in fields, payload
+    elif op == "rm":
+        assert fields["action"] == "remove", payload
+    payloads[op] = payload
+
+con = sqlite3.connect(db)
+placeholders = ",".join("?" for _ in hook_ids)
+remaining_hooks = con.execute(
+    f"select count(*) from hooks where id in ({placeholders})",
+    hook_ids,
+).fetchone()[0]
+assert remaining_hooks == 0, remaining_hooks
+
+churn_hook_ids = [
+    line.strip()
+    for line in (tmp / "churn-hook-ids.txt").read_text(encoding="utf-8").splitlines()
+    if line.strip()
+]
+assert len(churn_hook_ids) == 9, churn_hook_ids
+churn_placeholders = ",".join("?" for _ in churn_hook_ids)
+remaining_churn_hooks = con.execute(
+    f"select count(*) from hooks where id in ({churn_placeholders})",
+    churn_hook_ids,
+).fetchone()[0]
+assert remaining_churn_hooks == 0, remaining_churn_hooks
+
+rows = con.execute(
+    f"""
+    select hook_id, event_type, record_id, exit_status, stdout_summary, stderr_summary
+    from hook_runs
+    where id > ? and hook_id in ({placeholders})
+    """,
+    [hook_marker, *hook_ids],
+).fetchall()
+observed_runs = {row[0]: row[1:] for row in rows}
+expected_runs = {
+    set_hook_id: ("set", set_record, 0, "set", ""),
+    unset_hook_id: ("unset", unset_record, 0, "unset", ""),
+    rm_hook_id: ("rm", rm_record, 0, "rm", ""),
+}
+assert len(rows) == len(expected_runs), rows
+assert observed_runs == expected_runs, (observed_runs, expected_runs)
+
+churn_run_count = con.execute(
+    f"select count(*) from hook_runs where id > ? and hook_id in ({churn_placeholders})",
+    [hook_marker, *churn_hook_ids],
+).fetchone()[0]
+assert churn_run_count == 0, churn_run_count
+
+event_rows = con.execute(
+    """
+    select event_type, record_id, record_snapshot
+    from store_events
+    where id > ? and event_type in ('set', 'unset', 'rm')
+    order by id
+    """,
+    (event_marker,),
+).fetchall()
+event_counts = Counter(row[0] for row in event_rows)
+assert event_counts == {"set": 1, "unset": 1, "rm": 1}, event_counts
+for event_type, record_id, snapshot_raw in event_rows:
+    assert record_id == record_ids[event_type], (event_type, record_id)
+    snapshot = json.loads(snapshot_raw)
+    assert snapshot == payloads[event_type]["record"], (snapshot, payloads[event_type])
+
+set_fields = dict(
+    con.execute(
+        "select key, raw_value from record_fields where record_id = ?",
+        (set_record,),
+    ).fetchall()
+)
+assert set_fields["status"] == "done", set_fields
+assert set_fields["marker"] == "json-set", set_fields
+unset_flag_count = con.execute(
+    "select count(*) from record_fields where record_id = ? and key = 'flag'",
+    (unset_record,),
+).fetchone()[0]
+assert unset_flag_count == 0, unset_flag_count
+rm_remaining = con.execute(
+    "select count(*) from records where id = ?",
+    (rm_record,),
+).fetchone()[0]
+assert rm_remaining == 0, rm_remaining
+
+print(
+    "json_mutations=3 removed_hooks=3 churned_hooks={} hook_runs={} events={}".format(
+        len(churn_hook_ids),
+        len(observed_runs),
+        sum(event_counts.values()),
+    )
+)
+PY
+)"
+
+    side_effect_count="$(find "$side_effects" -type f | wc -l | tr -d ' ')"
+    test "$side_effect_count" = "${#mutation_names[@]}"
+
+    if [ -n "$evidence_root" ]; then
+      find "$tmp" -maxdepth 1 -type f \
+        \( -name 'json-mutation-*' -o -name 'hook-rm-*' -o -name 'hook-churn-*' -o -name 'hook-ls.*' -o -name 'churn-hook-ids.txt' \) \
+        -exec cp {} "$evidence_root/logs/" \;
+      find "$side_effects" -maxdepth 1 -type f -exec cp {} "$evidence_root/logs/" \;
+      cp .agent-store/store.sqlite "$evidence_root/store.sqlite"
+      cat > "$evidence_root/reports/concurrent-json-mutation-hook-lifecycle-races.md" <<EOF
+# Concurrent JSON Mutation Hook Lifecycle Race Evidence
+
+- set_record: $set_record
+- unset_record: $unset_record
+- rm_record: $rm_record
+- removed_hook_ids: $set_hook_id $unset_hook_id $rm_hook_id
+- $summary
+- hook_side_effects: $side_effect_count
+- database: $evidence_root/store.sqlite
+- logs: $evidence_root/logs
+EOF
+    fi
+    ;;
+
   concurrent_hook_churn_reads)
     CARGO_TARGET_DIR="$target_dir" cargo build --quiet --manifest-path "$repo/Cargo.toml"
     agent_store_bin="$target_dir/debug/agent-store"
@@ -4462,7 +4837,7 @@ EOF
     ;;
 
   *)
-    echo "usage: $0 {store_is_project_local|migrations_apply_on_open|initial_schema_tables|records_columns|record_fields_typed_columns|record_links_cardinality_shape|record_links_columns_unique|record_delete_cascades_links|hard_delete_store_event_snapshot|record_mutations_transactional|persistence_open_errors_actionable|migration_checksum_mismatch|concurrent_process_writers|concurrent_process_writers_with_hooks|concurrent_process_mutations_with_hooks|concurrent_hook_lifecycle_races|concurrent_hook_lifecycle_mutation_races|concurrent_hook_churn_reads|concurrent_record_readers_with_hooked_mutations|concurrent_json_record_readers_with_hooked_mutations|concurrent_link_record_disappearance_races|concurrent_set_unset_link_snapshot_races|create_rm_link_snapshot_hooks|concurrent_same_record_and_link_races|concurrent_id_prefix_resolution_races|concurrent_json_prefix_and_hook_rm_races|concurrent_json_mutation_prefix_races}" >&2
+    echo "usage: $0 {store_is_project_local|migrations_apply_on_open|initial_schema_tables|records_columns|record_fields_typed_columns|record_links_cardinality_shape|record_links_columns_unique|record_delete_cascades_links|hard_delete_store_event_snapshot|record_mutations_transactional|persistence_open_errors_actionable|migration_checksum_mismatch|concurrent_process_writers|concurrent_process_writers_with_hooks|concurrent_process_mutations_with_hooks|concurrent_hook_lifecycle_races|concurrent_hook_lifecycle_mutation_races|concurrent_json_mutation_hook_lifecycle_races|concurrent_hook_churn_reads|concurrent_record_readers_with_hooked_mutations|concurrent_json_record_readers_with_hooked_mutations|concurrent_link_record_disappearance_races|concurrent_set_unset_link_snapshot_races|create_rm_link_snapshot_hooks|concurrent_same_record_and_link_races|concurrent_id_prefix_resolution_races|concurrent_json_prefix_and_hook_rm_races|concurrent_json_mutation_prefix_races}" >&2
     exit 2
     ;;
 esac

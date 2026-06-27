@@ -40,3 +40,6 @@
   id: jpr
   command: bash tests/facts/store_schema_migrations.sh concurrent_json_mutation_prefix_races
   tags: [implemented]
+- label: simultaneous --json set, --json unset, and --json rm mutations with already-selected slow Hooks whose Hook rows are removed or churned before Hook Run persistence still exit successfully with valid mutation JSON for each committed Record mutation, leave removed Hooks absent, and persist matching Hook Runs without database lock or post-commit hook persistence errors
+  command: bash tests/facts/store_schema_migrations.sh concurrent_json_mutation_hook_lifecycle_races
+  tags: [implemented]
