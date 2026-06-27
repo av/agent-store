@@ -2005,9 +2005,10 @@ PY
 #!/usr/bin/env bash
 set -euo pipefail
 label="$1"
+signal_name="${2:-TERM}"
 printf "%s-signal-stdout" "$label"
 printf "%s-signal-stderr" "$label" >&2
-kill -TERM "$$"
+kill "-$signal_name" "$$"
 sleep 1
 SH
     chmod +x signal-hook.sh
@@ -2015,14 +2016,16 @@ SH
     assert_signal_failure() {
       local name="$1"
       local expected_stderr="$2"
+      local signal_number="$3"
+      local signal_name="$4"
       local status
       status="$(cat "$tmp/hook-signal-$name.status")"
 
       test "$status" -ne 0
       test ! -s "$tmp/hook-signal-$name.out"
       grep -Fq "Store mutation already committed" "$tmp/hook-signal-$name.err"
-      grep -Fq "terminated by signal 15" "$tmp/hook-signal-$name.err"
-      grep -Fq "SIGTERM" "$tmp/hook-signal-$name.err"
+      grep -Fq "terminated by signal $signal_number" "$tmp/hook-signal-$name.err"
+      grep -Fq "$signal_name" "$tmp/hook-signal-$name.err"
       grep -Fq "$expected_stderr" "$tmp/hook-signal-$name.err"
     }
 
@@ -2032,7 +2035,16 @@ SH
     plain_status="$?"
     set -e
     printf "%s" "$plain_status" >"$tmp/hook-signal-plain.status"
-    assert_signal_failure plain plain-signal-stderr
+    assert_signal_failure plain plain-signal-stderr 15 SIGTERM
+
+    plain_kill_record="$("$agent_store_bin" create task title=SignalKillPlain status=pending)"
+    plain_kill_hook_id="$("$agent_store_bin" hook add set 'kind=task and title=SignalKillPlain and status=done' -- './signal-hook.sh plain-kill KILL')"
+    set +e
+    "$agent_store_bin" set "$plain_kill_record" status=done >"$tmp/hook-signal-plain-kill.out" 2>"$tmp/hook-signal-plain-kill.err"
+    plain_kill_status="$?"
+    set -e
+    printf "%s" "$plain_kill_status" >"$tmp/hook-signal-plain-kill.status"
+    assert_signal_failure plain-kill plain-kill-signal-stderr 9 SIGKILL
 
     json_create_hook_id="$("$agent_store_bin" hook add create title=SignalJsonCreate -- './signal-hook.sh json-create')"
     set +e
@@ -2040,7 +2052,7 @@ SH
     json_create_status="$?"
     set -e
     printf "%s" "$json_create_status" >"$tmp/hook-signal-json-create.status"
-    assert_signal_failure json-create json-create-signal-stderr
+    assert_signal_failure json-create json-create-signal-stderr 15 SIGTERM
 
     json_set_record="$("$agent_store_bin" create task title=SignalJsonSet status=pending)"
     json_set_hook_id="$("$agent_store_bin" hook add set 'kind=task and title=SignalJsonSet and status=done' -- './signal-hook.sh json-set')"
@@ -2049,7 +2061,7 @@ SH
     json_set_status="$?"
     set -e
     printf "%s" "$json_set_status" >"$tmp/hook-signal-json-set.status"
-    assert_signal_failure json-set json-set-signal-stderr
+    assert_signal_failure json-set json-set-signal-stderr 15 SIGTERM
 
     json_link_source="$("$agent_store_bin" create task title=SignalJsonLinkSource status=open)"
     json_link_target="$("$agent_store_bin" create note title=SignalJsonLinkTarget status=open)"
@@ -2059,7 +2071,17 @@ SH
     json_link_status="$?"
     set -e
     printf "%s" "$json_link_status" >"$tmp/hook-signal-json-link.status"
-    assert_signal_failure json-link json-link-signal-stderr
+    assert_signal_failure json-link json-link-signal-stderr 15 SIGTERM
+
+    json_kill_link_source="$("$agent_store_bin" create task title=SignalKillJsonLinkSource status=open)"
+    json_kill_link_target="$("$agent_store_bin" create note title=SignalKillJsonLinkTarget status=open)"
+    json_kill_link_hook_id="$("$agent_store_bin" hook add link 'kind=task and title=SignalKillJsonLinkSource' -- './signal-hook.sh json-link-kill KILL')"
+    set +e
+    "$agent_store_bin" --json link "$json_kill_link_source" blocks "$json_kill_link_target" >"$tmp/hook-signal-json-link-kill.out" 2>"$tmp/hook-signal-json-link-kill.err"
+    json_kill_link_status="$?"
+    set -e
+    printf "%s" "$json_kill_link_status" >"$tmp/hook-signal-json-link-kill.status"
+    assert_signal_failure json-link-kill json-link-kill-signal-stderr 9 SIGKILL
 
     json_unset_record="$("$agent_store_bin" create task title=SignalJsonUnset status=present)"
     json_unset_hook_id="$("$agent_store_bin" hook add unset 'kind=task and title=SignalJsonUnset' -- './signal-hook.sh json-unset')"
@@ -2068,7 +2090,7 @@ SH
     json_unset_status="$?"
     set -e
     printf "%s" "$json_unset_status" >"$tmp/hook-signal-json-unset.status"
-    assert_signal_failure json-unset json-unset-signal-stderr
+    assert_signal_failure json-unset json-unset-signal-stderr 15 SIGTERM
 
     json_rm_record="$("$agent_store_bin" create task title=SignalJsonRm status=present)"
     json_rm_hook_id="$("$agent_store_bin" hook add rm 'kind=task and title=SignalJsonRm' -- './signal-hook.sh json-rm')"
@@ -2077,7 +2099,7 @@ SH
     json_rm_status="$?"
     set -e
     printf "%s" "$json_rm_status" >"$tmp/hook-signal-json-rm.status"
-    assert_signal_failure json-rm json-rm-signal-stderr
+    assert_signal_failure json-rm json-rm-signal-stderr 15 SIGTERM
 
     json_unlink_source="$("$agent_store_bin" create task title=SignalJsonUnlinkSource status=open)"
     json_unlink_target="$("$agent_store_bin" create note title=SignalJsonUnlinkTarget status=open)"
@@ -2088,7 +2110,7 @@ SH
     json_unlink_status="$?"
     set -e
     printf "%s" "$json_unlink_status" >"$tmp/hook-signal-json-unlink.status"
-    assert_signal_failure json-unlink json-unlink-signal-stderr
+    assert_signal_failure json-unlink json-unlink-signal-stderr 15 SIGTERM
 
     "$agent_store_bin" --json create task title=SignalAfter status=ok >"$tmp/hook-signal-after.out" 2>"$tmp/hook-signal-after.err"
     later_record="$(python3 - "$tmp/hook-signal-after.out" <<'PY'
@@ -2363,6 +2385,113 @@ print(
 PY
 )"
 
+    kill_summary="$(python3 - \
+      "$tmp" \
+      .agent-store/store.sqlite \
+      "$plain_kill_hook_id" \
+      "$json_kill_link_hook_id" \
+      "$plain_kill_record" \
+      "$json_kill_link_source" \
+      "$json_kill_link_target" <<'PY'
+import pathlib
+import sqlite3
+import sys
+
+(
+    tmp_s,
+    db,
+    plain_kill_hook_id,
+    json_kill_link_hook_id,
+    plain_kill_record,
+    json_kill_link_source,
+    json_kill_link_target,
+) = sys.argv[1:]
+tmp = pathlib.Path(tmp_s)
+con = sqlite3.connect(db)
+
+for name, expected in [
+    ("plain-kill", "plain-kill-signal-stderr"),
+    ("json-link-kill", "json-link-kill-signal-stderr"),
+]:
+    stdout = (tmp / f"hook-signal-{name}.out").read_text(encoding="utf-8")
+    stderr = (tmp / f"hook-signal-{name}.err").read_text(encoding="utf-8")
+    status = int((tmp / f"hook-signal-{name}.status").read_text(encoding="utf-8"))
+    assert stdout == "", (name, stdout)
+    assert status != 0, (name, status)
+    assert "Store mutation already committed" in stderr, (name, stderr)
+    assert "terminated by signal 9" in stderr, (name, stderr)
+    assert "SIGKILL" in stderr, (name, stderr)
+    assert expected in stderr, (name, stderr)
+
+plain_status = con.execute(
+    """
+    select raw_value
+    from record_fields
+    where record_id = ? and key = 'status'
+    """,
+    (plain_kill_record,),
+).fetchone()
+assert plain_status == ("done",), plain_status
+
+assert con.execute(
+    """
+    select count(*) from record_links
+    where from_record_id = ? and rel = 'blocks' and to_record_id = ?
+    """,
+    (json_kill_link_source, json_kill_link_target),
+).fetchone()[0] == 1
+
+event_rows = con.execute(
+    """
+    select event_type, record_id
+    from store_events
+    where record_id in (?, ?)
+    order by id
+    """,
+    (plain_kill_record, json_kill_link_source),
+).fetchall()
+assert ("set", plain_kill_record) in event_rows, event_rows
+assert ("link", json_kill_link_source) in event_rows, event_rows
+
+rows = con.execute(
+    """
+    select hook_id, event_type, record_id, exit_status, stdout_summary, stderr_summary
+    from hook_runs
+    where hook_id in (?, ?)
+    order by id
+    """,
+    (plain_kill_hook_id, json_kill_link_hook_id),
+).fetchall()
+assert rows == [
+    (
+        plain_kill_hook_id,
+        "set",
+        plain_kill_record,
+        -9,
+        "plain-kill-signal-stdout",
+        "plain-kill-signal-stderr",
+    ),
+    (
+        json_kill_link_hook_id,
+        "link",
+        json_kill_link_source,
+        -9,
+        "json-link-kill-signal-stdout",
+        "json-link-kill-signal-stderr",
+    ),
+], rows
+
+print(
+    "sigkill_hook_runs={} plain_kill_record={} json_kill_link_source={} statuses={}".format(
+        len(rows),
+        plain_kill_record,
+        json_kill_link_source,
+        ",".join(str(row[3]) for row in rows),
+    )
+)
+PY
+)"
+
     if [ -n "$evidence_root" ]; then
       cp signal-hook.sh "$evidence_root/logs/"
       cp "$tmp"/hook-signal-* "$evidence_root/logs/"
@@ -2371,21 +2500,26 @@ PY
 # Hook Signal Termination Evidence
 
 - plain_hook_id: $plain_hook_id
+- plain_kill_hook_id: $plain_kill_hook_id
 - json_create_hook_id: $json_create_hook_id
 - json_set_hook_id: $json_set_hook_id
 - json_link_hook_id: $json_link_hook_id
+- json_kill_link_hook_id: $json_kill_link_hook_id
 - json_unset_hook_id: $json_unset_hook_id
 - json_rm_hook_id: $json_rm_hook_id
 - json_unlink_hook_id: $json_unlink_hook_id
 - plain_status: $plain_status
+- plain_kill_status: $plain_kill_status
 - json_create_status: $json_create_status
 - json_set_status: $json_set_status
 - json_link_status: $json_link_status
+- json_kill_link_status: $json_kill_link_status
 - json_unset_status: $json_unset_status
 - json_rm_status: $json_rm_status
 - json_unlink_status: $json_unlink_status
 - later_record: $later_record
 - $summary
+- $kill_summary
 - database: $evidence_root/store.sqlite
 - logs: $evidence_root/logs
 EOF

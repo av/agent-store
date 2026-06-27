@@ -275,7 +275,7 @@
 - label: Timed-out Hook Bash commands terminate their process group so descendant processes do not keep running or produce side effects after the triggering CLI returns; the committed mutation and timeout Hook Run remain persisted
   command: bash tests/facts/cli_hooks.sh hook_timeout_terminates_process_group
   tags: [implemented]
-- label: Plain create and --json create, set, unset, rm, link, and unlink mutations whose matching Hook Bash command terminates from a signal exit non-zero with empty stdout, report that the Store mutation committed and name the signal on stderr, persist the Store mutation and Store Event, persist the Hook Run with captured output and a signal-derived status, and leave later CLI behavior unchanged
+- label: Plain create plus --json create, set, unset, rm, link, and unlink mutations whose matching Hook Bash command terminates with SIGTERM, and representative plain set plus --json link mutations whose matching Hook Bash command terminates with SIGKILL, exit non-zero with empty stdout, report that the Store mutation committed and name the signal on stderr, persist the Store mutation and Store Event, persist the Hook Run with captured output and a signal-derived negative status, and leave later CLI behavior unchanged
   id: yjb
   command: bash tests/facts/cli_hooks.sh hook_signal_termination_reports_committed_mutation
   tags: [implemented]
