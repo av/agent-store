@@ -3,6 +3,7 @@
   id: jhf
   command: bash tests/facts/cli_hooks.sh json_mutation_hook_failure_or_timeout_reports_committed_without_success_json
   tags: [implemented]
-- label: --json create, --json set, and --json link mutations with multiple matching Hooks run matching Hooks sequentially after commit; when one or more earlier Hooks succeed and a later Hook fails or times out, the mutation remains committed, the successful and failing or timed-out Hook Runs persist, later matching Hooks do not run, stdout stays empty, and stderr reports the committed Hook failure or timeout
+- label: --json create, --json set, --json unset, --json rm, --json link, and --json unlink mutations with multiple matching Hooks run matching Hooks sequentially after commit; when one or more earlier Hooks succeed and a later Hook fails or times out, the mutation remains committed, the successful and failing or timed-out Hook Runs persist, later matching Hooks do not run, stdout stays empty, and stderr reports the committed Hook failure or timeout
+  id: 9ev
   command: bash tests/facts/cli_hooks.sh json_multiple_matching_hooks_stop_after_failure_or_timeout
   tags: [implemented]
