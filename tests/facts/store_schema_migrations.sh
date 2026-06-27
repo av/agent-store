@@ -1045,6 +1045,196 @@ EOF
     fi
     ;;
 
+  concurrent_set_unset_link_snapshot_races)
+    CARGO_TARGET_DIR="$target_dir" cargo build --quiet --manifest-path "$repo/Cargo.toml"
+    agent_store_bin="$target_dir/debug/agent-store"
+    cd "$tmp"
+    "$agent_store_bin" init >/tmp/agent-store-set-unset-link-snapshot-init.out
+
+    evidence_root="${AGENT_STORE_E2E_DIR:-}"
+    if [ -n "$evidence_root" ]; then
+      mkdir -p "$evidence_root/logs" "$evidence_root/reports"
+    fi
+
+    hook_side_effects="$tmp/hook-side-effects"
+    mkdir "$hook_side_effects"
+    cat > hook-touch.sh <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+dir="$1"
+printf "%s:%s:%s\n" "$AGENT_STORE_EVENT" "$AGENT_STORE_ID" "$AGENT_STORE_KIND" >> "$dir/hook.log"
+printf "%s" "$AGENT_STORE_EVENT"
+SH
+    chmod +x hook-touch.sh
+
+    set_source="$("$agent_store_bin" create task title=set-source batch=snapshot-set status=open)"
+    set_target="$("$agent_store_bin" create note title=set-target batch=snapshot-set)"
+    "$agent_store_bin" link "$set_source" blocks "$set_target" >"$tmp/setup-set-link.out" 2>"$tmp/setup-set-link.err"
+    "$agent_store_bin" hook add set 'kind=task and batch=snapshot-set and status=done and link.out=blocks' -- './hook-touch.sh hook-side-effects' >/tmp/agent-store-set-link-snapshot-hook.out
+
+    unset_source="$("$agent_store_bin" create task title=unset-source batch=snapshot-unset status=open flag=present)"
+    unset_target="$("$agent_store_bin" create note title=unset-target batch=snapshot-unset)"
+    "$agent_store_bin" link "$unset_source" blocks "$unset_target" >"$tmp/setup-unset-link.out" 2>"$tmp/setup-unset-link.err"
+    "$agent_store_bin" hook add unset 'kind=task and batch=snapshot-unset and not flag=present and link.out=blocks' -- './hook-touch.sh hook-side-effects' >/tmp/agent-store-unset-link-snapshot-hook.out
+
+    event_marker="$(python3 - .agent-store/store.sqlite <<'PY'
+import sqlite3
+import sys
+
+con = sqlite3.connect(sys.argv[1])
+print(con.execute("select coalesce(max(id), 0) from store_events").fetchone()[0])
+PY
+)"
+    hook_marker="$(python3 - .agent-store/store.sqlite <<'PY'
+import sqlite3
+import sys
+
+con = sqlite3.connect(sys.argv[1])
+print(con.execute("select coalesce(max(id), 0) from hook_runs").fetchone()[0])
+PY
+)"
+
+    python3 - .agent-store/store.sqlite "$set_source" "$unset_source" <<'PY'
+import sqlite3
+import sys
+
+db, set_source, unset_source = sys.argv[1:]
+assert set_source.isalnum(), set_source
+assert unset_source.isalnum(), unset_source
+con = sqlite3.connect(db)
+con.execute("PRAGMA foreign_keys = ON")
+con.executescript(
+    f"""
+    create trigger delete_set_source_after_event
+    after insert on store_events
+    when new.event_type = 'set' and new.record_id = '{set_source}'
+    begin
+      delete from records where id = new.record_id;
+    end;
+
+    create trigger delete_unset_source_after_event
+    after insert on store_events
+    when new.event_type = 'unset' and new.record_id = '{unset_source}'
+    begin
+      delete from records where id = new.record_id;
+    end;
+    """
+)
+con.commit()
+PY
+
+    set +e
+    "$agent_store_bin" set "$set_source" status=done >"$tmp/trigger-set.out" 2>"$tmp/trigger-set.err"
+    set_code="$?"
+    "$agent_store_bin" unset "$unset_source" flag >"$tmp/trigger-unset.out" 2>"$tmp/trigger-unset.err"
+    unset_code="$?"
+    set -e
+    printf "%s" "$set_code" >"$tmp/trigger-set.status"
+    printf "%s" "$unset_code" >"$tmp/trigger-unset.status"
+
+    if [ "$set_code" != "0" ]; then
+      cat "$tmp/trigger-set.err" >&2
+      exit 1
+    fi
+    if [ "$unset_code" != "0" ]; then
+      cat "$tmp/trigger-unset.err" >&2
+      exit 1
+    fi
+    grep -Fxq "Updated $set_source" "$tmp/trigger-set.out"
+    grep -Fxq "Updated $unset_source" "$tmp/trigger-unset.out"
+
+    if grep -R "database is locked" "$tmp"/trigger-*.err; then
+      exit 1
+    fi
+    if grep -R "failed to load hook" "$tmp"/trigger-*.err; then
+      exit 1
+    fi
+
+    summary="$(python3 - .agent-store/store.sqlite "$event_marker" "$hook_marker" "$set_source" "$unset_source" <<'PY'
+import sqlite3
+import sys
+
+db, event_marker_s, hook_marker_s, set_source, unset_source = sys.argv[1:]
+event_marker = int(event_marker_s)
+hook_marker = int(hook_marker_s)
+con = sqlite3.connect(db)
+
+event_counts = dict(
+    con.execute(
+        """
+        select event_type, count(*)
+        from store_events
+        where id > ? and event_type in ('set', 'unset')
+        group by event_type
+        """,
+        (event_marker,),
+    ).fetchall()
+)
+hook_counts = dict(
+    con.execute(
+        """
+        select event_type, count(*)
+        from hook_runs
+        where id > ? and event_type in ('set', 'unset')
+        group by event_type
+        """,
+        (hook_marker,),
+    ).fetchall()
+)
+assert event_counts == {"set": 1, "unset": 1}, event_counts
+assert hook_counts == event_counts, (event_counts, hook_counts)
+remaining_sources = con.execute(
+    "select count(*) from records where id in (?, ?)",
+    (set_source, unset_source),
+).fetchone()[0]
+assert remaining_sources == 0, remaining_sources
+dangling_links = con.execute(
+    """
+    select count(*)
+    from record_links l
+    left join records source on source.id = l.from_record_id
+    left join records target on target.id = l.to_record_id
+    where source.id is null or target.id is null
+    """
+).fetchone()[0]
+assert dangling_links == 0, dangling_links
+print(
+    "set_events={set_events} unset_events={unset_events} hook_runs={hook_runs} remaining_sources={remaining_sources} dangling_links={dangling_links}".format(
+        set_events=event_counts.get("set", 0),
+        unset_events=event_counts.get("unset", 0),
+        hook_runs=sum(hook_counts.values()),
+        remaining_sources=remaining_sources,
+        dangling_links=dangling_links,
+    )
+)
+PY
+)"
+
+    side_effect_count="0"
+    if [ -f "$hook_side_effects/hook.log" ]; then
+      side_effect_count="$(wc -l < "$hook_side_effects/hook.log" | tr -d ' ')"
+    fi
+    test "$side_effect_count" = "2"
+
+    if [ -n "$evidence_root" ]; then
+      find "$tmp" -maxdepth 1 -type f \
+        \( -name 'trigger-*' -o -name 'setup-*-link.*' \) \
+        -exec cp {} "$evidence_root/logs/" \;
+      cp "$hook_side_effects/hook.log" "$evidence_root/logs/hook.log"
+      cp .agent-store/store.sqlite "$evidence_root/store.sqlite"
+      cat > "$evidence_root/reports/concurrent-set-unset-link-snapshot-races.md" <<EOF
+# Concurrent Set/Unset Link Snapshot Race Evidence
+
+- set_source: $set_source
+- unset_source: $unset_source
+- $summary
+- hook_side_effects: $side_effect_count
+- database: $evidence_root/store.sqlite
+- logs: $evidence_root/logs
+EOF
+    fi
+    ;;
+
   concurrent_same_record_and_link_races)
     CARGO_TARGET_DIR="$target_dir" cargo build --quiet --manifest-path "$repo/Cargo.toml"
     agent_store_bin="$target_dir/debug/agent-store"
@@ -1430,7 +1620,7 @@ EOF
     ;;
 
   *)
-    echo "usage: $0 {store_is_project_local|migrations_apply_on_open|initial_schema_tables|records_columns|record_fields_typed_columns|record_links_cardinality_shape|record_links_columns_unique|record_delete_cascades_links|hard_delete_store_event_snapshot|record_mutations_transactional|persistence_open_errors_actionable|migration_checksum_mismatch|concurrent_process_writers|concurrent_process_writers_with_hooks|concurrent_process_mutations_with_hooks|concurrent_link_record_disappearance_races|concurrent_same_record_and_link_races}" >&2
+    echo "usage: $0 {store_is_project_local|migrations_apply_on_open|initial_schema_tables|records_columns|record_fields_typed_columns|record_links_cardinality_shape|record_links_columns_unique|record_delete_cascades_links|hard_delete_store_event_snapshot|record_mutations_transactional|persistence_open_errors_actionable|migration_checksum_mismatch|concurrent_process_writers|concurrent_process_writers_with_hooks|concurrent_process_mutations_with_hooks|concurrent_link_record_disappearance_races|concurrent_set_unset_link_snapshot_races|concurrent_same_record_and_link_races}" >&2
     exit 2
     ;;
 esac

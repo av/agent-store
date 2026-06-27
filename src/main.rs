@@ -187,7 +187,7 @@ fn main() {
             let mut store = open_store_or_exit();
             match store.create_record(&kind, fields) {
                 Ok(record) => {
-                    run_hooks_or_exit(&mut store, "create", &record);
+                    run_hooks_or_exit(&mut store, "create", &record, None);
                     if cli.json_output {
                         print_json(mutation_json("created", &record));
                     } else {
@@ -243,13 +243,18 @@ fn main() {
         }
         CliCommand::Set { id, fields } => {
             let mut store = open_store_or_exit();
-            match store.set_record(&id, fields) {
-                Ok(record) => {
-                    run_hooks_or_exit(&mut store, "set", &record);
+            match store.set_record_with_snapshot(&id, fields) {
+                Ok(mutation) => {
+                    run_hooks_or_exit(
+                        &mut store,
+                        "set",
+                        &mutation.record,
+                        Some(&mutation.record_links),
+                    );
                     if cli.json_output {
-                        print_json(mutation_json("updated", &record));
+                        print_json(mutation_json("updated", &mutation.record));
                     } else {
-                        println!("Updated {}", record.id);
+                        println!("Updated {}", mutation.record.id);
                     }
                 }
                 Err(error) => {
@@ -260,13 +265,18 @@ fn main() {
         }
         CliCommand::Unset { id, keys } => {
             let mut store = open_store_or_exit();
-            match store.unset_record(&id, keys) {
-                Ok(record) => {
-                    run_hooks_or_exit(&mut store, "unset", &record);
+            match store.unset_record_with_snapshot(&id, keys) {
+                Ok(mutation) => {
+                    run_hooks_or_exit(
+                        &mut store,
+                        "unset",
+                        &mutation.record,
+                        Some(&mutation.record_links),
+                    );
                     if cli.json_output {
-                        print_json(mutation_json("updated", &record));
+                        print_json(mutation_json("updated", &mutation.record));
                     } else {
-                        println!("Updated {}", record.id);
+                        println!("Updated {}", mutation.record.id);
                     }
                 }
                 Err(error) => {
@@ -279,7 +289,7 @@ fn main() {
             let mut store = open_store_or_exit();
             match store.delete_record(&id) {
                 Ok(record) => {
-                    run_hooks_or_exit(&mut store, "rm", &record);
+                    run_hooks_or_exit(&mut store, "rm", &record, None);
                     if cli.json_output {
                         print_json(mutation_json("removed", &record));
                     } else {
@@ -459,8 +469,15 @@ fn open_store_or_exit() -> Store {
     }
 }
 
-fn run_hooks_or_exit(store: &mut Store, event_type: &str, record: &Record) {
-    if let Err(error) = run_matching_hooks_after_commit(store, event_type, record, None, None) {
+fn run_hooks_or_exit(
+    store: &mut Store,
+    event_type: &str,
+    record: &Record,
+    link_context: Option<&[LinkEdge]>,
+) {
+    if let Err(error) =
+        run_matching_hooks_after_commit(store, event_type, record, None, link_context)
+    {
         eprintln!(
             "error: failed to run hooks after Store mutation already committed for {event_type} {}: {error}",
             record.id

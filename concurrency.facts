@@ -6,3 +6,7 @@
   id: lrm
   command: bash tests/facts/store_schema_migrations.sh concurrent_link_record_disappearance_races
   tags: [implemented]
+- label: simultaneous or post-commit deletion of a linked source Record after committed set and unset mutations does not make link-predicate Hooks fail or skip; committed set and unset mutations evaluate Hook Queries against the mutation-time Record and Link snapshot and persist matching Hook Runs
+  id: sls
+  command: bash tests/facts/store_schema_migrations.sh concurrent_set_unset_link_snapshot_races
+  tags: [implemented]

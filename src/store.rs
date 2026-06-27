@@ -122,6 +122,12 @@ pub struct LinkMutation {
     pub source_links: Vec<LinkEdge>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecordMutation {
+    pub record: Record,
+    pub record_links: Vec<LinkEdge>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LinkDirection {
     Out,
@@ -623,6 +629,14 @@ impl Store {
         id_prefix: &str,
         fields: BTreeMap<String, String>,
     ) -> StoreResult<Record> {
+        Ok(self.set_record_with_snapshot(id_prefix, fields)?.record)
+    }
+
+    pub fn set_record_with_snapshot(
+        &mut self,
+        id_prefix: &str,
+        fields: BTreeMap<String, String>,
+    ) -> StoreResult<RecordMutation> {
         validate_id_prefix(id_prefix)?;
         let tx = self
             .conn
@@ -637,13 +651,25 @@ impl Store {
             params![&id],
         )?;
         let record = get_record_by_id(&tx, &id)?;
+        let record_links = links_for_record_id(&tx, &id)?;
         insert_store_event(&tx, "set", &record)?;
         tx.commit()?;
 
-        Ok(record)
+        Ok(RecordMutation {
+            record,
+            record_links,
+        })
     }
 
     pub fn unset_record(&mut self, id_prefix: &str, keys: Vec<String>) -> StoreResult<Record> {
+        Ok(self.unset_record_with_snapshot(id_prefix, keys)?.record)
+    }
+
+    pub fn unset_record_with_snapshot(
+        &mut self,
+        id_prefix: &str,
+        keys: Vec<String>,
+    ) -> StoreResult<RecordMutation> {
         validate_id_prefix(id_prefix)?;
         let tx = self
             .conn
@@ -661,10 +687,14 @@ impl Store {
             params![&id],
         )?;
         let record = get_record_by_id(&tx, &id)?;
+        let record_links = links_for_record_id(&tx, &id)?;
         insert_store_event(&tx, "unset", &record)?;
         tx.commit()?;
 
-        Ok(record)
+        Ok(RecordMutation {
+            record,
+            record_links,
+        })
     }
 
     pub fn delete_record(&mut self, id_prefix: &str) -> StoreResult<Record> {
