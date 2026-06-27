@@ -821,6 +821,352 @@ EOF
     fi
     ;;
 
+  json_multiple_matching_hooks_stop_after_failure_or_timeout)
+    cd "$tmp"
+    run_agent_store init >/tmp/agent-store-json-multi-hook-9ev-init.out
+    agent_store_bin="$target_dir/debug/agent-store"
+
+    evidence_root="${AGENT_STORE_E2E_DIR:-}"
+    if [ -n "$evidence_root" ]; then
+      mkdir -p "$evidence_root/logs" "$evidence_root/reports"
+    fi
+
+    cat > multi-hook.sh <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+
+scenario="$1"
+mode="$2"
+state_dir="multi-state"
+mkdir -p "$state_dir"
+count_file="$state_dir/$scenario.count"
+count=0
+if [ -f "$count_file" ]; then
+  count="$(cat "$count_file")"
+fi
+count=$((count + 1))
+printf "%s" "$count" >"$count_file"
+
+printf "%s count=%s event=%s id=%s rel=%s target=%s\n" \
+  "$scenario" \
+  "$count" \
+  "${AGENT_STORE_EVENT:-}" \
+  "${AGENT_STORE_ID:-}" \
+  "${AGENT_STORE_REL:-}" \
+  "${AGENT_STORE_TARGET_ID:-}" >>"$state_dir/invocations.log"
+
+if [ "$count" -le 2 ]; then
+  printf "%s-success-%s-stdout" "$scenario" "$count"
+  printf "%s-success-%s-stderr" "$scenario" "$count" >&2
+  exit 0
+fi
+
+if [ "$count" -eq 3 ]; then
+  if [ "$mode" = "timeout" ]; then
+    printf "%s-timeout-stderr" "$scenario" >&2
+    while :; do
+      sleep 1
+    done
+  fi
+
+  printf "%s-failure-stdout" "$scenario"
+  printf "%s-failure-stderr" "$scenario" >&2
+  exit 41
+fi
+
+printf "%s-after-failure-ran" "$scenario" >"$state_dir/$scenario.after-failure-ran"
+printf "%s-late-stdout" "$scenario"
+SH
+    chmod +x multi-hook.sh
+
+    add_multi_hooks() {
+      local event="$1"
+      local query="$2"
+      local scenario="$3"
+      local mode="$4"
+      local ids=""
+      local hook_id
+
+      for _ in 1 2 3 4; do
+        hook_id="$("$agent_store_bin" hook add "$event" "$query" -- "./multi-hook.sh $scenario $mode")"
+        ids="${ids}${ids:+,}$hook_id"
+      done
+
+      printf "%s" "$ids"
+    }
+
+    set_record="$("$agent_store_bin" create task op=json-multi-set status=pending)"
+    link_source="$("$agent_store_bin" create task op=json-multi-link-timeout status=open)"
+    link_target="$("$agent_store_bin" create note op=json-multi-link-target status=open)"
+
+    create_hook_ids="$(add_multi_hooks create 'kind=task and op=json-multi-create-fail' create-fail fail)"
+    set_hook_ids="$(add_multi_hooks set 'kind=task and op=json-multi-set and status=done' set-fail fail)"
+    link_hook_ids="$(add_multi_hooks link 'kind=task and op=json-multi-link-timeout' link-timeout timeout)"
+
+    event_marker="$(python3 - .agent-store/store.sqlite <<'PY'
+import sqlite3
+import sys
+
+con = sqlite3.connect(sys.argv[1])
+print(con.execute("select coalesce(max(id), 0) from store_events").fetchone()[0])
+PY
+)"
+    hook_marker="$(python3 - .agent-store/store.sqlite <<'PY'
+import sqlite3
+import sys
+
+con = sqlite3.connect(sys.argv[1])
+print(con.execute("select coalesce(max(id), 0) from hook_runs").fetchone()[0])
+PY
+)"
+
+    run_json_multi_failure() {
+      local name="$1"
+      local expected_stderr="$2"
+      shift 2
+      set +e
+      "$agent_store_bin" --json "$@" >"$tmp/json-multi-$name.out" 2>"$tmp/json-multi-$name.err"
+      local status="$?"
+      set -e
+      printf "%s" "$status" >"$tmp/json-multi-$name.status"
+      test "$status" -ne 0
+      test ! -s "$tmp/json-multi-$name.out"
+      grep -Fq "Store mutation already committed" "$tmp/json-multi-$name.err"
+      grep -Fq "exit status 41" "$tmp/json-multi-$name.err"
+      grep -Fq "$expected_stderr" "$tmp/json-multi-$name.err"
+    }
+
+    run_json_multi_failure create create-fail-failure-stderr create task op=json-multi-create-fail status=committed
+    run_json_multi_failure set set-fail-failure-stderr set "$set_record" status=done
+
+    set +e
+    timeout 40s "$agent_store_bin" --json link "$link_source" blocks "$link_target" >"$tmp/json-multi-link-timeout.out" 2>"$tmp/json-multi-link-timeout.err"
+    link_timeout_status="$?"
+    set -e
+    printf "%s" "$link_timeout_status" >"$tmp/json-multi-link-timeout.status"
+    test "$link_timeout_status" -ne 0
+    test "$link_timeout_status" -ne 124
+    test ! -s "$tmp/json-multi-link-timeout.out"
+    grep -Fq "Store mutation already committed" "$tmp/json-multi-link-timeout.err"
+    grep -Fq "timed out after 30 seconds" "$tmp/json-multi-link-timeout.err"
+    grep -Fq "link-timeout-timeout-stderr" "$tmp/json-multi-link-timeout.err"
+
+    summary="$(python3 - \
+      "$tmp" \
+      .agent-store/store.sqlite \
+      "$event_marker" \
+      "$hook_marker" \
+      "$set_record" \
+      "$link_source" \
+      "$link_target" \
+      "$create_hook_ids" \
+      "$set_hook_ids" \
+      "$link_hook_ids" <<'PY'
+from collections import Counter
+import pathlib
+import sqlite3
+import sys
+
+(
+    tmp_s,
+    db,
+    event_marker_s,
+    hook_marker_s,
+    set_record,
+    link_source,
+    link_target,
+    create_hook_ids_s,
+    set_hook_ids_s,
+    link_hook_ids_s,
+) = sys.argv[1:]
+tmp = pathlib.Path(tmp_s)
+event_marker = int(event_marker_s)
+hook_marker = int(hook_marker_s)
+
+for name, expected in [
+    ("create", "create-fail-failure-stderr"),
+    ("set", "set-fail-failure-stderr"),
+    ("link-timeout", "link-timeout-timeout-stderr"),
+]:
+    stdout = (tmp / f"json-multi-{name}.out").read_text(encoding="utf-8")
+    stderr = (tmp / f"json-multi-{name}.err").read_text(encoding="utf-8")
+    status = int((tmp / f"json-multi-{name}.status").read_text(encoding="utf-8"))
+    assert stdout == "", (name, stdout)
+    assert status != 0, (name, status)
+    assert "Store mutation already committed" in stderr, (name, stderr)
+    assert expected in stderr, (name, stderr)
+    if name == "link-timeout":
+        assert status != 124, status
+        assert "timed out after 30 seconds" in stderr, stderr
+    else:
+        assert "exit status 41" in stderr, (name, stderr)
+
+con = sqlite3.connect(db)
+
+def fields(record_id):
+    return dict(
+        con.execute(
+            "select key, raw_value from record_fields where record_id = ?",
+            (record_id,),
+        ).fetchall()
+    )
+
+def record_by_op(op):
+    rows = con.execute(
+        """
+        select records.id
+        from records
+        join record_fields on record_fields.record_id = records.id
+        where record_fields.key = 'op' and record_fields.raw_value = ?
+        order by records.id
+        """,
+        (op,),
+    ).fetchall()
+    assert len(rows) == 1, (op, rows)
+    return rows[0][0]
+
+create_record = record_by_op("json-multi-create-fail")
+assert fields(create_record)["status"] == "committed", fields(create_record)
+assert fields(set_record)["status"] == "done", fields(set_record)
+assert con.execute(
+    """
+    select count(*) from record_links
+    where from_record_id = ? and rel = 'blocks' and to_record_id = ?
+    """,
+    (link_source, link_target),
+).fetchone()[0] == 1
+
+event_rows = con.execute(
+    """
+    select event_type, record_id
+    from store_events
+    where id > ?
+    order by id
+    """,
+    (event_marker,),
+).fetchall()
+assert Counter(row[0] for row in event_rows) == {"create": 1, "set": 1, "link": 1}, event_rows
+assert ("create", create_record) in event_rows, event_rows
+assert ("set", set_record) in event_rows, event_rows
+assert ("link", link_source) in event_rows, event_rows
+
+def split_ids(ids):
+    values = [value for value in ids.split(",") if value]
+    assert len(values) == 4, values
+    return sorted(values)
+
+scenarios = [
+    {
+        "name": "create-fail",
+        "ids": split_ids(create_hook_ids_s),
+        "event": "create",
+        "record": create_record,
+        "mode": "fail",
+    },
+    {
+        "name": "set-fail",
+        "ids": split_ids(set_hook_ids_s),
+        "event": "set",
+        "record": set_record,
+        "mode": "fail",
+    },
+    {
+        "name": "link-timeout",
+        "ids": split_ids(link_hook_ids_s),
+        "event": "link",
+        "record": link_source,
+        "mode": "timeout",
+    },
+]
+
+all_hook_ids = [hook_id for scenario in scenarios for hook_id in scenario["ids"]]
+placeholders = ",".join("?" for _ in all_hook_ids)
+rows = con.execute(
+    f"""
+    select hook_id, event_type, record_id, exit_status, stdout_summary, stderr_summary
+    from hook_runs
+    where id > ? and hook_id in ({placeholders})
+    order by id
+    """,
+    [hook_marker, *all_hook_ids],
+).fetchall()
+by_hook = {row[0]: row[1:] for row in rows}
+assert len(rows) == 9, rows
+
+for scenario in scenarios:
+    name = scenario["name"]
+    ids = scenario["ids"]
+    expected_run_ids = ids[:3]
+    actual_run_ids = [hook_id for hook_id in ids if hook_id in by_hook]
+    assert actual_run_ids == expected_run_ids, (name, ids, actual_run_ids)
+    assert ids[3] not in by_hook, (name, ids[3], by_hook.get(ids[3]))
+
+    for index, hook_id in enumerate(ids[:2], start=1):
+        assert by_hook[hook_id] == (
+            scenario["event"],
+            scenario["record"],
+            0,
+            f"{name}-success-{index}-stdout",
+            f"{name}-success-{index}-stderr",
+        ), (name, hook_id, by_hook[hook_id])
+
+    failing_row = by_hook[ids[2]]
+    if scenario["mode"] == "timeout":
+        assert failing_row[:4] == (scenario["event"], scenario["record"], -1, ""), failing_row
+        assert f"{name}-timeout-stderr" in failing_row[4], failing_row
+        assert "timed out after 30 seconds" in failing_row[4], failing_row
+    else:
+        assert failing_row == (
+            scenario["event"],
+            scenario["record"],
+            41,
+            f"{name}-failure-stdout",
+            f"{name}-failure-stderr",
+        ), (name, failing_row)
+
+    count_text = (tmp / "multi-state" / f"{name}.count").read_text(encoding="utf-8")
+    assert count_text == "3", (name, count_text)
+    assert not (tmp / "multi-state" / f"{name}.after-failure-ran").exists(), name
+
+log_lines = (tmp / "multi-state" / "invocations.log").read_text(encoding="utf-8").splitlines()
+for scenario in scenarios:
+    scenario_lines = [line for line in log_lines if line.startswith(f"{scenario['name']} ")]
+    assert len(scenario_lines) == 3, (scenario["name"], scenario_lines)
+
+print(
+    "multi_hook_json_cases=3 hook_runs={} skipped_later_hooks=3 events={} create_record={} set_record={} link_source={}".format(
+        len(rows),
+        len(event_rows),
+        create_record,
+        set_record,
+        link_source,
+    )
+)
+PY
+)"
+
+    if [ -n "$evidence_root" ]; then
+      find "$tmp" -maxdepth 1 -type f \
+        \( -name 'json-multi-*' -o -name 'multi-hook.sh' \) \
+        -exec cp {} "$evidence_root/logs/" \;
+      cp -R "$tmp/multi-state" "$evidence_root/logs/"
+      cp .agent-store/store.sqlite "$evidence_root/store.sqlite"
+      cat > "$evidence_root/reports/json-multiple-matching-hooks.md" <<EOF
+# JSON Multiple Matching Hook Failure/Timeout Evidence
+
+- set_record: $set_record
+- link_source: $link_source
+- link_target: $link_target
+- create_hook_ids: $create_hook_ids
+- set_hook_ids: $set_hook_ids
+- link_hook_ids: $link_hook_ids
+- $summary
+- database: $evidence_root/store.sqlite
+- logs: $evidence_root/logs
+EOF
+    fi
+    ;;
+
   hooks_run_sequentially_from_project_root_with_timeout)
     cd "$tmp"
     run_agent_store init >/tmp/agent-store-hook-runtime-4as-init.out
@@ -1132,7 +1478,7 @@ PY
     ;;
 
   *)
-    echo "usage: $0 {hook_add_stores_metadata|hook_ls_deterministic|hook_rm_deletes_metadata|hooks_run_after_commit|hook_query_filters_records|hook_query_uses_mutation_snapshot|hook_stdin_receives_record_snapshot|hook_failure_reports_details|hook_failure_or_timeout_reports_committed_mutation|json_mutation_hook_failure_or_timeout_reports_committed_without_success_json|hooks_run_sequentially_from_project_root_with_timeout|hook_env_vars_for_record_events|link_hook_query_source_and_relation_env|hook_output_capture_caps_and_help}" >&2
+    echo "usage: $0 {hook_add_stores_metadata|hook_ls_deterministic|hook_rm_deletes_metadata|hooks_run_after_commit|hook_query_filters_records|hook_query_uses_mutation_snapshot|hook_stdin_receives_record_snapshot|hook_failure_reports_details|hook_failure_or_timeout_reports_committed_mutation|json_mutation_hook_failure_or_timeout_reports_committed_without_success_json|json_multiple_matching_hooks_stop_after_failure_or_timeout|hooks_run_sequentially_from_project_root_with_timeout|hook_env_vars_for_record_events|link_hook_query_source_and_relation_env|hook_output_capture_caps_and_help}" >&2
     exit 2
     ;;
 esac
