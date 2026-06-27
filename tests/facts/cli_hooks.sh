@@ -1404,12 +1404,20 @@ SH
     }
 
     plain_set_record="$("$agent_store_bin" create task op=plain-multi-set status=pending)"
+    plain_unset_record="$("$agent_store_bin" create task op=plain-multi-unset flag=present status=pending)"
+    plain_rm_record="$("$agent_store_bin" create task op=plain-multi-rm action=remove status=open)"
     plain_link_source="$("$agent_store_bin" create task op=plain-multi-link status=open)"
     plain_link_target="$("$agent_store_bin" create note op=plain-multi-link-target status=open)"
+    plain_unlink_source="$("$agent_store_bin" create task op=plain-multi-unlink status=open)"
+    plain_unlink_target="$("$agent_store_bin" create note op=plain-multi-unlink-target status=open)"
+    "$agent_store_bin" link "$plain_unlink_source" blocks "$plain_unlink_target" >/tmp/agent-store-plain-multi-hook-4as-seed-unlink.out
 
     plain_create_hook_ids="$(add_plain_multi_hooks create 'kind=task and op=plain-multi-create-fail' create-fail fail)"
     plain_set_hook_ids="$(add_plain_multi_hooks set 'kind=task and op=plain-multi-set and status=done' set-fail fail)"
+    plain_unset_hook_ids="$(add_plain_multi_hooks unset 'kind=task and op=plain-multi-unset and not flag=present' unset-fail fail)"
+    plain_rm_hook_ids="$(add_plain_multi_hooks rm 'kind=task and op=plain-multi-rm and action=remove' rm-timeout timeout)"
     plain_link_hook_ids="$(add_plain_multi_hooks link 'kind=task and op=plain-multi-link' link-timeout timeout)"
+    plain_unlink_hook_ids="$(add_plain_multi_hooks unlink 'kind=task and op=plain-multi-unlink' unlink-fail fail)"
 
     event_marker="$(python3 - .agent-store/store.sqlite <<'PY'
 import sqlite3
@@ -1463,7 +1471,10 @@ PY
 
     run_plain_multi_failure create create-fail-failure-stderr create task op=plain-multi-create-fail status=committed
     run_plain_multi_failure set set-fail-failure-stderr set "$plain_set_record" status=done
+    run_plain_multi_failure unset unset-fail-failure-stderr unset "$plain_unset_record" flag
+    run_plain_multi_timeout rm-timeout rm-timeout-timeout-stderr rm "$plain_rm_record"
     run_plain_multi_timeout link-timeout link-timeout-timeout-stderr link "$plain_link_source" blocks "$plain_link_target"
+    run_plain_multi_failure unlink unlink-fail-failure-stderr unlink "$plain_unlink_source" blocks "$plain_unlink_target"
 
     plain_multi_summary="$(python3 - \
       "$tmp" \
@@ -1471,11 +1482,18 @@ PY
       "$event_marker" \
       "$hook_marker" \
       "$plain_set_record" \
+      "$plain_unset_record" \
+      "$plain_rm_record" \
       "$plain_link_source" \
       "$plain_link_target" \
+      "$plain_unlink_source" \
+      "$plain_unlink_target" \
       "$plain_create_hook_ids" \
       "$plain_set_hook_ids" \
-      "$plain_link_hook_ids" <<'PY'
+      "$plain_unset_hook_ids" \
+      "$plain_rm_hook_ids" \
+      "$plain_link_hook_ids" \
+      "$plain_unlink_hook_ids" <<'PY'
 from collections import Counter
 import pathlib
 import sqlite3
@@ -1487,11 +1505,18 @@ import sys
     event_marker_s,
     hook_marker_s,
     set_record,
+    unset_record,
+    rm_record,
     link_source,
     link_target,
+    unlink_source,
+    unlink_target,
     create_hook_ids_s,
     set_hook_ids_s,
+    unset_hook_ids_s,
+    rm_hook_ids_s,
     link_hook_ids_s,
+    unlink_hook_ids_s,
 ) = sys.argv[1:]
 tmp = pathlib.Path(tmp_s)
 event_marker = int(event_marker_s)
@@ -1500,7 +1525,10 @@ hook_marker = int(hook_marker_s)
 for name, expected in [
     ("create", "create-fail-failure-stderr"),
     ("set", "set-fail-failure-stderr"),
+    ("unset", "unset-fail-failure-stderr"),
+    ("rm-timeout", "rm-timeout-timeout-stderr"),
     ("link-timeout", "link-timeout-timeout-stderr"),
+    ("unlink", "unlink-fail-failure-stderr"),
 ]:
     stdout = (tmp / f"plain-multi-{name}.out").read_text(encoding="utf-8")
     stderr = (tmp / f"plain-multi-{name}.err").read_text(encoding="utf-8")
@@ -1542,6 +1570,8 @@ def record_by_op(op):
 create_record = record_by_op("plain-multi-create-fail")
 assert fields(create_record)["status"] == "committed", fields(create_record)
 assert fields(set_record)["status"] == "done", fields(set_record)
+assert "flag" not in fields(unset_record), fields(unset_record)
+assert con.execute("select count(*) from records where id = ?", (rm_record,)).fetchone()[0] == 0
 assert con.execute(
     """
     select count(*) from record_links
@@ -1549,6 +1579,13 @@ assert con.execute(
     """,
     (link_source, link_target),
 ).fetchone()[0] == 1
+assert con.execute(
+    """
+    select count(*) from record_links
+    where from_record_id = ? and rel = 'blocks' and to_record_id = ?
+    """,
+    (unlink_source, unlink_target),
+).fetchone()[0] == 0
 
 event_rows = con.execute(
     """
@@ -1562,11 +1599,17 @@ event_rows = con.execute(
 assert Counter(row[0] for row in event_rows) == {
     "create": 1,
     "set": 1,
+    "unset": 1,
+    "rm": 1,
     "link": 1,
+    "unlink": 1,
 }, event_rows
 assert ("create", create_record) in event_rows, event_rows
 assert ("set", set_record) in event_rows, event_rows
+assert ("unset", unset_record) in event_rows, event_rows
+assert ("rm", rm_record) in event_rows, event_rows
 assert ("link", link_source) in event_rows, event_rows
+assert ("unlink", unlink_source) in event_rows, event_rows
 
 def split_ids(ids):
     values = [value for value in ids.split(",") if value]
@@ -1589,11 +1632,32 @@ scenarios = [
         "mode": "fail",
     },
     {
+        "name": "unset-fail",
+        "ids": split_ids(unset_hook_ids_s),
+        "event": "unset",
+        "record": unset_record,
+        "mode": "fail",
+    },
+    {
+        "name": "rm-timeout",
+        "ids": split_ids(rm_hook_ids_s),
+        "event": "rm",
+        "record": rm_record,
+        "mode": "timeout",
+    },
+    {
         "name": "link-timeout",
         "ids": split_ids(link_hook_ids_s),
         "event": "link",
         "record": link_source,
         "mode": "timeout",
+    },
+    {
+        "name": "unlink-fail",
+        "ids": split_ids(unlink_hook_ids_s),
+        "event": "unlink",
+        "record": unlink_source,
+        "mode": "fail",
     },
 ]
 
@@ -1609,7 +1673,7 @@ rows = con.execute(
     [hook_marker, *all_hook_ids],
 ).fetchall()
 by_hook = {row[0]: row[1:] for row in rows}
-assert len(rows) == 9, rows
+assert len(rows) == 18, rows
 
 for scenario in scenarios:
     name = scenario["name"]
@@ -1652,12 +1716,15 @@ for scenario in scenarios:
     assert len(scenario_lines) == 3, (scenario["name"], scenario_lines)
 
 print(
-    "plain_multi_hook_cases=3 hook_runs={} skipped_later_hooks=3 events={} create_record={} set_record={} link_source={}".format(
+    "plain_multi_hook_cases=6 hook_runs={} skipped_later_hooks=6 events={} create_record={} set_record={} unset_record={} rm_record={} link_source={} unlink_source={}".format(
         len(rows),
         len(event_rows),
         create_record,
         set_record,
+        unset_record,
+        rm_record,
         link_source,
+        unlink_source,
     )
 )
 PY
@@ -1673,11 +1740,18 @@ PY
 # Plain CLI Multiple Matching Hook Failure/Timeout Evidence
 
 - set_record: $plain_set_record
+- unset_record: $plain_unset_record
+- rm_record: $plain_rm_record
 - link_source: $plain_link_source
 - link_target: $plain_link_target
+- unlink_source: $plain_unlink_source
+- unlink_target: $plain_unlink_target
 - create_hook_ids: $plain_create_hook_ids
 - set_hook_ids: $plain_set_hook_ids
+- unset_hook_ids: $plain_unset_hook_ids
+- rm_hook_ids: $plain_rm_hook_ids
 - link_hook_ids: $plain_link_hook_ids
+- unlink_hook_ids: $plain_unlink_hook_ids
 - $plain_multi_summary
 - database: $evidence_root/store.sqlite
 - logs: $evidence_root/logs

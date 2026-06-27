@@ -249,7 +249,7 @@
   id: hxt
   command: bash tests/facts/cli_hooks.sh hook_failure_reports_details
   tags: [implemented]
-- label: Matching Hooks for plain create, set, and link mutations run sequentially after the triggering mutation commits; earlier successful Hook Runs persist, the first failing or timed-out Hook Run persists and makes the CLI exit non-zero with empty stdout and useful stderr, later matching Hooks do not run, the Store mutation remains committed, and each Bash command starts in the project root with the default 30-second timeout
+- label: Matching Hooks for plain create, set, unset, rm, link, and unlink mutations run sequentially after the triggering mutation commits; earlier successful Hook Runs persist, the first failing or timed-out Hook Run persists and makes the CLI exit non-zero with empty stdout and useful stderr, later matching Hooks do not run, the Store mutation remains committed, and each Bash command starts in the project root with the default 30-second timeout
   id: 4as
   command: bash tests/facts/cli_hooks.sh hooks_run_sequentially_from_project_root_with_timeout
   tags: [implemented]
