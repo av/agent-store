@@ -1642,6 +1642,289 @@ EOF
     fi
     ;;
 
+  concurrent_record_readers_with_hooked_mutations)
+    CARGO_TARGET_DIR="$target_dir" cargo build --quiet --manifest-path "$repo/Cargo.toml"
+    agent_store_bin="$target_dir/debug/agent-store"
+    cd "$tmp"
+    "$agent_store_bin" init >/tmp/agent-store-record-readers-init.out
+
+    evidence_root="${AGENT_STORE_E2E_DIR:-}"
+    if [ -n "$evidence_root" ]; then
+      mkdir -p "$evidence_root/logs" "$evidence_root/reports"
+    fi
+
+    side_effects="$tmp/hook-side-effects"
+    mkdir "$side_effects"
+
+    cat > slow-hook.sh <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+side_effects="$1"
+sleep 0.02
+rel="${AGENT_STORE_REL:-none}"
+target="${AGENT_STORE_TARGET_ID:-none}"
+touch "$side_effects/${AGENT_STORE_EVENT}-${AGENT_STORE_ID}-${rel}-${target}"
+printf "%s" "$AGENT_STORE_EVENT"
+SH
+    chmod +x slow-hook.sh
+
+    stable_source="$("$agent_store_bin" create task title=StableSource status=open phase=stable)"
+    stable_target="$("$agent_store_bin" create task title=StableTarget status=open phase=stable)"
+    "$agent_store_bin" link "$stable_source" blocks "$stable_target" >"$tmp/stable-link.out" 2>"$tmp/stable-link.err"
+
+    "$agent_store_bin" hook add create 'kind=task and phase=volatile' -- './slow-hook.sh hook-side-effects' >"$tmp/hook-create.out"
+    "$agent_store_bin" hook add link 'kind=task and phase=volatile' -- './slow-hook.sh hook-side-effects' >"$tmp/hook-link.out"
+    "$agent_store_bin" hook add unlink 'kind=task and phase=volatile' -- './slow-hook.sh hook-side-effects' >"$tmp/hook-unlink.out"
+    "$agent_store_bin" hook add rm 'kind=task and phase=volatile' -- './slow-hook.sh hook-side-effects' >"$tmp/hook-rm.out"
+
+    start_file="$tmp/readers-start"
+    wait_for_start() {
+      while [ ! -f "$start_file" ]; do
+        sleep 0.005
+      done
+    }
+
+    run_mutator() {
+      local worker="$1"
+      local iterations="$2"
+      wait_for_start
+      for index in $(seq 1 "$iterations"); do
+        set +e
+        "$agent_store_bin" create task title="Volatile-$worker-$index" status=open phase=volatile >"$tmp/create-$worker-$index.out" 2>"$tmp/create-$worker-$index.err"
+        local create_code="$?"
+        set -e
+        printf "%s" "$create_code" >"$tmp/create-$worker-$index.status"
+        if [ "$create_code" != "0" ]; then
+          continue
+        fi
+
+        local record_id
+        record_id="$(cat "$tmp/create-$worker-$index.out")"
+
+        set +e
+        "$agent_store_bin" link "$record_id" observes "$stable_target" >"$tmp/link-$worker-$index.out" 2>"$tmp/link-$worker-$index.err"
+        local link_code="$?"
+        "$agent_store_bin" unlink "$record_id" observes "$stable_target" >"$tmp/unlink-$worker-$index.out" 2>"$tmp/unlink-$worker-$index.err"
+        local unlink_code="$?"
+        "$agent_store_bin" rm "$record_id" >"$tmp/rm-$worker-$index.out" 2>"$tmp/rm-$worker-$index.err"
+        local rm_code="$?"
+        set -e
+        printf "%s" "$link_code" >"$tmp/link-$worker-$index.status"
+        printf "%s" "$unlink_code" >"$tmp/unlink-$worker-$index.status"
+        printf "%s" "$rm_code" >"$tmp/rm-$worker-$index.status"
+      done
+    }
+
+    run_reader() {
+      local worker="$1"
+      local iterations="$2"
+      wait_for_start
+      for index in $(seq 1 "$iterations"); do
+        set +e
+        "$agent_store_bin" find 'kind=task and phase=stable' >"$tmp/find-$worker-$index.out" 2>"$tmp/find-$worker-$index.err"
+        local find_code="$?"
+        "$agent_store_bin" get "$stable_source" >"$tmp/get-$worker-$index.out" 2>"$tmp/get-$worker-$index.err"
+        local get_code="$?"
+        "$agent_store_bin" links "$stable_source" >"$tmp/links-$worker-$index.out" 2>"$tmp/links-$worker-$index.err"
+        local links_code="$?"
+        set -e
+        printf "%s" "$find_code" >"$tmp/find-$worker-$index.status"
+        printf "%s" "$get_code" >"$tmp/get-$worker-$index.status"
+        printf "%s" "$links_code" >"$tmp/links-$worker-$index.status"
+      done
+    }
+
+    mutator_workers=4
+    mutator_iterations=8
+    reader_workers=3
+    reader_iterations=25
+    pids=()
+    for worker in $(seq 1 "$mutator_workers"); do
+      run_mutator "$worker" "$mutator_iterations" &
+      pids+=("$!")
+    done
+    for worker in $(seq 1 "$reader_workers"); do
+      run_reader "$worker" "$reader_iterations" &
+      pids+=("$!")
+    done
+
+    touch "$start_file"
+    wait_status=0
+    for pid in "${pids[@]}"; do
+      if ! wait "$pid"; then
+        wait_status=1
+      fi
+    done
+    if [ "$wait_status" -ne 0 ]; then
+      find "$tmp" -maxdepth 1 -type f -name '*.err' -print -exec cat {} \; >&2
+      exit 1
+    fi
+
+    "$agent_store_bin" find 'kind=task and phase=stable' >"$tmp/final-find.out" 2>"$tmp/final-find.err"
+    printf "%s" "$?" >"$tmp/final-find.status"
+    "$agent_store_bin" get "$stable_source" >"$tmp/final-get.out" 2>"$tmp/final-get.err"
+    printf "%s" "$?" >"$tmp/final-get.status"
+    "$agent_store_bin" links "$stable_source" >"$tmp/final-links.out" 2>"$tmp/final-links.err"
+    printf "%s" "$?" >"$tmp/final-links.status"
+
+    for status_file in "$tmp"/*.status; do
+      if [ "$(cat "$status_file")" != "0" ]; then
+        echo "non-zero status in $status_file: $(cat "$status_file")" >&2
+        find "$tmp" -maxdepth 1 -type f -name '*.err' -print -exec cat {} \; >&2
+        exit 1
+      fi
+    done
+
+    if grep -R -E "database is locked|panicked at|thread '.*' panicked|Query returned no rows|failed to (create record|link records|unlink records|remove record|find records|get record|list links)|failed to run hooks after Store mutation already committed|failed to record hook" "$tmp"/*.err; then
+      exit 1
+    fi
+
+    expected_mutations=$((mutator_workers * mutator_iterations))
+    expected_hook_runs=$((expected_mutations * 4))
+    side_effect_count="$(find "$side_effects" -type f | wc -l | tr -d ' ')"
+    test "$side_effect_count" = "$expected_hook_runs"
+
+    summary="$(python3 - \
+      "$tmp" \
+      .agent-store/store.sqlite \
+      "$stable_source" \
+      "$stable_target" \
+      "$reader_workers" \
+      "$reader_iterations" \
+      "$expected_mutations" \
+      "$expected_hook_runs" <<'PY'
+import glob
+import re
+import sqlite3
+import sys
+from pathlib import Path
+
+(
+    tmp_dir,
+    db,
+    stable_source,
+    stable_target,
+    reader_workers_s,
+    reader_iterations_s,
+    expected_mutations_s,
+    expected_hook_runs_s,
+) = sys.argv[1:]
+tmp = Path(tmp_dir)
+reader_workers = int(reader_workers_s)
+reader_iterations = int(reader_iterations_s)
+expected_mutations = int(expected_mutations_s)
+expected_hook_runs = int(expected_hook_runs_s)
+
+record_line = re.compile(r"^[a-z0-9]{6,8} [a-z][a-z0-9_-]*( [a-zA-Z0-9_.:-]+=([^ ']+|'[^']*'))*$")
+stable_source_line = f"{stable_source} task phase=stable status=open title=StableSource"
+stable_target_line = f"{stable_target} task phase=stable status=open title=StableTarget"
+expected_find = sorted([stable_source_line, stable_target_line])
+expected_get = stable_source_line
+expected_links = f"out blocks {stable_target}"
+
+find_samples = sorted(glob.glob(str(tmp / "find-*.out"))) + [str(tmp / "final-find.out")]
+get_samples = sorted(glob.glob(str(tmp / "get-*.out"))) + [str(tmp / "final-get.out")]
+links_samples = sorted(glob.glob(str(tmp / "links-*.out"))) + [str(tmp / "final-links.out")]
+assert len(find_samples) == reader_workers * reader_iterations + 1, len(find_samples)
+assert len(get_samples) == reader_workers * reader_iterations + 1, len(get_samples)
+assert len(links_samples) == reader_workers * reader_iterations + 1, len(links_samples)
+
+for path in find_samples:
+    lines = Path(path).read_text().splitlines()
+    assert lines == expected_find, (path, lines, expected_find)
+    assert all(record_line.match(line) for line in lines), (path, lines)
+
+for path in get_samples:
+    lines = Path(path).read_text().splitlines()
+    assert lines == [expected_get], (path, lines, expected_get)
+    assert record_line.match(lines[0]), (path, lines[0])
+
+for path in links_samples:
+    lines = Path(path).read_text().splitlines()
+    assert lines == [expected_links], (path, lines, expected_links)
+
+con = sqlite3.connect(db)
+hook_counts = dict(
+    con.execute(
+        """
+        select event_type, count(*)
+        from hook_runs
+        where event_type in ('create', 'link', 'unlink', 'rm')
+        group by event_type
+        """
+    ).fetchall()
+)
+expected_counts = {
+    "create": expected_mutations,
+    "link": expected_mutations,
+    "unlink": expected_mutations,
+    "rm": expected_mutations,
+}
+assert hook_counts == expected_counts, (hook_counts, expected_counts)
+total_hook_runs = con.execute(
+    "select count(*) from hook_runs where event_type in ('create', 'link', 'unlink', 'rm')"
+).fetchone()[0]
+assert total_hook_runs == expected_hook_runs, (total_hook_runs, expected_hook_runs)
+
+volatile_records = con.execute(
+    """
+    select count(*)
+    from records
+    join record_fields on record_fields.record_id = records.id
+    where record_fields.key = 'phase'
+      and record_fields.raw_value = 'volatile'
+    """
+).fetchone()[0]
+assert volatile_records == 0, volatile_records
+volatile_links = con.execute(
+    "select count(*) from record_links where rel = 'observes'"
+).fetchone()[0]
+assert volatile_links == 0, volatile_links
+stable_link = con.execute(
+    """
+    select count(*)
+    from record_links
+    where from_record_id = ? and rel = 'blocks' and to_record_id = ?
+    """,
+    (stable_source, stable_target),
+).fetchone()[0]
+assert stable_link == 1, stable_link
+
+print(
+    "find_samples={find_samples} get_samples={get_samples} links_samples={links_samples} hooked_mutations={mutations} hook_runs={hook_runs}".format(
+        find_samples=len(find_samples),
+        get_samples=len(get_samples),
+        links_samples=len(links_samples),
+        mutations=expected_mutations,
+        hook_runs=total_hook_runs,
+    )
+)
+PY
+)"
+
+    if [ -n "$evidence_root" ]; then
+      find "$tmp" -maxdepth 1 -type f \
+        \( -name 'create-*' -o -name 'link-*' -o -name 'unlink-*' -o -name 'rm-*' -o -name 'find-*' -o -name 'get-*' -o -name 'links-*' -o -name 'final-*' -o -name 'stable-*' -o -name 'hook-*' \) \
+        -exec cp {} "$evidence_root/logs/" \;
+      find "$side_effects" -maxdepth 1 -type f -exec cp {} "$evidence_root/logs/" \;
+      cp .agent-store/store.sqlite "$evidence_root/store.sqlite"
+      cat > "$evidence_root/reports/concurrent-record-readers-with-hooked-mutations.md" <<EOF
+# Concurrent Record Readers With Hooked Mutations Evidence
+
+- stable_source: $stable_source
+- stable_target: $stable_target
+- mutator_workers: $mutator_workers
+- mutator_iterations: $mutator_iterations
+- reader_workers: $reader_workers
+- reader_iterations: $reader_iterations
+- $summary
+- hook_side_effects: $side_effect_count
+- database: $evidence_root/store.sqlite
+- logs: $evidence_root/logs
+EOF
+    fi
+    ;;
+
   concurrent_link_record_disappearance_races)
     CARGO_TARGET_DIR="$target_dir" cargo build --quiet --manifest-path "$repo/Cargo.toml"
     agent_store_bin="$target_dir/debug/agent-store"
@@ -2662,7 +2945,7 @@ EOF
     ;;
 
   *)
-    echo "usage: $0 {store_is_project_local|migrations_apply_on_open|initial_schema_tables|records_columns|record_fields_typed_columns|record_links_cardinality_shape|record_links_columns_unique|record_delete_cascades_links|hard_delete_store_event_snapshot|record_mutations_transactional|persistence_open_errors_actionable|migration_checksum_mismatch|concurrent_process_writers|concurrent_process_writers_with_hooks|concurrent_process_mutations_with_hooks|concurrent_hook_lifecycle_races|concurrent_hook_lifecycle_mutation_races|concurrent_hook_churn_reads|concurrent_link_record_disappearance_races|concurrent_set_unset_link_snapshot_races|create_rm_link_snapshot_hooks|concurrent_same_record_and_link_races}" >&2
+    echo "usage: $0 {store_is_project_local|migrations_apply_on_open|initial_schema_tables|records_columns|record_fields_typed_columns|record_links_cardinality_shape|record_links_columns_unique|record_delete_cascades_links|hard_delete_store_event_snapshot|record_mutations_transactional|persistence_open_errors_actionable|migration_checksum_mismatch|concurrent_process_writers|concurrent_process_writers_with_hooks|concurrent_process_mutations_with_hooks|concurrent_hook_lifecycle_races|concurrent_hook_lifecycle_mutation_races|concurrent_hook_churn_reads|concurrent_record_readers_with_hooked_mutations|concurrent_link_record_disappearance_races|concurrent_set_unset_link_snapshot_races|create_rm_link_snapshot_hooks|concurrent_same_record_and_link_races}" >&2
     exit 2
     ;;
 esac

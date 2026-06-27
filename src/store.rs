@@ -496,21 +496,26 @@ impl Store {
 
     pub fn get_record(&self, id_prefix: &str) -> StoreResult<Record> {
         validate_id_prefix(id_prefix)?;
-        let id = self.resolve_id(id_prefix)?;
-        get_record_by_id(&self.conn, &id)
+        let tx = self.conn.unchecked_transaction()?;
+        let id = resolve_id(&tx, id_prefix)?;
+        let record = get_record_by_id(&tx, &id)?;
+        tx.commit()?;
+
+        Ok(record)
     }
 
     pub fn find_records(&self, query: &Query) -> StoreResult<Vec<Record>> {
-        let mut stmt = self.conn.prepare("SELECT id FROM records ORDER BY id")?;
+        let tx = self.conn.unchecked_transaction()?;
+        let mut stmt = tx.prepare("SELECT id FROM records ORDER BY id")?;
         let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
         let ids: Vec<String> = rows.collect::<Result<_, _>>()?;
         let mut records = Vec::new();
         let uses_links = query.uses_links();
 
         for id in ids {
-            let record = get_record_by_id(&self.conn, &id)?;
+            let record = get_record_by_id(&tx, &id)?;
             let matches = if uses_links {
-                let links = links_for_record_id(&self.conn, &id)?;
+                let links = links_for_record_id(&tx, &id)?;
                 query.matches_with_links(&record, &links)
             } else {
                 query.matches(&record)
@@ -521,16 +526,18 @@ impl Store {
             }
         }
 
+        drop(stmt);
+        tx.commit()?;
+
         Ok(records)
     }
 
     pub fn quick_context_summary(&self) -> StoreResult<QuickContextSummary> {
-        let record_count = self
-            .conn
-            .query_row("SELECT COUNT(*) FROM records", [], |row| row.get(0))?;
+        let tx = self.conn.unchecked_transaction()?;
+        let record_count = tx.query_row("SELECT COUNT(*) FROM records", [], |row| row.get(0))?;
 
         let mut records_by_kind = BTreeMap::new();
-        let mut stmt = self.conn.prepare(
+        let mut stmt = tx.prepare(
             r#"
             SELECT kind, COUNT(*)
             FROM records
@@ -545,12 +552,13 @@ impl Store {
             let (kind, count) = row?;
             records_by_kind.insert(kind, count);
         }
+        drop(stmt);
 
         let mut fields_by_kind = records_by_kind
             .keys()
             .map(|kind| (kind.clone(), Vec::new()))
             .collect::<BTreeMap<_, _>>();
-        let mut stmt = self.conn.prepare(
+        let mut stmt = tx.prepare(
             r#"
             SELECT records.kind, record_fields.key
             FROM records
@@ -566,9 +574,10 @@ impl Store {
             let (kind, field_name) = row?;
             fields_by_kind.entry(kind).or_default().push(field_name);
         }
+        drop(stmt);
 
         let mut status_counts_by_kind = BTreeMap::new();
-        let mut stmt = self.conn.prepare(
+        let mut stmt = tx.prepare(
             r#"
             SELECT records.kind, record_fields.raw_value, COUNT(*)
             FROM records
@@ -592,9 +601,10 @@ impl Store {
                 .or_insert_with(BTreeMap::new)
                 .insert(status, count);
         }
+        drop(stmt);
 
         let mut date_windows_by_kind = BTreeMap::new();
-        let mut stmt = self.conn.prepare(
+        let mut stmt = tx.prepare(
             r#"
             SELECT records.kind, record_fields.key, MIN(record_fields.timestamp_value), MAX(record_fields.timestamp_value)
             FROM records
@@ -622,12 +632,11 @@ impl Store {
                 .or_insert_with(BTreeMap::new)
                 .insert(field, window);
         }
+        drop(stmt);
 
-        let link_count = self
-            .conn
-            .query_row("SELECT COUNT(*) FROM record_links", [], |row| row.get(0))?;
+        let link_count = tx.query_row("SELECT COUNT(*) FROM record_links", [], |row| row.get(0))?;
         let mut links_by_relation = BTreeMap::new();
-        let mut stmt = self.conn.prepare(
+        let mut stmt = tx.prepare(
             r#"
             SELECT rel, COUNT(*)
             FROM record_links
@@ -642,18 +651,18 @@ impl Store {
             let (rel, count) = row?;
             links_by_relation.insert(rel, count);
         }
+        drop(stmt);
 
-        let hook_count = self
-            .conn
-            .query_row("SELECT COUNT(*) FROM hooks", [], |row| row.get(0))?;
-        let latest_activity_at = self
-            .conn
+        let hook_count = tx.query_row("SELECT COUNT(*) FROM hooks", [], |row| row.get(0))?;
+        let latest_activity_at = tx
             .query_row(
                 "SELECT created_at FROM store_events ORDER BY id DESC LIMIT 1",
                 [],
                 |row| row.get(0),
             )
             .optional()?;
+
+        tx.commit()?;
 
         Ok(QuickContextSummary {
             record_count,
@@ -868,8 +877,10 @@ impl Store {
 
     pub fn links_for_record(&self, id_prefix: &str) -> StoreResult<RecordLinks> {
         validate_id_prefix(id_prefix)?;
-        let record_id = self.resolve_id(id_prefix)?;
-        let links = links_for_record_id(&self.conn, &record_id)?;
+        let tx = self.conn.unchecked_transaction()?;
+        let record_id = resolve_id(&tx, id_prefix)?;
+        let links = links_for_record_id(&tx, &record_id)?;
+        tx.commit()?;
 
         Ok(RecordLinks { record_id, links })
     }
@@ -1000,10 +1011,6 @@ impl Store {
         let rows = stmt.query_map([], hook_run_from_row)?;
 
         Ok(rows.collect::<Result<_, _>>()?)
-    }
-
-    fn resolve_id(&self, id_prefix: &str) -> StoreResult<String> {
-        resolve_id(&self.conn, id_prefix)
     }
 }
 
