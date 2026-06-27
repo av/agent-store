@@ -7,7 +7,7 @@
   id: 9ev
   command: bash tests/facts/cli_hooks.sh json_multiple_matching_hooks_stop_after_failure_or_timeout
   tags: [implemented]
-- label: Plain link, --json unlink, plain single-field set, --json single-field unset, plain multi-field set, and --json multi-field unset mutations whose matching Hook fails after commit still invoke the Hook with stable AGENT_STORE_EVENT, AGENT_STORE_ID, and AGENT_STORE_KIND; link mutations include relation/target env, single-field record mutations include field key/value old/new env, multi-field record mutations omit field-specific env, stdout remains empty, and the Store mutation and Hook Run persist
+- label: Plain link, --json unlink, plain single-field set, --json single-field unset, plain multi-field set, and --json multi-field unset mutations whose matching Hook fails after commit still invoke the Hook with stable AGENT_STORE_EVENT, AGENT_STORE_ID, and AGENT_STORE_KIND; link mutations include relation/target env, single-field record mutations include field key/value old/new env with spaces, equals signs, quotes, backslashes, and newlines preserved for hook consumers, multi-field record mutations omit field-specific env, stdout remains empty, and the Store mutation and Hook Run persist
   id: 06p
   command: bash tests/facts/cli_hooks.sh hook_failure_preserves_link_context_env
   tags: [implemented]
