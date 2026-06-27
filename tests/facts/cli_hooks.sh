@@ -1257,11 +1257,17 @@ EOF
   hooks_run_sequentially_from_project_root_with_timeout)
     cd "$tmp"
     run_agent_store init >/tmp/agent-store-hook-runtime-4as-init.out
+    agent_store_bin="$target_dir/debug/agent-store"
+
+    evidence_root="${AGENT_STORE_E2E_DIR:-}"
+    if [ -n "$evidence_root" ]; then
+      mkdir -p "$evidence_root/logs" "$evidence_root/reports"
+    fi
 
     mkdir -p "$tmp/bin" "$tmp/subdir"
     cat > "$tmp/bin/agent-store" <<SH
 #!/usr/bin/env bash
-exec "$target_dir/debug/agent-store" "\$@"
+exec "$agent_store_bin" "\$@"
 SH
     chmod +x "$tmp/bin/agent-store"
     export PATH="$tmp/bin:$PATH"
@@ -1331,6 +1337,353 @@ expected = {
 assert set(rows) == expected, rows
 PY
 
+    cat > plain-multi-hook.sh <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+
+scenario="$1"
+mode="$2"
+state_dir="plain-multi-state"
+mkdir -p "$state_dir"
+count_file="$state_dir/$scenario.count"
+count=0
+if [ -f "$count_file" ]; then
+  count="$(cat "$count_file")"
+fi
+count=$((count + 1))
+printf "%s" "$count" >"$count_file"
+
+test -d .agent-store
+printf "%s count=%s event=%s id=%s rel=%s target=%s root=%s\n" \
+  "$scenario" \
+  "$count" \
+  "${AGENT_STORE_EVENT:-}" \
+  "${AGENT_STORE_ID:-}" \
+  "${AGENT_STORE_REL:-}" \
+  "${AGENT_STORE_TARGET_ID:-}" \
+  "$(pwd)" >>"$state_dir/invocations.log"
+
+if [ "$count" -le 2 ]; then
+  printf "%s-success-%s-stdout" "$scenario" "$count"
+  printf "%s-success-%s-stderr" "$scenario" "$count" >&2
+  exit 0
+fi
+
+if [ "$count" -eq 3 ]; then
+  if [ "$mode" = "timeout" ]; then
+    printf "%s-timeout-stderr" "$scenario" >&2
+    while :; do
+      sleep 1
+    done
+  fi
+
+  printf "%s-failure-stdout" "$scenario"
+  printf "%s-failure-stderr" "$scenario" >&2
+  exit 41
+fi
+
+printf "%s-after-failure-ran" "$scenario" >"$state_dir/$scenario.after-failure-ran"
+printf "%s-late-stdout" "$scenario"
+SH
+    chmod +x plain-multi-hook.sh
+
+    add_plain_multi_hooks() {
+      local event="$1"
+      local query="$2"
+      local scenario="$3"
+      local mode="$4"
+      local ids=""
+      local hook_id
+
+      for _ in 1 2 3 4; do
+        hook_id="$("$agent_store_bin" hook add "$event" "$query" -- "./plain-multi-hook.sh $scenario $mode")"
+        ids="${ids}${ids:+,}$hook_id"
+      done
+
+      printf "%s" "$ids"
+    }
+
+    plain_set_record="$("$agent_store_bin" create task op=plain-multi-set status=pending)"
+    plain_link_source="$("$agent_store_bin" create task op=plain-multi-link status=open)"
+    plain_link_target="$("$agent_store_bin" create note op=plain-multi-link-target status=open)"
+
+    plain_create_hook_ids="$(add_plain_multi_hooks create 'kind=task and op=plain-multi-create-fail' create-fail fail)"
+    plain_set_hook_ids="$(add_plain_multi_hooks set 'kind=task and op=plain-multi-set and status=done' set-fail fail)"
+    plain_link_hook_ids="$(add_plain_multi_hooks link 'kind=task and op=plain-multi-link' link-timeout timeout)"
+
+    event_marker="$(python3 - .agent-store/store.sqlite <<'PY'
+import sqlite3
+import sys
+
+con = sqlite3.connect(sys.argv[1])
+print(con.execute("select coalesce(max(id), 0) from store_events").fetchone()[0])
+PY
+)"
+    hook_marker="$(python3 - .agent-store/store.sqlite <<'PY'
+import sqlite3
+import sys
+
+con = sqlite3.connect(sys.argv[1])
+print(con.execute("select coalesce(max(id), 0) from hook_runs").fetchone()[0])
+PY
+)"
+
+    run_plain_multi_failure() {
+      local name="$1"
+      local expected_stderr="$2"
+      shift 2
+      set +e
+      "$agent_store_bin" "$@" >"$tmp/plain-multi-$name.out" 2>"$tmp/plain-multi-$name.err"
+      local status="$?"
+      set -e
+      printf "%s" "$status" >"$tmp/plain-multi-$name.status"
+      test "$status" -ne 0
+      test ! -s "$tmp/plain-multi-$name.out"
+      grep -Fq "Store mutation already committed" "$tmp/plain-multi-$name.err"
+      grep -Fq "exit status 41" "$tmp/plain-multi-$name.err"
+      grep -Fq "$expected_stderr" "$tmp/plain-multi-$name.err"
+    }
+
+    run_plain_multi_timeout() {
+      local name="$1"
+      local expected_stderr="$2"
+      shift 2
+      set +e
+      timeout 40s "$agent_store_bin" "$@" >"$tmp/plain-multi-$name.out" 2>"$tmp/plain-multi-$name.err"
+      local status="$?"
+      set -e
+      printf "%s" "$status" >"$tmp/plain-multi-$name.status"
+      test "$status" -ne 0
+      test "$status" -ne 124
+      test ! -s "$tmp/plain-multi-$name.out"
+      grep -Fq "Store mutation already committed" "$tmp/plain-multi-$name.err"
+      grep -Fq "timed out after 30 seconds" "$tmp/plain-multi-$name.err"
+      grep -Fq "$expected_stderr" "$tmp/plain-multi-$name.err"
+    }
+
+    run_plain_multi_failure create create-fail-failure-stderr create task op=plain-multi-create-fail status=committed
+    run_plain_multi_failure set set-fail-failure-stderr set "$plain_set_record" status=done
+    run_plain_multi_timeout link-timeout link-timeout-timeout-stderr link "$plain_link_source" blocks "$plain_link_target"
+
+    plain_multi_summary="$(python3 - \
+      "$tmp" \
+      .agent-store/store.sqlite \
+      "$event_marker" \
+      "$hook_marker" \
+      "$plain_set_record" \
+      "$plain_link_source" \
+      "$plain_link_target" \
+      "$plain_create_hook_ids" \
+      "$plain_set_hook_ids" \
+      "$plain_link_hook_ids" <<'PY'
+from collections import Counter
+import pathlib
+import sqlite3
+import sys
+
+(
+    tmp_s,
+    db,
+    event_marker_s,
+    hook_marker_s,
+    set_record,
+    link_source,
+    link_target,
+    create_hook_ids_s,
+    set_hook_ids_s,
+    link_hook_ids_s,
+) = sys.argv[1:]
+tmp = pathlib.Path(tmp_s)
+event_marker = int(event_marker_s)
+hook_marker = int(hook_marker_s)
+
+for name, expected in [
+    ("create", "create-fail-failure-stderr"),
+    ("set", "set-fail-failure-stderr"),
+    ("link-timeout", "link-timeout-timeout-stderr"),
+]:
+    stdout = (tmp / f"plain-multi-{name}.out").read_text(encoding="utf-8")
+    stderr = (tmp / f"plain-multi-{name}.err").read_text(encoding="utf-8")
+    status = int((tmp / f"plain-multi-{name}.status").read_text(encoding="utf-8"))
+    assert stdout == "", (name, stdout)
+    assert status != 0, (name, status)
+    assert "Store mutation already committed" in stderr, (name, stderr)
+    assert expected in stderr, (name, stderr)
+    if name.endswith("-timeout"):
+        assert status != 124, status
+        assert "timed out after 30 seconds" in stderr, stderr
+    else:
+        assert "exit status 41" in stderr, (name, stderr)
+
+con = sqlite3.connect(db)
+
+def fields(record_id):
+    return dict(
+        con.execute(
+            "select key, raw_value from record_fields where record_id = ?",
+            (record_id,),
+        ).fetchall()
+    )
+
+def record_by_op(op):
+    rows = con.execute(
+        """
+        select records.id
+        from records
+        join record_fields on record_fields.record_id = records.id
+        where record_fields.key = 'op' and record_fields.raw_value = ?
+        order by records.id
+        """,
+        (op,),
+    ).fetchall()
+    assert len(rows) == 1, (op, rows)
+    return rows[0][0]
+
+create_record = record_by_op("plain-multi-create-fail")
+assert fields(create_record)["status"] == "committed", fields(create_record)
+assert fields(set_record)["status"] == "done", fields(set_record)
+assert con.execute(
+    """
+    select count(*) from record_links
+    where from_record_id = ? and rel = 'blocks' and to_record_id = ?
+    """,
+    (link_source, link_target),
+).fetchone()[0] == 1
+
+event_rows = con.execute(
+    """
+    select event_type, record_id
+    from store_events
+    where id > ?
+    order by id
+    """,
+    (event_marker,),
+).fetchall()
+assert Counter(row[0] for row in event_rows) == {
+    "create": 1,
+    "set": 1,
+    "link": 1,
+}, event_rows
+assert ("create", create_record) in event_rows, event_rows
+assert ("set", set_record) in event_rows, event_rows
+assert ("link", link_source) in event_rows, event_rows
+
+def split_ids(ids):
+    values = [value for value in ids.split(",") if value]
+    assert len(values) == 4, values
+    return sorted(values)
+
+scenarios = [
+    {
+        "name": "create-fail",
+        "ids": split_ids(create_hook_ids_s),
+        "event": "create",
+        "record": create_record,
+        "mode": "fail",
+    },
+    {
+        "name": "set-fail",
+        "ids": split_ids(set_hook_ids_s),
+        "event": "set",
+        "record": set_record,
+        "mode": "fail",
+    },
+    {
+        "name": "link-timeout",
+        "ids": split_ids(link_hook_ids_s),
+        "event": "link",
+        "record": link_source,
+        "mode": "timeout",
+    },
+]
+
+all_hook_ids = [hook_id for scenario in scenarios for hook_id in scenario["ids"]]
+placeholders = ",".join("?" for _ in all_hook_ids)
+rows = con.execute(
+    f"""
+    select hook_id, event_type, record_id, exit_status, stdout_summary, stderr_summary
+    from hook_runs
+    where id > ? and hook_id in ({placeholders})
+    order by id
+    """,
+    [hook_marker, *all_hook_ids],
+).fetchall()
+by_hook = {row[0]: row[1:] for row in rows}
+assert len(rows) == 9, rows
+
+for scenario in scenarios:
+    name = scenario["name"]
+    ids = scenario["ids"]
+    expected_run_ids = ids[:3]
+    actual_run_ids = [hook_id for hook_id in ids if hook_id in by_hook]
+    assert actual_run_ids == expected_run_ids, (name, ids, actual_run_ids)
+    assert ids[3] not in by_hook, (name, ids[3], by_hook.get(ids[3]))
+
+    for index, hook_id in enumerate(ids[:2], start=1):
+        assert by_hook[hook_id] == (
+            scenario["event"],
+            scenario["record"],
+            0,
+            f"{name}-success-{index}-stdout",
+            f"{name}-success-{index}-stderr",
+        ), (name, hook_id, by_hook[hook_id])
+
+    failing_row = by_hook[ids[2]]
+    if scenario["mode"] == "timeout":
+        assert failing_row[:4] == (scenario["event"], scenario["record"], -1, ""), failing_row
+        assert f"{name}-timeout-stderr" in failing_row[4], failing_row
+        assert "timed out after 30 seconds" in failing_row[4], failing_row
+    else:
+        assert failing_row == (
+            scenario["event"],
+            scenario["record"],
+            41,
+            f"{name}-failure-stdout",
+            f"{name}-failure-stderr",
+        ), (name, failing_row)
+
+    count_text = (tmp / "plain-multi-state" / f"{name}.count").read_text(encoding="utf-8")
+    assert count_text == "3", (name, count_text)
+    assert not (tmp / "plain-multi-state" / f"{name}.after-failure-ran").exists(), name
+
+log_lines = (tmp / "plain-multi-state" / "invocations.log").read_text(encoding="utf-8").splitlines()
+for scenario in scenarios:
+    scenario_lines = [line for line in log_lines if line.startswith(f"{scenario['name']} ")]
+    assert len(scenario_lines) == 3, (scenario["name"], scenario_lines)
+
+print(
+    "plain_multi_hook_cases=3 hook_runs={} skipped_later_hooks=3 events={} create_record={} set_record={} link_source={}".format(
+        len(rows),
+        len(event_rows),
+        create_record,
+        set_record,
+        link_source,
+    )
+)
+PY
+)"
+
+    if [ -n "$evidence_root" ]; then
+      find "$tmp" -maxdepth 1 -type f \
+        \( -name 'plain-multi-*' -o -name 'plain-multi-hook.sh' -o -name 'hook-sequence.log' \) \
+        -exec cp {} "$evidence_root/logs/" \;
+      cp -R "$tmp/plain-multi-state" "$evidence_root/logs/"
+      cp .agent-store/store.sqlite "$evidence_root/store.sqlite"
+      cat > "$evidence_root/reports/plain-multiple-matching-hooks.md" <<EOF
+# Plain CLI Multiple Matching Hook Failure/Timeout Evidence
+
+- set_record: $plain_set_record
+- link_source: $plain_link_source
+- link_target: $plain_link_target
+- create_hook_ids: $plain_create_hook_ids
+- set_hook_ids: $plain_set_hook_ids
+- link_hook_ids: $plain_link_hook_ids
+- $plain_multi_summary
+- database: $evidence_root/store.sqlite
+- logs: $evidence_root/logs
+EOF
+    fi
+
     timeout_hook_id="$(run_agent_store hook add create title=Timeout -- 'printf hook-timeout-stderr >&2; while :; do sleep 1; done')"
 
     cd "$tmp/subdir"
@@ -1340,7 +1693,7 @@ print(time.monotonic())
 PY
 )"
     set +e
-    timeout 40s "$target_dir/debug/agent-store" create task title=Timeout >/tmp/agent-store-hook-timeout-4as.out 2>/tmp/agent-store-hook-timeout-4as.err
+    timeout 40s "$agent_store_bin" create task title=Timeout >/tmp/agent-store-hook-timeout-4as.out 2>/tmp/agent-store-hook-timeout-4as.err
     timeout_status=$?
     set -e
     ended_at="$(python3 - <<'PY'
