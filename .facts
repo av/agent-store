@@ -193,7 +193,10 @@
   tags: [implemented]
 
 ## concurrency
-- SQLite connections enable foreign keys, WAL mode, and a busy timeout so multiple concurrent agent-store processes can read and write safely @implemented
+- label: simultaneous agent-store create processes all finish without database lock errors and persist every record
+  id: ohz
+  command: bash tests/facts/store_schema_migrations.sh concurrent_process_writers
+  tags: [implemented]
 - label: agent-store create and rm either commit all Store writes for the mutation or roll them back when a later write fails
   id: 0uf
   command: bash tests/facts/store_schema_migrations.sh record_mutations_transactional

@@ -1,7 +1,9 @@
 use crate::query::Query;
 use crate::value::FieldValue;
 use rand::Rng;
-use rusqlite::{params, Connection, ErrorCode, OptionalExtension, Transaction};
+use rusqlite::{
+    params, Connection, ErrorCode, OptionalExtension, Transaction, TransactionBehavior,
+};
 use serde_json::json;
 use std::collections::BTreeMap;
 use std::error::Error;
@@ -9,6 +11,7 @@ use std::fmt;
 use std::fs;
 use std::hash::Hasher;
 use std::path::{Path, PathBuf};
+use std::thread;
 use std::time::Duration;
 
 pub const STORE_DIR: &str = ".agent-store";
@@ -16,6 +19,9 @@ const STORE_DB_FILE: &str = "store.sqlite";
 const ID_CHARS: &[u8] = b"abcdefghijklmnopqrstuvwxyz0123456789";
 const ID_LEN: usize = 6;
 const ID_RETRIES: usize = 16;
+const SQLITE_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
+const OPEN_BUSY_RETRY_ATTEMPTS: usize = 8;
+const OPEN_BUSY_RETRY_BASE: Duration = Duration::from_millis(25);
 
 const INITIAL_SCHEMA: &str = r#"
 CREATE TABLE records (
@@ -357,17 +363,36 @@ impl Store {
     }
 
     fn open_db(path: PathBuf, project_root: PathBuf) -> StoreResult<Self> {
-        let mut conn = Connection::open(&path)
-            .map_err(|source| StoreError::open_store_context(&path, StoreError::Sql(source)))?;
-        conn.busy_timeout(Duration::from_secs(5))
-            .map_err(|source| StoreError::open_store_context(&path, StoreError::Sql(source)))?;
+        for attempt in 0..OPEN_BUSY_RETRY_ATTEMPTS {
+            match Self::open_db_once(&path, &project_root) {
+                Ok(store) => return Ok(store),
+                Err(error)
+                    if attempt + 1 < OPEN_BUSY_RETRY_ATTEMPTS
+                        && is_transient_open_error(&error) =>
+                {
+                    thread::sleep(open_retry_delay(attempt));
+                }
+                Err(error) => return Err(error),
+            }
+        }
+
+        unreachable!("open_db retry loop always returns before exhausting attempts")
+    }
+
+    fn open_db_once(path: &Path, project_root: &Path) -> StoreResult<Self> {
+        let mut conn = Connection::open(path)
+            .map_err(|source| StoreError::open_store_context(path, StoreError::Sql(source)))?;
+        conn.busy_timeout(SQLITE_BUSY_TIMEOUT)
+            .map_err(|source| StoreError::open_store_context(path, StoreError::Sql(source)))?;
         conn.pragma_update(None, "foreign_keys", "ON")
-            .map_err(|source| StoreError::open_store_context(&path, StoreError::Sql(source)))?;
+            .map_err(|source| StoreError::open_store_context(path, StoreError::Sql(source)))?;
         conn.pragma_update(None, "journal_mode", "WAL")
-            .map_err(|source| StoreError::open_store_context(&path, StoreError::Sql(source)))?;
-        run_migrations(&mut conn)
-            .map_err(|source| StoreError::open_store_context(&path, source))?;
-        Ok(Self { conn, project_root })
+            .map_err(|source| StoreError::open_store_context(path, StoreError::Sql(source)))?;
+        run_migrations(&mut conn).map_err(|source| StoreError::open_store_context(path, source))?;
+        Ok(Self {
+            conn,
+            project_root: project_root.to_path_buf(),
+        })
     }
 
     pub fn project_root(&self) -> &Path {
@@ -999,7 +1024,8 @@ fn insert_store_event(tx: &Transaction<'_>, event_type: &str, record: &Record) -
 }
 
 fn run_migrations(conn: &mut Connection) -> StoreResult<()> {
-    conn.execute_batch(
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    tx.execute_batch(
         r#"
         CREATE TABLE IF NOT EXISTS schema_migrations (
             version INTEGER PRIMARY KEY NOT NULL,
@@ -1012,7 +1038,7 @@ fn run_migrations(conn: &mut Connection) -> StoreResult<()> {
 
     for migration in MIGRATIONS {
         let checksum = migration_checksum(migration.sql);
-        let applied = conn
+        let applied = tx
             .query_row(
                 "SELECT name, checksum FROM schema_migrations WHERE version = ?1",
                 params![migration.version],
@@ -1032,15 +1058,14 @@ fn run_migrations(conn: &mut Connection) -> StoreResult<()> {
             continue;
         }
 
-        let tx = conn.transaction()?;
         tx.execute_batch(migration.sql)?;
         tx.execute(
             "INSERT INTO schema_migrations (version, name, checksum) VALUES (?1, ?2, ?3)",
             params![migration.version, migration.name, checksum],
         )?;
-        tx.commit()?;
     }
 
+    tx.commit()?;
     Ok(())
 }
 
@@ -1208,6 +1233,25 @@ fn is_constraint_violation(error: &rusqlite::Error) -> bool {
         rusqlite::Error::SqliteFailure(sqlite_error, _)
             if sqlite_error.code == ErrorCode::ConstraintViolation
     )
+}
+
+fn is_transient_open_error(error: &StoreError) -> bool {
+    match error {
+        StoreError::OpenStore { source, .. } => is_transient_open_error(source),
+        StoreError::Sql(error) => is_sqlite_busy_or_locked(error),
+        _ => false,
+    }
+}
+
+fn is_sqlite_busy_or_locked(error: &rusqlite::Error) -> bool {
+    matches!(
+        error.sqlite_error_code(),
+        Some(ErrorCode::DatabaseBusy) | Some(ErrorCode::DatabaseLocked)
+    )
+}
+
+fn open_retry_delay(attempt: usize) -> Duration {
+    Duration::from_millis(OPEN_BUSY_RETRY_BASE.as_millis() as u64 * (attempt as u64 + 1))
 }
 
 fn migration_checksum(sql: &str) -> String {

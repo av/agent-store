@@ -468,8 +468,66 @@ PY
     grep -Fq "found bad" /tmp/agent-store-facts-checksum.err
     ;;
 
+  concurrent_process_writers)
+    CARGO_TARGET_DIR="$target_dir" cargo build --quiet --manifest-path "$repo/Cargo.toml"
+    agent_store_bin="$target_dir/debug/agent-store"
+    cd "$tmp"
+    "$agent_store_bin" init >/tmp/agent-store-concurrent-init.out
+
+    ready_dir="$tmp/ready"
+    start_file="$tmp/start"
+    mkdir "$ready_dir"
+    writers=(alpha beta gamma delta)
+    per_writer=10
+
+    writer() {
+      local name="$1"
+      local count="$2"
+      touch "$ready_dir/$name"
+      while [ ! -f "$start_file" ]; do
+        sleep 0.01
+      done
+      for i in $(seq 1 "$count"); do
+        "$agent_store_bin" create event writer="$name" seq="$i" batch=concurrent
+      done
+    }
+
+    pids=()
+    for name in "${writers[@]}"; do
+      (writer "$name" "$per_writer") >"$tmp/writer-$name.out" 2>"$tmp/writer-$name.err" &
+      pids+=("$!")
+    done
+
+    while [ "$(find "$ready_dir" -type f | wc -l | tr -d ' ')" -lt "${#writers[@]}" ]; do
+      sleep 0.01
+    done
+    touch "$start_file"
+
+    status=0
+    for pid in "${pids[@]}"; do
+      if ! wait "$pid"; then
+        status=1
+      fi
+    done
+    if [ "$status" -ne 0 ]; then
+      cat "$tmp"/writer-*.err >&2
+      exit 1
+    fi
+    if grep -R "database is locked" "$tmp"/writer-*.err; then
+      exit 1
+    fi
+
+    expected=$((${#writers[@]} * per_writer))
+    total="$("$agent_store_bin" find 'kind=event and batch=concurrent' | sed '/^$/d' | wc -l | tr -d ' ')"
+    test "$total" = "$expected"
+    for name in "${writers[@]}"; do
+      count="$("$agent_store_bin" find "kind=event and writer=$name" | sed '/^$/d' | wc -l | tr -d ' ')"
+      test "$count" = "$per_writer"
+    done
+    ;;
+
   *)
-    echo "usage: $0 {store_is_project_local|migrations_apply_on_open|initial_schema_tables|records_columns|record_fields_typed_columns|record_links_cardinality_shape|record_links_columns_unique|record_delete_cascades_links|hard_delete_store_event_snapshot|record_mutations_transactional|persistence_open_errors_actionable|migration_checksum_mismatch}" >&2
+    echo "usage: $0 {store_is_project_local|migrations_apply_on_open|initial_schema_tables|records_columns|record_fields_typed_columns|record_links_cardinality_shape|record_links_columns_unique|record_delete_cascades_links|hard_delete_store_event_snapshot|record_mutations_transactional|persistence_open_errors_actionable|migration_checksum_mismatch|concurrent_process_writers}" >&2
     exit 2
     ;;
 esac
