@@ -2,7 +2,7 @@ mod cli;
 mod output;
 
 use agent_store::query::Query;
-use agent_store::store::{Hook, Link, Record, Store, STORE_DIR};
+use agent_store::store::{Hook, Link, LinkEdge, Record, Store, STORE_DIR};
 use cli::{CliCommand, HookCliCommand};
 use output::{
     format_hook, format_quick_context, format_record, help_text, init_json, link_mutation_json,
@@ -294,16 +294,23 @@ fn main() {
         }
         CliCommand::Link { from, rel, to } => {
             let mut store = open_store_or_exit();
-            match store.link_records(&from, &rel, &to) {
-                Ok(link) => {
-                    let source = record_for_link_hook_or_exit(&store, "link", &link);
-                    run_link_hooks_or_exit(&mut store, "link", &source, &link);
+            match store.link_records_with_snapshot(&from, &rel, &to) {
+                Ok(mutation) => {
+                    run_link_hooks_or_exit(
+                        &mut store,
+                        "link",
+                        &mutation.source,
+                        &mutation.link,
+                        &mutation.source_links,
+                    );
                     if cli.json_output {
-                        print_json(link_mutation_json("linked", &link));
+                        print_json(link_mutation_json("linked", &mutation.link));
                     } else {
                         println!(
                             "Linked {} {} {}",
-                            link.from_record_id, link.rel, link.to_record_id
+                            mutation.link.from_record_id,
+                            mutation.link.rel,
+                            mutation.link.to_record_id
                         );
                     }
                 }
@@ -315,16 +322,23 @@ fn main() {
         }
         CliCommand::Unlink { from, rel, to } => {
             let mut store = open_store_or_exit();
-            match store.unlink_records(&from, &rel, &to) {
-                Ok(link) => {
-                    let source = record_for_link_hook_or_exit(&store, "unlink", &link);
-                    run_link_hooks_or_exit(&mut store, "unlink", &source, &link);
+            match store.unlink_records_with_snapshot(&from, &rel, &to) {
+                Ok(mutation) => {
+                    run_link_hooks_or_exit(
+                        &mut store,
+                        "unlink",
+                        &mutation.source,
+                        &mutation.link,
+                        &mutation.source_links,
+                    );
                     if cli.json_output {
-                        print_json(link_mutation_json("unlinked", &link));
+                        print_json(link_mutation_json("unlinked", &mutation.link));
                     } else {
                         println!(
                             "Unlinked {} {} {}",
-                            link.from_record_id, link.rel, link.to_record_id
+                            mutation.link.from_record_id,
+                            mutation.link.rel,
+                            mutation.link.to_record_id
                         );
                     }
                 }
@@ -445,18 +459,8 @@ fn open_store_or_exit() -> Store {
     }
 }
 
-fn record_for_link_hook_or_exit(store: &Store, event_type: &str, link: &Link) -> Record {
-    match store.get_record(&link.from_record_id) {
-        Ok(record) => record,
-        Err(error) => {
-            eprintln!("error: failed to load {event_type} hook record: {error}");
-            process::exit(1);
-        }
-    }
-}
-
 fn run_hooks_or_exit(store: &mut Store, event_type: &str, record: &Record) {
-    if let Err(error) = run_matching_hooks_after_commit(store, event_type, record, None) {
+    if let Err(error) = run_matching_hooks_after_commit(store, event_type, record, None, None) {
         eprintln!(
             "error: failed to run hooks after Store mutation already committed for {event_type} {}: {error}",
             record.id
@@ -465,8 +469,16 @@ fn run_hooks_or_exit(store: &mut Store, event_type: &str, record: &Record) {
     }
 }
 
-fn run_link_hooks_or_exit(store: &mut Store, event_type: &str, record: &Record, link: &Link) {
-    if let Err(error) = run_matching_hooks_after_commit(store, event_type, record, Some(link)) {
+fn run_link_hooks_or_exit(
+    store: &mut Store,
+    event_type: &str,
+    record: &Record,
+    link: &Link,
+    link_context: &[LinkEdge],
+) {
+    if let Err(error) =
+        run_matching_hooks_after_commit(store, event_type, record, Some(link), Some(link_context))
+    {
         eprintln!(
             "error: failed to run hooks after Store mutation already committed for {event_type} {}: {error}",
             record.id
@@ -480,6 +492,7 @@ fn run_matching_hooks_after_commit(
     event_type: &str,
     record: &Record,
     link: Option<&Link>,
+    link_context: Option<&[LinkEdge]>,
 ) -> Result<(), String> {
     let project_root = store.project_root().to_path_buf();
     let hooks = store
@@ -487,7 +500,7 @@ fn run_matching_hooks_after_commit(
         .map_err(|error| format!("failed to list hooks: {error}"))?;
 
     for hook in hooks.into_iter().filter(|hook| hook.event == event_type) {
-        if !hook_query_matches(store, event_type, &hook, record)? {
+        if !hook_query_matches(store, event_type, &hook, record, link_context)? {
             continue;
         }
 
@@ -722,6 +735,7 @@ fn hook_query_matches(
     event_type: &str,
     hook: &Hook,
     record: &Record,
+    link_context: Option<&[LinkEdge]>,
 ) -> Result<bool, String> {
     let Some(query_text) = hook.query.as_deref() else {
         return Ok(true);
@@ -733,16 +747,20 @@ fn hook_query_matches(
         return Ok(query.matches(record));
     }
 
+    let live_links;
     let links = if event_type == "rm" {
-        Vec::new()
+        &[][..]
+    } else if let Some(link_context) = link_context {
+        link_context
     } else {
-        store
+        live_links = store
             .links_for_record(&record.id)
             .map_err(|error| format!("failed to load hook {} link context: {error}", hook.id))?
-            .links
+            .links;
+        &live_links
     };
 
-    Ok(query.matches_with_links(record, &links))
+    Ok(query.matches_with_links(record, links))
 }
 
 fn ensure_gitignore_rule(path: &Path, rule: &str) -> io::Result<()> {

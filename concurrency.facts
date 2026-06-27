@@ -1,0 +1,8 @@
+
+# persistence
+
+## concurrency
+- label: simultaneous rm of source and target Records with link and unlink operations on their pair either report committed success or a not-found failure, never report database lock or post-commit hook lookup errors, leave no dangling affected Links, and persist Hook Runs for committed link and unlink mutations whose source Record snapshot matched a Hook
+  id: lrm
+  command: bash tests/facts/store_schema_migrations.sh concurrent_link_record_disappearance_races
+  tags: [implemented]

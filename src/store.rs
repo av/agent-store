@@ -115,6 +115,13 @@ pub struct Link {
     pub to_record_id: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LinkMutation {
+    pub link: Link,
+    pub source: Record,
+    pub source_links: Vec<LinkEdge>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LinkDirection {
     Out,
@@ -681,6 +688,17 @@ impl Store {
         rel: &str,
         to_prefix: &str,
     ) -> StoreResult<Link> {
+        Ok(self
+            .link_records_with_snapshot(from_prefix, rel, to_prefix)?
+            .link)
+    }
+
+    pub fn link_records_with_snapshot(
+        &mut self,
+        from_prefix: &str,
+        rel: &str,
+        to_prefix: &str,
+    ) -> StoreResult<LinkMutation> {
         validate_id_prefix(from_prefix)?;
         validate_id_prefix(to_prefix)?;
         validate_relation(rel)?;
@@ -698,13 +716,20 @@ impl Store {
             params![&from_id, rel, &to_id],
         )?;
         let source = get_record_by_id(&tx, &from_id)?;
+        let source_links = links_for_record_id(&tx, &from_id)?;
         insert_store_event(&tx, "link", &source)?;
         tx.commit()?;
 
-        Ok(Link {
+        let link = Link {
             from_record_id: from_id,
             rel: rel.to_owned(),
             to_record_id: to_id,
+        };
+
+        Ok(LinkMutation {
+            link,
+            source,
+            source_links,
         })
     }
 
@@ -714,6 +739,17 @@ impl Store {
         rel: &str,
         to_prefix: &str,
     ) -> StoreResult<Link> {
+        Ok(self
+            .unlink_records_with_snapshot(from_prefix, rel, to_prefix)?
+            .link)
+    }
+
+    pub fn unlink_records_with_snapshot(
+        &mut self,
+        from_prefix: &str,
+        rel: &str,
+        to_prefix: &str,
+    ) -> StoreResult<LinkMutation> {
         validate_id_prefix(from_prefix)?;
         validate_id_prefix(to_prefix)?;
         validate_relation(rel)?;
@@ -731,13 +767,20 @@ impl Store {
             params![&from_id, rel, &to_id],
         )?;
         let source = get_record_by_id(&tx, &from_id)?;
+        let source_links = links_for_record_id(&tx, &from_id)?;
         insert_store_event(&tx, "unlink", &source)?;
         tx.commit()?;
 
-        Ok(Link {
+        let link = Link {
             from_record_id: from_id,
             rel: rel.to_owned(),
             to_record_id: to_id,
+        };
+
+        Ok(LinkMutation {
+            link,
+            source,
+            source_links,
         })
     }
 

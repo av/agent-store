@@ -743,6 +743,308 @@ assert remaining_targets == 0, remaining_targets
 PY
     ;;
 
+  concurrent_link_record_disappearance_races)
+    CARGO_TARGET_DIR="$target_dir" cargo build --quiet --manifest-path "$repo/Cargo.toml"
+    agent_store_bin="$target_dir/debug/agent-store"
+    cd "$tmp"
+    "$agent_store_bin" init >/tmp/agent-store-link-rm-race-init.out
+
+    evidence_root="${AGENT_STORE_E2E_DIR:-}"
+    if [ -n "$evidence_root" ]; then
+      mkdir -p "$evidence_root/logs" "$evidence_root/reports"
+    fi
+
+    hook_side_effects="$tmp/hook-side-effects"
+    mkdir "$hook_side_effects"
+    cat > hook-touch.sh <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+dir="$1"
+printf "%s:%s:%s:%s\n" "$AGENT_STORE_EVENT" "$AGENT_STORE_ID" "${AGENT_STORE_REL:-none}" "${AGENT_STORE_TARGET_ID:-none}" >> "$dir/hook.log"
+printf "%s" "$AGENT_STORE_EVENT"
+SH
+    chmod +x hook-touch.sh
+
+    pair_count=12
+    for index in $(seq 1 "$pair_count"); do
+      source_id="$("$agent_store_bin" create task title="source-$index" batch=disappear-race status=open)"
+      target_id="$("$agent_store_bin" create note title="target-$index" batch=disappear-race)"
+      printf "%s" "$source_id" >"$tmp/source-$index.id"
+      printf "%s" "$target_id" >"$tmp/target-$index.id"
+      "$agent_store_bin" link "$source_id" blocks "$target_id" >"$tmp/setup-link-$index.out" 2>"$tmp/setup-link-$index.err"
+    done
+
+    "$agent_store_bin" hook add link 'kind=task and batch=disappear-race and link.out=blocks' -- './hook-touch.sh hook-side-effects' >/tmp/agent-store-link-rm-race-link-hook.out
+    "$agent_store_bin" hook add unlink 'kind=task and batch=disappear-race' -- './hook-touch.sh hook-side-effects' >/tmp/agent-store-link-rm-race-unlink-hook.out
+
+    event_marker="$(python3 - .agent-store/store.sqlite <<'PY'
+import sqlite3
+import sys
+
+con = sqlite3.connect(sys.argv[1])
+print(con.execute("select coalesce(max(id), 0) from store_events").fetchone()[0])
+PY
+)"
+    hook_marker="$(python3 - .agent-store/store.sqlite <<'PY'
+import sqlite3
+import sys
+
+con = sqlite3.connect(sys.argv[1])
+print(con.execute("select coalesce(max(id), 0) from hook_runs").fetchone()[0])
+PY
+)"
+
+    ready_dir="$tmp/race-ready"
+    start_file="$tmp/race-start"
+    mkdir "$ready_dir"
+
+    run_pair_worker() {
+      local op="$1"
+      local index="$2"
+      local source_id
+      local target_id
+      source_id="$(cat "$tmp/source-$index.id")"
+      target_id="$(cat "$tmp/target-$index.id")"
+
+      touch "$ready_dir/$op-$index"
+      while [ ! -f "$start_file" ]; do
+        sleep 0.01
+      done
+
+      set +e
+      case "$op" in
+        link)
+          "$agent_store_bin" link "$source_id" blocks "$target_id" >"$tmp/race-$op-$index.out" 2>"$tmp/race-$op-$index.err"
+          ;;
+        unlink)
+          "$agent_store_bin" unlink "$source_id" blocks "$target_id" >"$tmp/race-$op-$index.out" 2>"$tmp/race-$op-$index.err"
+          ;;
+        rm-source)
+          "$agent_store_bin" rm "$source_id" >"$tmp/race-$op-$index.out" 2>"$tmp/race-$op-$index.err"
+          ;;
+        rm-target)
+          "$agent_store_bin" rm "$target_id" >"$tmp/race-$op-$index.out" 2>"$tmp/race-$op-$index.err"
+          ;;
+      esac
+      code="$?"
+      set -e
+      printf "%s" "$code" >"$tmp/race-$op-$index.status"
+    }
+
+    pids=()
+    for index in $(seq 1 "$pair_count"); do
+      for op in link unlink rm-source rm-target; do
+        (run_pair_worker "$op" "$index") &
+        pids+=("$!")
+      done
+    done
+
+    expected_workers=$((pair_count * 4))
+    while [ "$(find "$ready_dir" -type f | wc -l | tr -d ' ')" -lt "$expected_workers" ]; do
+      sleep 0.01
+    done
+    touch "$start_file"
+
+    for pid in "${pids[@]}"; do
+      wait "$pid"
+    done
+
+    if grep -R "database is locked" "$tmp"/race-*.err; then
+      exit 1
+    fi
+    if grep -R -E "failed to load (link|unlink) hook record" "$tmp"/race-*.err; then
+      exit 1
+    fi
+
+    for index in $(seq 1 "$pair_count"); do
+      source_id="$(cat "$tmp/source-$index.id")"
+      target_id="$(cat "$tmp/target-$index.id")"
+
+      for op in link unlink; do
+        code="$(cat "$tmp/race-$op-$index.status")"
+        if [ "$code" = "0" ]; then
+          case "$op" in
+            link) grep -Fxq "Linked $source_id blocks $target_id" "$tmp/race-$op-$index.out" ;;
+            unlink) grep -Fxq "Unlinked $source_id blocks $target_id" "$tmp/race-$op-$index.out" ;;
+          esac
+        else
+          grep -Fq "was not found" "$tmp/race-$op-$index.err"
+        fi
+      done
+
+      for op in rm-source rm-target; do
+        code="$(cat "$tmp/race-$op-$index.status")"
+        record_id="$source_id"
+        if [ "$op" = "rm-target" ]; then
+          record_id="$target_id"
+        fi
+        if [ "$code" = "0" ]; then
+          grep -Fxq "Removed $record_id" "$tmp/race-$op-$index.out"
+        else
+          grep -Fq "was not found" "$tmp/race-$op-$index.err"
+        fi
+      done
+    done
+
+    trigger_link_source="$("$agent_store_bin" create task title=trigger-link-source batch=disappear-race status=open)"
+    trigger_link_target="$("$agent_store_bin" create note title=trigger-link-target batch=disappear-race)"
+    python3 - .agent-store/store.sqlite "$trigger_link_source" <<'PY'
+import sqlite3
+import sys
+
+db, source_id = sys.argv[1:]
+assert source_id.isalnum(), source_id
+con = sqlite3.connect(db)
+con.execute("PRAGMA foreign_keys = ON")
+con.executescript(
+    f"""
+    create trigger delete_link_source_after_event
+    after insert on store_events
+    when new.event_type = 'link' and new.record_id = '{source_id}'
+    begin
+      delete from records where id = new.record_id;
+    end
+    """
+)
+con.commit()
+PY
+    set +e
+    "$agent_store_bin" link "$trigger_link_source" blocks "$trigger_link_target" >"$tmp/trigger-link.out" 2>"$tmp/trigger-link.err"
+    trigger_link_code="$?"
+    set -e
+    printf "%s" "$trigger_link_code" >"$tmp/trigger-link.status"
+    if [ "$trigger_link_code" != "0" ]; then
+      cat "$tmp/trigger-link.err" >&2
+      exit 1
+    fi
+    grep -Fxq "Linked $trigger_link_source blocks $trigger_link_target" "$tmp/trigger-link.out"
+
+    trigger_unlink_source="$("$agent_store_bin" create task title=trigger-unlink-source batch=disappear-race status=open)"
+    trigger_unlink_target="$("$agent_store_bin" create note title=trigger-unlink-target batch=disappear-race)"
+    "$agent_store_bin" link "$trigger_unlink_source" blocks "$trigger_unlink_target" >"$tmp/trigger-unlink-setup.out" 2>"$tmp/trigger-unlink-setup.err"
+    python3 - .agent-store/store.sqlite "$trigger_unlink_source" <<'PY'
+import sqlite3
+import sys
+
+db, source_id = sys.argv[1:]
+assert source_id.isalnum(), source_id
+con = sqlite3.connect(db)
+con.execute("PRAGMA foreign_keys = ON")
+con.executescript(
+    f"""
+    create trigger delete_unlink_source_after_event
+    after insert on store_events
+    when new.event_type = 'unlink' and new.record_id = '{source_id}'
+    begin
+      delete from records where id = new.record_id;
+    end
+    """
+)
+con.commit()
+PY
+    set +e
+    "$agent_store_bin" unlink "$trigger_unlink_source" blocks "$trigger_unlink_target" >"$tmp/trigger-unlink.out" 2>"$tmp/trigger-unlink.err"
+    trigger_unlink_code="$?"
+    set -e
+    printf "%s" "$trigger_unlink_code" >"$tmp/trigger-unlink.status"
+    if [ "$trigger_unlink_code" != "0" ]; then
+      cat "$tmp/trigger-unlink.err" >&2
+      exit 1
+    fi
+    grep -Fxq "Unlinked $trigger_unlink_source blocks $trigger_unlink_target" "$tmp/trigger-unlink.out"
+
+    if grep -R "database is locked" "$tmp"/trigger-*.err; then
+      exit 1
+    fi
+    if grep -R -E "failed to load (link|unlink) hook record" "$tmp"/trigger-*.err; then
+      exit 1
+    fi
+
+    summary="$(python3 - .agent-store/store.sqlite "$event_marker" "$hook_marker" <<'PY'
+import sqlite3
+import sys
+
+db, event_marker_s, hook_marker_s = sys.argv[1:]
+event_marker = int(event_marker_s)
+hook_marker = int(hook_marker_s)
+con = sqlite3.connect(db)
+
+dangling_links = con.execute(
+    """
+    select count(*)
+    from record_links l
+    left join records source on source.id = l.from_record_id
+    left join records target on target.id = l.to_record_id
+    where source.id is null or target.id is null
+    """
+).fetchone()[0]
+assert dangling_links == 0, dangling_links
+
+event_counts = dict(
+    con.execute(
+        """
+        select event_type, count(*)
+        from store_events
+        where id > ? and event_type in ('link', 'unlink')
+        group by event_type
+        """,
+        (event_marker,),
+    ).fetchall()
+)
+hook_counts = dict(
+    con.execute(
+        """
+        select event_type, count(*)
+        from hook_runs
+        where id > ? and event_type in ('link', 'unlink')
+        group by event_type
+        """,
+        (hook_marker,),
+    ).fetchall()
+)
+assert event_counts == hook_counts, (event_counts, hook_counts)
+print(
+    "link_events={link} unlink_events={unlink} hook_runs={hooks} dangling_links={dangling}".format(
+        link=event_counts.get("link", 0),
+        unlink=event_counts.get("unlink", 0),
+        hooks=sum(hook_counts.values()),
+        dangling=dangling_links,
+    )
+)
+PY
+)"
+
+    side_effect_count="0"
+    if [ -f "$hook_side_effects/hook.log" ]; then
+      side_effect_count="$(wc -l < "$hook_side_effects/hook.log" | tr -d ' ')"
+    fi
+
+    hook_run_count="$(printf "%s\n" "$summary" | sed -E 's/.*hook_runs=([0-9]+).*/\1/')"
+    test "$side_effect_count" = "$hook_run_count"
+
+    if [ -n "$evidence_root" ]; then
+      find "$tmp" -maxdepth 1 -type f \
+        \( -name 'race-*' -o -name 'trigger-*' -o -name 'setup-link-*' \) \
+        -exec cp {} "$evidence_root/logs/" \;
+      if [ -f "$hook_side_effects/hook.log" ]; then
+        cp "$hook_side_effects/hook.log" "$evidence_root/logs/hook.log"
+      fi
+      cp .agent-store/store.sqlite "$evidence_root/store.sqlite"
+      cat > "$evidence_root/reports/concurrent-link-record-disappearance-races.md" <<EOF
+# Concurrent Link/Record Disappearance Race Evidence
+
+- raced_pairs: $pair_count
+- cli_workers: $expected_workers
+- trigger_link_source: $trigger_link_source
+- trigger_unlink_source: $trigger_unlink_source
+- $summary
+- hook_side_effects: $side_effect_count
+- database: $evidence_root/store.sqlite
+- logs: $evidence_root/logs
+EOF
+    fi
+    ;;
+
   concurrent_same_record_and_link_races)
     CARGO_TARGET_DIR="$target_dir" cargo build --quiet --manifest-path "$repo/Cargo.toml"
     agent_store_bin="$target_dir/debug/agent-store"
@@ -1128,7 +1430,7 @@ EOF
     ;;
 
   *)
-    echo "usage: $0 {store_is_project_local|migrations_apply_on_open|initial_schema_tables|records_columns|record_fields_typed_columns|record_links_cardinality_shape|record_links_columns_unique|record_delete_cascades_links|hard_delete_store_event_snapshot|record_mutations_transactional|persistence_open_errors_actionable|migration_checksum_mismatch|concurrent_process_writers|concurrent_process_writers_with_hooks|concurrent_process_mutations_with_hooks|concurrent_same_record_and_link_races}" >&2
+    echo "usage: $0 {store_is_project_local|migrations_apply_on_open|initial_schema_tables|records_columns|record_fields_typed_columns|record_links_cardinality_shape|record_links_columns_unique|record_delete_cascades_links|hard_delete_store_event_snapshot|record_mutations_transactional|persistence_open_errors_actionable|migration_checksum_mismatch|concurrent_process_writers|concurrent_process_writers_with_hooks|concurrent_process_mutations_with_hooks|concurrent_link_record_disappearance_races|concurrent_same_record_and_link_races}" >&2
     exit 2
     ;;
 esac
