@@ -2181,11 +2181,15 @@ SH
     "$agent_store_bin" link "$json_source_id" relates "$json_target_id" >/tmp/agent-store-hook-context-failure-06p-seed-link.out
     plain_set_id="$("$agent_store_bin" create task title=PlainSetContext status=pending)"
     json_unset_id="$("$agent_store_bin" create task title=JsonUnsetContext flag=remove-me status=open)"
+    plain_multi_set_id="$("$agent_store_bin" create task title=PlainMultiSetContext status=pending priority=low)"
+    json_multi_unset_id="$("$agent_store_bin" create task title=JsonMultiUnsetContext flag=remove-me extra=remove-too status=open)"
 
     plain_hook_id="$("$agent_store_bin" hook add link 'kind=task and title=PlainLinkContext' -- './fail-context-hook.sh plain-link')"
     json_hook_id="$("$agent_store_bin" hook add unlink 'kind=task and title=JsonUnlinkContext' -- './fail-context-hook.sh json-unlink')"
     plain_set_hook_id="$("$agent_store_bin" hook add set 'kind=task and title=PlainSetContext and status=done' -- './fail-context-hook.sh plain-set')"
     json_unset_hook_id="$("$agent_store_bin" hook add unset 'kind=task and title=JsonUnsetContext and not flag=remove-me' -- './fail-context-hook.sh json-unset-field')"
+    plain_multi_set_hook_id="$("$agent_store_bin" hook add set 'kind=task and title=PlainMultiSetContext and status=done and priority=high' -- './fail-context-hook.sh plain-set-multi')"
+    json_multi_unset_hook_id="$("$agent_store_bin" hook add unset 'kind=task and title=JsonMultiUnsetContext and not flag=remove-me and not extra=remove-too' -- './fail-context-hook.sh json-unset-multi')"
 
     event_marker="$(python3 - .agent-store/store.sqlite <<'PY'
 import sqlite3
@@ -2248,6 +2252,28 @@ PY
     grep -Fq "exit status 33" "$tmp/hook-context-json-unset.err"
     grep -Fq "json-unset-field-stderr" "$tmp/hook-context-json-unset.err"
 
+    set +e
+    "$agent_store_bin" set "$plain_multi_set_id" status=done priority=high >"$tmp/hook-context-plain-set-multi.out" 2>"$tmp/hook-context-plain-set-multi.err"
+    plain_multi_set_status="$?"
+    set -e
+    printf "%s" "$plain_multi_set_status" >"$tmp/hook-context-plain-set-multi.status"
+    test "$plain_multi_set_status" -ne 0
+    test ! -s "$tmp/hook-context-plain-set-multi.out"
+    grep -Fq "Store mutation already committed" "$tmp/hook-context-plain-set-multi.err"
+    grep -Fq "exit status 33" "$tmp/hook-context-plain-set-multi.err"
+    grep -Fq "plain-set-multi-stderr" "$tmp/hook-context-plain-set-multi.err"
+
+    set +e
+    "$agent_store_bin" --json unset "$json_multi_unset_id" flag extra >"$tmp/hook-context-json-unset-multi.out" 2>"$tmp/hook-context-json-unset-multi.err"
+    json_multi_unset_status="$?"
+    set -e
+    printf "%s" "$json_multi_unset_status" >"$tmp/hook-context-json-unset-multi.status"
+    test "$json_multi_unset_status" -ne 0
+    test ! -s "$tmp/hook-context-json-unset-multi.out"
+    grep -Fq "Store mutation already committed" "$tmp/hook-context-json-unset-multi.err"
+    grep -Fq "exit status 33" "$tmp/hook-context-json-unset-multi.err"
+    grep -Fq "json-unset-multi-stderr" "$tmp/hook-context-json-unset-multi.err"
+
     summary="$(
       python3 - .agent-store/store.sqlite \
         context-env.log \
@@ -2257,12 +2283,16 @@ PY
         "$json_hook_id" \
         "$plain_set_hook_id" \
         "$json_unset_hook_id" \
+        "$plain_multi_set_hook_id" \
+        "$json_multi_unset_hook_id" \
         "$plain_source_id" \
         "$plain_target_id" \
         "$json_source_id" \
         "$json_target_id" \
         "$plain_set_id" \
-        "$json_unset_id" <<'PY'
+        "$json_unset_id" \
+        "$plain_multi_set_id" \
+        "$json_multi_unset_id" <<'PY'
 import pathlib
 import sqlite3
 import sys
@@ -2276,12 +2306,16 @@ import sys
     json_hook_id,
     plain_set_hook_id,
     json_unset_hook_id,
+    plain_multi_set_hook_id,
+    json_multi_unset_hook_id,
     plain_source_id,
     plain_target_id,
     json_source_id,
     json_target_id,
     plain_set_id,
     json_unset_id,
+    plain_multi_set_id,
+    json_multi_unset_id,
 ) = sys.argv[1:]
 
 env_lines = pathlib.Path(env_log).read_text().splitlines()
@@ -2290,6 +2324,8 @@ expected_env = [
     f"json-unlink:unlink:{json_source_id}:task:relates:{json_target_id}:::::",
     f"plain-set:set:{plain_set_id}:task:::status:status:done:pending:done",
     f"json-unset-field:unset:{json_unset_id}:task:::flag:flag:remove-me:remove-me:",
+    f"plain-set-multi:set:{plain_multi_set_id}:task:::::::",
+    f"json-unset-multi:unset:{json_multi_unset_id}:task:::::::",
 ]
 assert env_lines == expected_env, env_lines
 
@@ -2309,6 +2345,8 @@ assert event_rows == [
     ("unlink", json_source_id),
     ("set", plain_set_id),
     ("unset", json_unset_id),
+    ("set", plain_multi_set_id),
+    ("unset", json_multi_unset_id),
 ], event_rows
 
 link_rows = set(
@@ -2333,6 +2371,26 @@ plain_set_status = con.execute(
     (plain_set_id,),
 ).fetchone()
 assert plain_set_status == ("done",), plain_set_status
+plain_multi_set_status = con.execute(
+    """
+    select raw_value
+    from record_fields
+    where record_id = ?
+      and key = 'status'
+    """,
+    (plain_multi_set_id,),
+).fetchone()
+plain_multi_set_priority = con.execute(
+    """
+    select raw_value
+    from record_fields
+    where record_id = ?
+      and key = 'priority'
+    """,
+    (plain_multi_set_id,),
+).fetchone()
+assert plain_multi_set_status == ("done",), plain_multi_set_status
+assert plain_multi_set_priority == ("high",), plain_multi_set_priority
 json_unset_flag = con.execute(
     """
     select raw_value
@@ -2343,24 +2401,54 @@ json_unset_flag = con.execute(
     (json_unset_id,),
 ).fetchone()
 assert json_unset_flag is None, json_unset_flag
+json_multi_unset_flag = con.execute(
+    """
+    select raw_value
+    from record_fields
+    where record_id = ?
+      and key = 'flag'
+    """,
+    (json_multi_unset_id,),
+).fetchone()
+json_multi_unset_extra = con.execute(
+    """
+    select raw_value
+    from record_fields
+    where record_id = ?
+      and key = 'extra'
+    """,
+    (json_multi_unset_id,),
+).fetchone()
+assert json_multi_unset_flag is None, json_multi_unset_flag
+assert json_multi_unset_extra is None, json_multi_unset_extra
 
 rows = con.execute(
     """
     select hook_id, event_type, record_id, exit_status, stdout_summary, stderr_summary
     from hook_runs
     where id > ?
-      and hook_id in (?, ?, ?, ?)
+      and hook_id in (?, ?, ?, ?, ?, ?)
     order by id
     """,
-    (hook_marker, plain_hook_id, json_hook_id, plain_set_hook_id, json_unset_hook_id),
+    (
+        hook_marker,
+        plain_hook_id,
+        json_hook_id,
+        plain_set_hook_id,
+        json_unset_hook_id,
+        plain_multi_set_hook_id,
+        json_multi_unset_hook_id,
+    ),
 ).fetchall()
 expected = {
     plain_hook_id: ("link", plain_source_id, "plain-link-stdout", "plain-link-stderr"),
     json_hook_id: ("unlink", json_source_id, "json-unlink-stdout", "json-unlink-stderr"),
     plain_set_hook_id: ("set", plain_set_id, "plain-set-stdout", "plain-set-stderr"),
     json_unset_hook_id: ("unset", json_unset_id, "json-unset-field-stdout", "json-unset-field-stderr"),
+    plain_multi_set_hook_id: ("set", plain_multi_set_id, "plain-set-multi-stdout", "plain-set-multi-stderr"),
+    json_multi_unset_hook_id: ("unset", json_multi_unset_id, "json-unset-multi-stdout", "json-unset-multi-stderr"),
 }
-assert len(rows) == 4, rows
+assert len(rows) == 6, rows
 for hook_id, event_type, record_id, exit_status, stdout_summary, stderr_summary in rows:
     expected_event, expected_record, expected_stdout, expected_stderr = expected[hook_id]
     assert event_type == expected_event, rows
@@ -2370,12 +2458,14 @@ for hook_id, event_type, record_id, exit_status, stdout_summary, stderr_summary 
     assert expected_stderr in stderr_summary, rows
 
 print(
-    "context_failure_hook_runs={} plain_source={} json_source={} plain_set={} json_unset={} env_lines={}".format(
+    "context_failure_hook_runs={} plain_source={} json_source={} plain_set={} json_unset={} plain_multi_set={} json_multi_unset={} env_lines={}".format(
         len(rows),
         plain_source_id,
         json_source_id,
         plain_set_id,
         json_unset_id,
+        plain_multi_set_id,
+        json_multi_unset_id,
         len(env_lines),
     )
 )
@@ -2396,16 +2486,22 @@ PY
 - json_hook_id: $json_hook_id
 - plain_set_hook_id: $plain_set_hook_id
 - json_unset_hook_id: $json_unset_hook_id
+- plain_multi_set_hook_id: $plain_multi_set_hook_id
+- json_multi_unset_hook_id: $json_multi_unset_hook_id
 - plain_source_id: $plain_source_id
 - plain_target_id: $plain_target_id
 - json_source_id: $json_source_id
 - json_target_id: $json_target_id
 - plain_set_id: $plain_set_id
 - json_unset_id: $json_unset_id
+- plain_multi_set_id: $plain_multi_set_id
+- json_multi_unset_id: $json_multi_unset_id
 - plain_status: $plain_status
 - json_status: $json_status
 - plain_set_status: $plain_set_status
 - json_unset_status: $json_unset_status
+- plain_multi_set_status: $plain_multi_set_status
+- json_multi_unset_status: $json_multi_unset_status
 - $summary
 - database: $evidence_root/store.sqlite
 - logs: $evidence_root/logs
