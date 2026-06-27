@@ -13,7 +13,7 @@ use std::env;
 use std::fs::{self, OpenOptions};
 use std::io::{self, Read, Write};
 #[cfg(unix)]
-use std::os::unix::process::CommandExt;
+use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::path::Path;
 use std::process::{self, Command};
 use std::thread;
@@ -538,7 +538,7 @@ fn run_matching_hooks_after_commit(
         let exit_status = if output.timed_out {
             HOOK_TIMEOUT_EXIT_STATUS
         } else {
-            output.status.code().unwrap_or(1)
+            hook_exit_status(&output.status)
         };
         let stdout_summary = String::from_utf8_lossy(&output.stdout).into_owned();
         let hook_stderr_summary = String::from_utf8_lossy(&output.stderr).into_owned();
@@ -581,14 +581,61 @@ fn run_matching_hooks_after_commit(
         }
 
         if !output.status.success() {
+            let status_detail = hook_status_detail(&output.status, exit_status);
             return Err(format!(
-                "hook {} command '{}' failed with exit status {}; stderr: {}",
-                hook.id, hook.command, exit_status, stderr_summary
+                "hook {} command '{}' failed with {}; stderr: {}",
+                hook.id, hook.command, status_detail, stderr_summary
             ));
         }
     }
 
     Ok(())
+}
+
+fn hook_exit_status(status: &process::ExitStatus) -> i32 {
+    if let Some(code) = status.code() {
+        return code;
+    }
+
+    #[cfg(unix)]
+    {
+        if let Some(signal) = status.signal() {
+            return -signal;
+        }
+    }
+
+    1
+}
+
+fn hook_status_detail(status: &process::ExitStatus, exit_status: i32) -> String {
+    if let Some(code) = status.code() {
+        return format!("exit status {code}");
+    }
+
+    #[cfg(unix)]
+    {
+        if let Some(signal) = status.signal() {
+            if let Some(name) = unix_signal_name(signal) {
+                return format!("terminated by signal {signal} ({name})");
+            }
+            return format!("terminated by signal {signal}");
+        }
+    }
+
+    format!("exit status {exit_status}")
+}
+
+#[cfg(unix)]
+fn unix_signal_name(signal: i32) -> Option<&'static str> {
+    match signal {
+        libc::SIGHUP => Some("SIGHUP"),
+        libc::SIGINT => Some("SIGINT"),
+        libc::SIGQUIT => Some("SIGQUIT"),
+        libc::SIGABRT => Some("SIGABRT"),
+        libc::SIGKILL => Some("SIGKILL"),
+        libc::SIGTERM => Some("SIGTERM"),
+        _ => None,
+    }
 }
 
 struct HookCommandOutput {

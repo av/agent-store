@@ -275,6 +275,9 @@
 - label: Timed-out Hook Bash commands terminate their process group so descendant processes do not keep running or produce side effects after the triggering CLI returns; the committed mutation and timeout Hook Run remain persisted
   command: bash tests/facts/cli_hooks.sh hook_timeout_terminates_process_group
   tags: [implemented]
+- label: Plain and --json mutations whose matching Hook Bash command terminates from a signal exit non-zero with empty stdout, report that the Store mutation committed and name the signal on stderr, and persist the Hook Run with captured output and a signal-derived status
+  command: bash tests/facts/cli_hooks.sh hook_signal_termination_reports_committed_mutation
+  tags: [implemented]
 
 # context
 - label: Quick Context output includes total Record count, per-kind Record counts sorted by kind, Hook count, and the most recent Store activity timestamp when available

@@ -1991,6 +1991,164 @@ assert rows == [
 PY
     ;;
 
+  hook_signal_termination_reports_committed_mutation)
+    cd "$tmp"
+    run_agent_store init >/tmp/agent-store-hook-signal-yjb-init.out
+    agent_store_bin="$target_dir/debug/agent-store"
+
+    evidence_root="${AGENT_STORE_E2E_DIR:-}"
+    if [ -n "$evidence_root" ]; then
+      mkdir -p "$evidence_root/logs" "$evidence_root/reports"
+    fi
+
+    cat > signal-hook.sh <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+label="$1"
+printf "%s-signal-stdout" "$label"
+printf "%s-signal-stderr" "$label" >&2
+kill -TERM "$$"
+sleep 1
+SH
+    chmod +x signal-hook.sh
+
+    plain_hook_id="$("$agent_store_bin" hook add create title=SignalPlain -- './signal-hook.sh plain')"
+    set +e
+    "$agent_store_bin" create task title=SignalPlain >"$tmp/hook-signal-plain.out" 2>"$tmp/hook-signal-plain.err"
+    plain_status="$?"
+    set -e
+    printf "%s" "$plain_status" >"$tmp/hook-signal-plain.status"
+
+    test "$plain_status" -ne 0
+    test ! -s "$tmp/hook-signal-plain.out"
+    grep -Fq "Store mutation already committed" "$tmp/hook-signal-plain.err"
+    grep -Fq "terminated by signal 15" "$tmp/hook-signal-plain.err"
+    grep -Fq "SIGTERM" "$tmp/hook-signal-plain.err"
+    grep -Fq "plain-signal-stderr" "$tmp/hook-signal-plain.err"
+
+    json_record="$("$agent_store_bin" create task title=SignalJson status=pending)"
+    json_hook_id="$("$agent_store_bin" hook add set 'kind=task and title=SignalJson and status=done' -- './signal-hook.sh json')"
+    set +e
+    "$agent_store_bin" --json set "$json_record" status=done >"$tmp/hook-signal-json.out" 2>"$tmp/hook-signal-json.err"
+    json_status="$?"
+    set -e
+    printf "%s" "$json_status" >"$tmp/hook-signal-json.status"
+
+    test "$json_status" -ne 0
+    test ! -s "$tmp/hook-signal-json.out"
+    grep -Fq "Store mutation already committed" "$tmp/hook-signal-json.err"
+    grep -Fq "terminated by signal 15" "$tmp/hook-signal-json.err"
+    grep -Fq "SIGTERM" "$tmp/hook-signal-json.err"
+    grep -Fq "json-signal-stderr" "$tmp/hook-signal-json.err"
+
+    summary="$(python3 - \
+      .agent-store/store.sqlite \
+      "$plain_hook_id" \
+      "$json_hook_id" \
+      "$json_record" <<'PY'
+import sqlite3
+import sys
+
+db, plain_hook_id, json_hook_id, json_record = sys.argv[1:]
+con = sqlite3.connect(db)
+
+records = {
+    row[1]: row[0]
+    for row in con.execute(
+        """
+        select records.id, record_fields.raw_value
+        from records
+        join record_fields on record_fields.record_id = records.id
+        where records.kind = 'task'
+          and record_fields.key = 'title'
+          and record_fields.raw_value in ('SignalPlain', 'SignalJson')
+        """
+    )
+}
+assert set(records) == {"SignalPlain", "SignalJson"}, records
+plain_record = records["SignalPlain"]
+assert records["SignalJson"] == json_record, records
+
+json_status = con.execute(
+    """
+    select raw_value
+    from record_fields
+    where record_id = ? and key = 'status'
+    """,
+    (json_record,),
+).fetchone()
+assert json_status == ("done",), json_status
+
+event_rows = con.execute(
+    """
+    select event_type, record_id
+    from store_events
+    where record_id in (?, ?)
+    order by id
+    """,
+    (plain_record, json_record),
+).fetchall()
+assert ("create", plain_record) in event_rows, event_rows
+assert ("set", json_record) in event_rows, event_rows
+
+rows = con.execute(
+    """
+    select hook_id, event_type, record_id, exit_status, stdout_summary, stderr_summary
+    from hook_runs
+    where hook_id in (?, ?)
+    order by id
+    """,
+    (plain_hook_id, json_hook_id),
+).fetchall()
+assert rows == [
+    (
+        plain_hook_id,
+        "create",
+        plain_record,
+        -15,
+        "plain-signal-stdout",
+        "plain-signal-stderr",
+    ),
+    (
+        json_hook_id,
+        "set",
+        json_record,
+        -15,
+        "json-signal-stdout",
+        "json-signal-stderr",
+    ),
+], rows
+
+print(
+    "signal_hook_runs={} plain_record={} json_record={} statuses={} {}".format(
+        len(rows),
+        plain_record,
+        json_record,
+        rows[0][3],
+        rows[1][3],
+    )
+)
+PY
+)"
+
+    if [ -n "$evidence_root" ]; then
+      cp signal-hook.sh "$evidence_root/logs/"
+      cp "$tmp"/hook-signal-* "$evidence_root/logs/"
+      cp .agent-store/store.sqlite "$evidence_root/store.sqlite"
+      cat > "$evidence_root/reports/hook-signal-termination.md" <<EOF
+# Hook Signal Termination Evidence
+
+- plain_hook_id: $plain_hook_id
+- json_hook_id: $json_hook_id
+- plain_status: $plain_status
+- json_status: $json_status
+- $summary
+- database: $evidence_root/store.sqlite
+- logs: $evidence_root/logs
+EOF
+    fi
+    ;;
+
   hook_timeout_terminates_process_group)
     cd "$tmp"
     run_agent_store init >/tmp/agent-store-hook-timeout-pgrp-ecj-init.out
@@ -2121,7 +2279,7 @@ EOF
     ;;
 
   *)
-    echo "usage: $0 {hook_add_stores_metadata|hook_ls_deterministic|hook_rm_deletes_metadata|hooks_run_after_commit|hook_query_filters_records|hook_query_uses_mutation_snapshot|hook_stdin_receives_record_snapshot|hook_failure_reports_details|hook_failure_or_timeout_reports_committed_mutation|json_mutation_hook_failure_or_timeout_reports_committed_without_success_json|json_multiple_matching_hooks_stop_after_failure_or_timeout|hooks_run_sequentially_from_project_root_with_timeout|hook_env_vars_for_record_events|link_hook_query_source_and_relation_env|hook_output_capture_caps_and_help|hook_timeout_terminates_process_group}" >&2
+    echo "usage: $0 {hook_add_stores_metadata|hook_ls_deterministic|hook_rm_deletes_metadata|hooks_run_after_commit|hook_query_filters_records|hook_query_uses_mutation_snapshot|hook_stdin_receives_record_snapshot|hook_failure_reports_details|hook_failure_or_timeout_reports_committed_mutation|json_mutation_hook_failure_or_timeout_reports_committed_without_success_json|json_multiple_matching_hooks_stop_after_failure_or_timeout|hooks_run_sequentially_from_project_root_with_timeout|hook_env_vars_for_record_events|link_hook_query_source_and_relation_env|hook_output_capture_caps_and_help|hook_signal_termination_reports_committed_mutation|hook_timeout_terminates_process_group}" >&2
     exit 2
     ;;
 esac
