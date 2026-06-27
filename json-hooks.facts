@@ -1,5 +1,5 @@
 # hooks
-- label: --json set, --json unset, --json rm, --json link, and --json unlink mutations whose matching Hook fails or times out after the Store mutation commits exit non-zero, leave stdout empty, report the committed Hook failure or timeout on stderr, and persist both the Store mutation and Hook Run
+- label: --json create, --json set, --json unset, --json rm, --json link, and --json unlink mutations whose matching Hook fails or times out after the Store mutation commits exit non-zero, leave stdout empty, report the committed Hook failure or timeout on stderr, and persist both the Store mutation and Hook Run
   id: jhf
   command: bash tests/facts/cli_hooks.sh json_mutation_hook_failure_or_timeout_reports_committed_without_success_json
   tags: [implemented]

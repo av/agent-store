@@ -529,12 +529,14 @@ SH
     timeout_record="$("$agent_store_bin" create task op=json-timeout-set status=pending)"
     "$agent_store_bin" link "$unlink_source" blocks "$unlink_target" >/tmp/agent-store-json-hook-failure-jhf-seed-unlink.out
 
+    create_hook_id="$("$agent_store_bin" hook add create 'kind=task and op=json-fail-create' -- './fail-hook.sh create')"
     set_hook_id="$("$agent_store_bin" hook add set 'kind=task and op=json-fail-set and status=done' -- './fail-hook.sh set')"
     unset_hook_id="$("$agent_store_bin" hook add unset 'kind=task and op=json-fail-unset and not flag=present' -- './fail-hook.sh unset')"
     rm_hook_id="$("$agent_store_bin" hook add rm 'kind=task and op=json-fail-rm and action=remove' -- './fail-hook.sh rm')"
     link_hook_id="$("$agent_store_bin" hook add link 'kind=task and op=json-fail-link' -- './fail-hook.sh link')"
     unlink_hook_id="$("$agent_store_bin" hook add unlink 'kind=task and op=json-fail-unlink' -- './fail-hook.sh unlink')"
     timeout_hook_id="$("$agent_store_bin" hook add set 'kind=task and op=json-timeout-set and status=timeout' -- './timeout-hook.sh set')"
+    create_timeout_hook_id="$("$agent_store_bin" hook add create 'kind=task and op=json-timeout-create' -- './timeout-hook.sh create')"
 
     event_marker="$(python3 - .agent-store/store.sqlite <<'PY'
 import sqlite3
@@ -568,6 +570,7 @@ PY
       grep -Fq "$name-failure-stderr" "$tmp/json-hook-$name.err"
     }
 
+    run_json_failure create create task op=json-fail-create status=committed
     run_json_failure set set "$set_record" status=done
     run_json_failure unset unset "$unset_record" flag
     run_json_failure rm rm "$rm_record"
@@ -586,6 +589,18 @@ PY
     grep -Fq "timed out after 30 seconds" "$tmp/json-hook-timeout.err"
     grep -Fq "set-timeout-stderr" "$tmp/json-hook-timeout.err"
 
+    set +e
+    timeout 40s "$agent_store_bin" --json create task op=json-timeout-create status=committed >"$tmp/json-hook-create-timeout.out" 2>"$tmp/json-hook-create-timeout.err"
+    create_timeout_status="$?"
+    set -e
+    printf "%s" "$create_timeout_status" >"$tmp/json-hook-create-timeout.status"
+    test "$create_timeout_status" -ne 0
+    test "$create_timeout_status" -ne 124
+    test ! -s "$tmp/json-hook-create-timeout.out"
+    grep -Fq "Store mutation already committed" "$tmp/json-hook-create-timeout.err"
+    grep -Fq "timed out after 30 seconds" "$tmp/json-hook-create-timeout.err"
+    grep -Fq "create-timeout-stderr" "$tmp/json-hook-create-timeout.err"
+
     summary="$(python3 - \
       "$tmp" \
       .agent-store/store.sqlite \
@@ -599,12 +614,14 @@ PY
       "$unlink_source" \
       "$unlink_target" \
       "$timeout_record" \
+      "$create_hook_id" \
       "$set_hook_id" \
       "$unset_hook_id" \
       "$rm_hook_id" \
       "$link_hook_id" \
       "$unlink_hook_id" \
-      "$timeout_hook_id" <<'PY'
+      "$timeout_hook_id" \
+      "$create_timeout_hook_id" <<'PY'
 from collections import Counter
 import pathlib
 import sqlite3
@@ -623,28 +640,31 @@ import sys
     unlink_source,
     unlink_target,
     timeout_record,
+    create_hook_id,
     set_hook_id,
     unset_hook_id,
     rm_hook_id,
     link_hook_id,
     unlink_hook_id,
     timeout_hook_id,
+    create_timeout_hook_id,
 ) = sys.argv[1:]
 tmp = pathlib.Path(tmp_s)
 event_marker = int(event_marker_s)
 hook_marker = int(hook_marker_s)
 
-for name in ["set", "unset", "rm", "link", "unlink", "timeout"]:
+for name in ["create", "set", "unset", "rm", "link", "unlink", "timeout", "create-timeout"]:
     stdout = (tmp / f"json-hook-{name}.out").read_text(encoding="utf-8")
     stderr = (tmp / f"json-hook-{name}.err").read_text(encoding="utf-8")
     status = int((tmp / f"json-hook-{name}.status").read_text(encoding="utf-8"))
     assert stdout == "", (name, stdout)
     assert status != 0, (name, status)
     assert "Store mutation already committed" in stderr, (name, stderr)
-    if name == "timeout":
+    if name in {"timeout", "create-timeout"}:
         assert status != 124, status
         assert "timed out after 30 seconds" in stderr, stderr
-        assert "set-timeout-stderr" in stderr, stderr
+        expected_stderr = "create-timeout-stderr" if name == "create-timeout" else "set-timeout-stderr"
+        assert expected_stderr in stderr, stderr
     else:
         assert "exit status 31" in stderr, (name, stderr)
         assert f"{name}-failure-stderr" in stderr, (name, stderr)
@@ -659,9 +679,27 @@ def fields(record_id):
         ).fetchall()
     )
 
+def record_by_op(op):
+    rows = con.execute(
+        """
+        select records.id
+        from records
+        join record_fields on record_fields.record_id = records.id
+        where record_fields.key = 'op' and record_fields.raw_value = ?
+        order by records.id
+        """,
+        (op,),
+    ).fetchall()
+    assert len(rows) == 1, (op, rows)
+    return rows[0][0]
+
+create_record = record_by_op("json-fail-create")
+create_timeout_record = record_by_op("json-timeout-create")
+assert fields(create_record)["status"] == "committed", fields(create_record)
 assert fields(set_record)["status"] == "done", fields(set_record)
 assert "flag" not in fields(unset_record), fields(unset_record)
 assert fields(timeout_record)["status"] == "timeout", fields(timeout_record)
+assert fields(create_timeout_record)["status"] == "committed", fields(create_timeout_record)
 assert con.execute("select count(*) from records where id = ?", (rm_record,)).fetchone()[0] == 0
 assert con.execute(
     """
@@ -688,26 +726,31 @@ event_rows = con.execute(
     (event_marker,),
 ).fetchall()
 assert Counter(row[0] for row in event_rows) == {
+    "create": 2,
     "set": 2,
     "unset": 1,
     "rm": 1,
     "link": 1,
     "unlink": 1,
 }, event_rows
+assert ("create", create_record) in event_rows, event_rows
 assert ("set", set_record) in event_rows, event_rows
 assert ("unset", unset_record) in event_rows, event_rows
 assert ("rm", rm_record) in event_rows, event_rows
 assert ("link", link_source) in event_rows, event_rows
 assert ("unlink", unlink_source) in event_rows, event_rows
 assert ("set", timeout_record) in event_rows, event_rows
+assert ("create", create_timeout_record) in event_rows, event_rows
 
 hook_ids = [
+    create_hook_id,
     set_hook_id,
     unset_hook_id,
     rm_hook_id,
     link_hook_id,
     unlink_hook_id,
     timeout_hook_id,
+    create_timeout_hook_id,
 ]
 placeholders = ",".join("?" for _ in hook_ids)
 rows = con.execute(
@@ -722,6 +765,7 @@ rows = con.execute(
 assert len(rows) == len(hook_ids), rows
 by_hook = {row[0]: row[1:] for row in rows}
 expected_failures = {
+    create_hook_id: ("create", create_record, 31, "create-failure-stdout", "create-failure-stderr"),
     set_hook_id: ("set", set_record, 31, "set-failure-stdout", "set-failure-stderr"),
     unset_hook_id: ("unset", unset_record, 31, "unset-failure-stdout", "unset-failure-stderr"),
     rm_hook_id: ("rm", rm_record, 31, "rm-failure-stdout", "rm-failure-stderr"),
@@ -736,10 +780,17 @@ assert timeout_row[:4] == ("set", timeout_record, -1, ""), timeout_row
 assert "set-timeout-stderr" in timeout_row[4], timeout_row
 assert "timed out after 30 seconds" in timeout_row[4], timeout_row
 
+create_timeout_row = by_hook[create_timeout_hook_id]
+assert create_timeout_row[:4] == ("create", create_timeout_record, -1, ""), create_timeout_row
+assert "create-timeout-stderr" in create_timeout_row[4], create_timeout_row
+assert "timed out after 30 seconds" in create_timeout_row[4], create_timeout_row
+
 print(
-    "json_failures=5 json_timeouts=1 stdout_empty=6 hook_runs={} events={}".format(
+    "json_failures=6 json_timeouts=2 stdout_empty=8 hook_runs={} events={} create_record={} create_timeout_record={}".format(
         len(rows),
         len(event_rows),
+        create_record,
+        create_timeout_record,
     )
 )
 PY
@@ -761,8 +812,8 @@ PY
 - unlink_source: $unlink_source
 - unlink_target: $unlink_target
 - timeout_record: $timeout_record
-- failing_hook_ids: $set_hook_id $unset_hook_id $rm_hook_id $link_hook_id $unlink_hook_id
-- timeout_hook_id: $timeout_hook_id
+- failing_hook_ids: $create_hook_id $set_hook_id $unset_hook_id $rm_hook_id $link_hook_id $unlink_hook_id
+- timeout_hook_ids: $timeout_hook_id $create_timeout_hook_id
 - $summary
 - database: $evidence_root/store.sqlite
 - logs: $evidence_root/logs
