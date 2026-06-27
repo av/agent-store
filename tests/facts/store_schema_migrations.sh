@@ -1362,6 +1362,286 @@ EOF
     fi
     ;;
 
+  concurrent_hook_churn_reads)
+    CARGO_TARGET_DIR="$target_dir" cargo build --quiet --manifest-path "$repo/Cargo.toml"
+    agent_store_bin="$target_dir/debug/agent-store"
+    cd "$tmp"
+    "$agent_store_bin" init >/tmp/agent-store-hook-churn-reads-init.out
+
+    evidence_root="${AGENT_STORE_E2E_DIR:-}"
+    if [ -n "$evidence_root" ]; then
+      mkdir -p "$evidence_root/logs" "$evidence_root/reports"
+    fi
+
+    seed_task="$("$agent_store_bin" create task title=ChurnSeed status=open due=2026-07-01)"
+    seed_bug="$("$agent_store_bin" create bug title=ChurnBug status=open)"
+    "$agent_store_bin" link "$seed_task" blocks "$seed_bug" >"$tmp/seed-link.out" 2>"$tmp/seed-link.err"
+
+    stable_hook_count=3
+    stable_hook_ids=()
+    for index in $(seq 1 "$stable_hook_count"); do
+      stable_hook_ids+=("$("$agent_store_bin" hook add create "kind=task and phase=stable-$index" -- true)")
+    done
+
+    removable_hook_count=24
+    removable_hook_ids=()
+    for index in $(seq 1 "$removable_hook_count"); do
+      removable_hook_ids+=("$("$agent_store_bin" hook add rm "kind=task and phase=remove-$index" -- true)")
+    done
+
+    start_file="$tmp/churn-start"
+    wait_for_start() {
+      while [ ! -f "$start_file" ]; do
+        sleep 0.005
+      done
+    }
+
+    add_workers=6
+    adds_per_worker=8
+    add_worker() {
+      local worker="$1"
+      wait_for_start
+      for index in $(seq 1 "$adds_per_worker"); do
+        set +e
+        "$agent_store_bin" hook add create "kind=task and batch=churn-read-$worker-$index" -- true >"$tmp/add-$worker-$index.out" 2>"$tmp/add-$worker-$index.err"
+        local code="$?"
+        set -e
+        printf "%s" "$code" >"$tmp/add-$worker-$index.status"
+      done
+    }
+
+    reader_workers=4
+    reader_iterations=15
+    reader_worker() {
+      local worker="$1"
+      wait_for_start
+      for index in $(seq 1 "$reader_iterations"); do
+        set +e
+        "$agent_store_bin" hook ls >"$tmp/hook-ls-$worker-$index.out" 2>"$tmp/hook-ls-$worker-$index.err"
+        local hook_code="$?"
+        "$agent_store_bin" ctx >"$tmp/ctx-$worker-$index.out" 2>"$tmp/ctx-$worker-$index.err"
+        local ctx_code="$?"
+        set -e
+        printf "%s" "$hook_code" >"$tmp/hook-ls-$worker-$index.status"
+        printf "%s" "$ctx_code" >"$tmp/ctx-$worker-$index.status"
+      done
+    }
+
+    pids=()
+    for worker in $(seq 1 "$add_workers"); do
+      add_worker "$worker" &
+      pids+=("$!")
+    done
+
+    for index in $(seq 1 "$removable_hook_count"); do
+      hook_id="${removable_hook_ids[$((index - 1))]}"
+      (
+        wait_for_start
+        set +e
+        "$agent_store_bin" hook rm "$hook_id" >"$tmp/rm-$index.out" 2>"$tmp/rm-$index.err"
+        code="$?"
+        set -e
+        printf "%s" "$code" >"$tmp/rm-$index.status"
+      ) &
+      pids+=("$!")
+    done
+
+    for worker in $(seq 1 "$reader_workers"); do
+      reader_worker "$worker" &
+      pids+=("$!")
+    done
+
+    touch "$start_file"
+    wait_status=0
+    for pid in "${pids[@]}"; do
+      if ! wait "$pid"; then
+        wait_status=1
+      fi
+    done
+    if [ "$wait_status" -ne 0 ]; then
+      find "$tmp" -maxdepth 1 -type f -name '*.err' -print -exec cat {} \; >&2
+      exit 1
+    fi
+
+    for status_file in "$tmp"/*.status; do
+      if [ "$(cat "$status_file")" != "0" ]; then
+        echo "non-zero status in $status_file: $(cat "$status_file")" >&2
+        find "$tmp" -maxdepth 1 -type f -name '*.err' -print -exec cat {} \; >&2
+        exit 1
+      fi
+    done
+
+    if grep -R -E "database is locked|panicked at|thread '.*' panicked|failed to (add hook|remove hook|list hooks|build Quick Context)" "$tmp"/*.err; then
+      exit 1
+    fi
+
+    added_hook_ids=()
+    for worker in $(seq 1 "$add_workers"); do
+      for index in $(seq 1 "$adds_per_worker"); do
+        hook_id="$(cat "$tmp/add-$worker-$index.out")"
+        case "$hook_id" in
+          ??????) ;;
+          *) echo "invalid added hook id: $hook_id" >&2; exit 1 ;;
+        esac
+        added_hook_ids+=("$hook_id")
+      done
+    done
+    expected_added_count=$((add_workers * adds_per_worker))
+    test "${#added_hook_ids[@]}" = "$expected_added_count"
+
+    for index in $(seq 1 "$removable_hook_count"); do
+      hook_id="${removable_hook_ids[$((index - 1))]}"
+      grep -Fxq "Removed $hook_id" "$tmp/rm-$index.out"
+    done
+
+    "$agent_store_bin" hook ls >"$tmp/final-hook-ls.out" 2>"$tmp/final-hook-ls.err"
+    "$agent_store_bin" ctx >"$tmp/final-ctx.out" 2>"$tmp/final-ctx.err"
+
+    stable_ids_arg="$(IFS=,; printf "%s" "${stable_hook_ids[*]}")"
+    removable_ids_arg="$(IFS=,; printf "%s" "${removable_hook_ids[*]}")"
+    added_ids_arg="$(IFS=,; printf "%s" "${added_hook_ids[*]}")"
+    expected_final_hooks=$((stable_hook_count + expected_added_count))
+    max_observable_hooks=$((stable_hook_count + removable_hook_count + expected_added_count))
+
+    summary="$(python3 - \
+      "$tmp" \
+      .agent-store/store.sqlite \
+      "$stable_ids_arg" \
+      "$removable_ids_arg" \
+      "$added_ids_arg" \
+      "$seed_task" \
+      "$seed_bug" \
+      "$stable_hook_count" \
+      "$expected_final_hooks" \
+      "$max_observable_hooks" <<'PY'
+import glob
+import re
+import sqlite3
+import sys
+from pathlib import Path
+
+(
+    tmp_dir,
+    db,
+    stable_ids_arg,
+    removable_ids_arg,
+    added_ids_arg,
+    seed_task,
+    seed_bug,
+    stable_hook_count_s,
+    expected_final_hooks_s,
+    max_observable_hooks_s,
+) = sys.argv[1:]
+tmp = Path(tmp_dir)
+stable_ids = [item for item in stable_ids_arg.split(",") if item]
+removable_ids = [item for item in removable_ids_arg.split(",") if item]
+added_ids = [item for item in added_ids_arg.split(",") if item]
+stable_hook_count = int(stable_hook_count_s)
+expected_final_hooks = int(expected_final_hooks_s)
+max_observable_hooks = int(max_observable_hooks_s)
+
+hook_line = re.compile(
+    r"^([a-z0-9]{6}) (create|set|unset|rm|link|unlink)( query=(('[^']*')|[^ ]+))? -- .+$"
+)
+hook_samples = sorted(glob.glob(str(tmp / "hook-ls-*.out"))) + [str(tmp / "final-hook-ls.out")]
+assert hook_samples, "no hook ls samples"
+for path in hook_samples:
+    lines = Path(path).read_text().splitlines()
+    assert lines, path
+    ids = []
+    for line in lines:
+        match = hook_line.match(line)
+        assert match, (path, line)
+        ids.append(match.group(1))
+    assert ids == sorted(ids), (path, ids)
+    assert len(ids) == len(set(ids)), (path, ids)
+
+ctx_samples = sorted(glob.glob(str(tmp / "ctx-*.out"))) + [str(tmp / "final-ctx.out")]
+assert ctx_samples, "no ctx samples"
+for path in ctx_samples:
+    data = Path(path).read_bytes()
+    assert len(data) <= 8192, (path, len(data))
+    text = data.decode()
+    assert text.startswith("Quick Context\n"), path
+    assert "\nRecords: 2\n" in text, (path, text)
+    assert "Record kinds:" in text, (path, text)
+    hook_count_match = re.search(r"^Hooks: ([0-9]+)$", text, re.MULTILINE)
+    assert hook_count_match, (path, text)
+    hook_count = int(hook_count_match.group(1))
+    assert stable_hook_count <= hook_count <= max_observable_hooks, (path, hook_count)
+    assert "Latest activity: " in text, (path, text)
+    assert "query=" not in text, (path, text)
+    assert " -- " not in text, (path, text)
+
+final_hook_lines = Path(tmp / "final-hook-ls.out").read_text().splitlines()
+final_ids = {line.split(" ", 1)[0] for line in final_hook_lines}
+expected_present = set(stable_ids) | set(added_ids)
+assert final_ids == expected_present, (final_ids, expected_present)
+assert not (set(removable_ids) & final_ids), set(removable_ids) & final_ids
+
+final_ctx = Path(tmp / "final-ctx.out").read_text()
+assert re.search(rf"^Hooks: {expected_final_hooks}$", final_ctx, re.MULTILINE), final_ctx
+
+con = sqlite3.connect(db)
+hook_count = con.execute("select count(*) from hooks").fetchone()[0]
+assert hook_count == expected_final_hooks, hook_count
+placeholders = ",".join("?" for _ in stable_ids + added_ids)
+present = {
+    row[0]
+    for row in con.execute(
+        f"select id from hooks where id in ({placeholders})",
+        stable_ids + added_ids,
+    )
+}
+assert present == expected_present, (present, expected_present)
+placeholders = ",".join("?" for _ in removable_ids)
+removed_count = con.execute(
+    f"select count(*) from hooks where id in ({placeholders})",
+    removable_ids,
+).fetchone()[0]
+assert removed_count == 0, removed_count
+record_ids = {
+    row[0] for row in con.execute("select id from records")
+}
+assert record_ids == {seed_task, seed_bug}, record_ids
+link_count = con.execute(
+    "select count(*) from record_links where from_record_id = ? and rel = 'blocks' and to_record_id = ?",
+    (seed_task, seed_bug),
+).fetchone()[0]
+assert link_count == 1, link_count
+
+print(
+    "reader_hook_ls_samples={hook_samples} reader_ctx_samples={ctx_samples} added_hooks={added} removed_hooks={removed} final_hooks={final}".format(
+        hook_samples=len(hook_samples),
+        ctx_samples=len(ctx_samples),
+        added=len(added_ids),
+        removed=len(removable_ids),
+        final=hook_count,
+    )
+)
+PY
+)"
+
+    if [ -n "$evidence_root" ]; then
+      find "$tmp" -maxdepth 1 -type f \
+        \( -name 'add-*' -o -name 'rm-*' -o -name 'hook-ls-*' -o -name 'ctx-*' -o -name 'final-*' -o -name 'seed-*' \) \
+        -exec cp {} "$evidence_root/logs/" \;
+      cp .agent-store/store.sqlite "$evidence_root/store.sqlite"
+      cat > "$evidence_root/reports/concurrent-hook-churn-reads.md" <<EOF
+# Concurrent Hook Churn Read Evidence
+
+- seed_task: $seed_task
+- seed_bug: $seed_bug
+- stable_hook_ids: ${stable_hook_ids[*]}
+- removable_hook_ids: ${removable_hook_ids[*]}
+- added_hook_count: ${#added_hook_ids[@]}
+- $summary
+- database: $evidence_root/store.sqlite
+- logs: $evidence_root/logs
+EOF
+    fi
+    ;;
+
   concurrent_link_record_disappearance_races)
     CARGO_TARGET_DIR="$target_dir" cargo build --quiet --manifest-path "$repo/Cargo.toml"
     agent_store_bin="$target_dir/debug/agent-store"
@@ -2382,7 +2662,7 @@ EOF
     ;;
 
   *)
-    echo "usage: $0 {store_is_project_local|migrations_apply_on_open|initial_schema_tables|records_columns|record_fields_typed_columns|record_links_cardinality_shape|record_links_columns_unique|record_delete_cascades_links|hard_delete_store_event_snapshot|record_mutations_transactional|persistence_open_errors_actionable|migration_checksum_mismatch|concurrent_process_writers|concurrent_process_writers_with_hooks|concurrent_process_mutations_with_hooks|concurrent_hook_lifecycle_races|concurrent_hook_lifecycle_mutation_races|concurrent_link_record_disappearance_races|concurrent_set_unset_link_snapshot_races|create_rm_link_snapshot_hooks|concurrent_same_record_and_link_races}" >&2
+    echo "usage: $0 {store_is_project_local|migrations_apply_on_open|initial_schema_tables|records_columns|record_fields_typed_columns|record_links_cardinality_shape|record_links_columns_unique|record_delete_cascades_links|hard_delete_store_event_snapshot|record_mutations_transactional|persistence_open_errors_actionable|migration_checksum_mismatch|concurrent_process_writers|concurrent_process_writers_with_hooks|concurrent_process_mutations_with_hooks|concurrent_hook_lifecycle_races|concurrent_hook_lifecycle_mutation_races|concurrent_hook_churn_reads|concurrent_link_record_disappearance_races|concurrent_set_unset_link_snapshot_races|create_rm_link_snapshot_hooks|concurrent_same_record_and_link_races}" >&2
     exit 2
     ;;
 esac
