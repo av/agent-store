@@ -10,3 +10,6 @@
   id: sls
   command: bash tests/facts/store_schema_migrations.sh concurrent_set_unset_link_snapshot_races
   tags: [implemented]
+- label: create Hooks evaluate link predicates against an empty create-time Link snapshot, and rm Hooks evaluate link predicates against the pre-delete Link snapshot so post-event Link changes do not make matching Hooks skip or non-matching Hooks run
+  command: bash tests/facts/store_schema_migrations.sh create_rm_link_snapshot_hooks
+  tags: [implemented]

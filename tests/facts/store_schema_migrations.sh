@@ -1235,6 +1235,149 @@ EOF
     fi
     ;;
 
+  create_rm_link_snapshot_hooks)
+    CARGO_TARGET_DIR="$target_dir" cargo build --quiet --manifest-path "$repo/Cargo.toml"
+    agent_store_bin="$target_dir/debug/agent-store"
+    cd "$tmp"
+    "$agent_store_bin" init >/tmp/agent-store-create-rm-link-snapshot-init.out
+
+    evidence_root="${AGENT_STORE_E2E_DIR:-}"
+    if [ -n "$evidence_root" ]; then
+      mkdir -p "$evidence_root/logs" "$evidence_root/reports"
+    fi
+
+    cat > hook-log.sh <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+printf "%s:%s:%s\n" "$AGENT_STORE_EVENT" "$AGENT_STORE_ID" "$1" >> hook.log
+printf "%s" "$1"
+SH
+    chmod +x hook-log.sh
+
+    create_target="$("$agent_store_bin" create note title=create-target batch=create-rm-link-snapshot)"
+    create_hook_id="$("$agent_store_bin" hook add create 'kind=task and batch=create-rm-link-snapshot and link.out=blocks' -- './hook-log.sh create-link-match')"
+    rm_hook_id="$("$agent_store_bin" hook add rm 'kind=task and batch=create-rm-link-snapshot and link.out=blocks' -- './hook-log.sh rm-link-match')"
+
+    python3 - .agent-store/store.sqlite "$create_target" <<'PY'
+import sqlite3
+import sys
+
+db, create_target = sys.argv[1:]
+assert create_target.isalnum(), create_target
+con = sqlite3.connect(db)
+con.execute("PRAGMA foreign_keys = ON")
+con.executescript(
+    f"""
+    create trigger link_created_record_after_event
+    after insert on store_events
+    when new.event_type = 'create'
+    begin
+      insert or ignore into record_links (from_record_id, rel, to_record_id)
+      values (new.record_id, 'blocks', '{create_target}');
+    end;
+    """
+)
+con.commit()
+PY
+
+    "$agent_store_bin" create task title=create-source batch=create-rm-link-snapshot >"$tmp/create.out" 2>"$tmp/create.err"
+    create_record="$(cat "$tmp/create.out")"
+    test -s "$tmp/create.out"
+
+    python3 - .agent-store/store.sqlite <<'PY'
+import sqlite3
+import sys
+
+con = sqlite3.connect(sys.argv[1])
+con.execute("drop trigger link_created_record_after_event")
+con.commit()
+PY
+
+    rm_source="$("$agent_store_bin" create task title=rm-source batch=create-rm-link-snapshot)"
+    rm_target="$("$agent_store_bin" create note title=rm-target batch=create-rm-link-snapshot)"
+    "$agent_store_bin" link "$rm_source" blocks "$rm_target" >"$tmp/rm-setup-link.out" 2>"$tmp/rm-setup-link.err"
+
+    set +e
+    "$agent_store_bin" rm "$rm_source" >"$tmp/rm.out" 2>"$tmp/rm.err"
+    rm_code="$?"
+    set -e
+    printf "%s" "$rm_code" >"$tmp/rm.status"
+    if [ "$rm_code" != "0" ]; then
+      cat "$tmp/rm.err" >&2
+      exit 1
+    fi
+    grep -Fxq "Removed $rm_source" "$tmp/rm.out"
+
+    if grep -R "failed to load hook" "$tmp"/*.err; then
+      exit 1
+    fi
+
+    summary="$(python3 - .agent-store/store.sqlite "$create_hook_id" "$rm_hook_id" "$create_record" "$rm_source" <<'PY'
+import sqlite3
+import sys
+
+db, create_hook_id, rm_hook_id, create_record, rm_source = sys.argv[1:]
+con = sqlite3.connect(db)
+rows = con.execute(
+    """
+    select hook_id, event_type, record_id, exit_status, stdout_summary, stderr_summary
+    from hook_runs
+    where hook_id in (?, ?)
+    order by id
+    """,
+    (create_hook_id, rm_hook_id),
+).fetchall()
+expected = [(rm_hook_id, "rm", rm_source, 0, "rm-link-match", "")]
+assert rows == expected, rows
+create_links = con.execute(
+    """
+    select count(*)
+    from record_links
+    where from_record_id = ? and rel = 'blocks'
+    """,
+    (create_record,),
+).fetchone()[0]
+assert create_links == 1, create_links
+remaining_rm_links = con.execute(
+    """
+    select count(*)
+    from record_links
+    where from_record_id = ? or to_record_id = ?
+    """,
+    (rm_source, rm_source),
+).fetchone()[0]
+assert remaining_rm_links == 0, remaining_rm_links
+print(
+    "create_hook_runs=0 rm_hook_runs=1 create_post_event_links={create_links} remaining_rm_links={remaining_rm_links}".format(
+        create_links=create_links,
+        remaining_rm_links=remaining_rm_links,
+    )
+)
+PY
+)"
+
+    expected_log="$(printf "rm:%s:rm-link-match\n" "$rm_source")"
+    test "$(cat hook.log)" = "$expected_log"
+
+    if [ -n "$evidence_root" ]; then
+      find "$tmp" -maxdepth 1 -type f \
+        \( -name 'create.*' -o -name 'rm.*' -o -name 'rm-setup-link.*' \) \
+        -exec cp {} "$evidence_root/logs/" \;
+      cp hook.log "$evidence_root/logs/hook.log"
+      cp .agent-store/store.sqlite "$evidence_root/store.sqlite"
+      cat > "$evidence_root/reports/create-rm-link-snapshot-hooks.md" <<EOF
+# Create/Rm Link Snapshot Hook Evidence
+
+- create_record: $create_record
+- rm_source: $rm_source
+- $summary
+- hook_side_effects: 1
+- database: $evidence_root/store.sqlite
+- logs: $evidence_root/logs
+EOF
+    fi
+    ;;
+
   concurrent_same_record_and_link_races)
     CARGO_TARGET_DIR="$target_dir" cargo build --quiet --manifest-path "$repo/Cargo.toml"
     agent_store_bin="$target_dir/debug/agent-store"
@@ -1620,7 +1763,7 @@ EOF
     ;;
 
   *)
-    echo "usage: $0 {store_is_project_local|migrations_apply_on_open|initial_schema_tables|records_columns|record_fields_typed_columns|record_links_cardinality_shape|record_links_columns_unique|record_delete_cascades_links|hard_delete_store_event_snapshot|record_mutations_transactional|persistence_open_errors_actionable|migration_checksum_mismatch|concurrent_process_writers|concurrent_process_writers_with_hooks|concurrent_process_mutations_with_hooks|concurrent_link_record_disappearance_races|concurrent_set_unset_link_snapshot_races|concurrent_same_record_and_link_races}" >&2
+    echo "usage: $0 {store_is_project_local|migrations_apply_on_open|initial_schema_tables|records_columns|record_fields_typed_columns|record_links_cardinality_shape|record_links_columns_unique|record_delete_cascades_links|hard_delete_store_event_snapshot|record_mutations_transactional|persistence_open_errors_actionable|migration_checksum_mismatch|concurrent_process_writers|concurrent_process_writers_with_hooks|concurrent_process_mutations_with_hooks|concurrent_link_record_disappearance_races|concurrent_set_unset_link_snapshot_races|create_rm_link_snapshot_hooks|concurrent_same_record_and_link_races}" >&2
     exit 2
     ;;
 esac

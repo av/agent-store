@@ -187,7 +187,7 @@ fn main() {
             let mut store = open_store_or_exit();
             match store.create_record(&kind, fields) {
                 Ok(record) => {
-                    run_hooks_or_exit(&mut store, "create", &record, None);
+                    run_hooks_or_exit(&mut store, "create", &record, Some(&[]));
                     if cli.json_output {
                         print_json(mutation_json("created", &record));
                     } else {
@@ -287,13 +287,18 @@ fn main() {
         }
         CliCommand::Rm { id } => {
             let mut store = open_store_or_exit();
-            match store.delete_record(&id) {
-                Ok(record) => {
-                    run_hooks_or_exit(&mut store, "rm", &record, None);
+            match store.delete_record_with_snapshot(&id) {
+                Ok(mutation) => {
+                    run_hooks_or_exit(
+                        &mut store,
+                        "rm",
+                        &mutation.record,
+                        Some(&mutation.record_links),
+                    );
                     if cli.json_output {
-                        print_json(mutation_json("removed", &record));
+                        print_json(mutation_json("removed", &mutation.record));
                     } else {
-                        println!("Removed {}", record.id);
+                        println!("Removed {}", mutation.record.id);
                     }
                 }
                 Err(error) => {
@@ -765,10 +770,10 @@ fn hook_query_matches(
     }
 
     let live_links;
-    let links = if event_type == "rm" {
-        &[][..]
-    } else if let Some(link_context) = link_context {
+    let links = if let Some(link_context) = link_context {
         link_context
+    } else if event_type == "rm" {
+        &[][..]
     } else {
         live_links = store
             .links_for_record(&record.id)

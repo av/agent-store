@@ -698,18 +698,26 @@ impl Store {
     }
 
     pub fn delete_record(&mut self, id_prefix: &str) -> StoreResult<Record> {
+        Ok(self.delete_record_with_snapshot(id_prefix)?.record)
+    }
+
+    pub fn delete_record_with_snapshot(&mut self, id_prefix: &str) -> StoreResult<RecordMutation> {
         validate_id_prefix(id_prefix)?;
         let tx = self
             .conn
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         let id = resolve_id(&tx, id_prefix)?;
         let record = get_record_by_id(&tx, &id)?;
+        let record_links = links_for_record_id(&tx, &id)?;
 
         insert_store_event(&tx, "rm", &record)?;
         tx.execute("DELETE FROM records WHERE id = ?1", params![&record.id])?;
         tx.commit()?;
 
-        Ok(record)
+        Ok(RecordMutation {
+            record,
+            record_links,
+        })
     }
 
     pub fn link_records(
