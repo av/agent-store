@@ -210,6 +210,9 @@
 - label: simultaneous agent-store create processes with a matching Hook all finish without database lock errors, persist every record, and persist one Hook Run per create
   command: bash tests/facts/store_schema_migrations.sh concurrent_process_writers_with_hooks
   tags: [implemented]
+- label: simultaneous agent-store set, link, unlink, and rm processes with matching Hooks all finish without database lock errors, persist each committed mutation, and persist one Hook Run per mutation
+  command: bash tests/facts/store_schema_migrations.sh concurrent_process_mutations_with_hooks
+  tags: [implemented]
 
 # architecture
 - label: callers can open a Store for a chosen project root and exercise record, query, link, and Quick Context behavior through Store and Query APIs without naming the SQLite database path or schema tables

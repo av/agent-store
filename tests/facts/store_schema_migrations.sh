@@ -597,8 +597,154 @@ assert hook_runs == expected, (hook_runs, expected)
 PY
     ;;
 
+  concurrent_process_mutations_with_hooks)
+    CARGO_TARGET_DIR="$target_dir" cargo build --quiet --manifest-path "$repo/Cargo.toml"
+    agent_store_bin="$target_dir/debug/agent-store"
+    cd "$tmp"
+    "$agent_store_bin" init >/tmp/agent-store-concurrent-mutations-init.out
+
+    hook_side_effects="$tmp/hook-side-effects"
+    mkdir "$hook_side_effects"
+    cat > hook-touch.sh <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+dir="$1"
+sleep 0.02
+rel="${AGENT_STORE_REL:-none}"
+target="${AGENT_STORE_TARGET_ID:-none}"
+touch "$dir/${AGENT_STORE_EVENT}-${AGENT_STORE_ID}-${rel}-${target}"
+printf "%s" "$AGENT_STORE_EVENT"
+SH
+    chmod +x hook-touch.sh
+
+    "$agent_store_bin" hook add set 'kind=task and status=done' -- './hook-touch.sh hook-side-effects' >/tmp/agent-store-concurrent-mutations-set-hook.out
+    "$agent_store_bin" hook add link 'kind=task and status=done' -- './hook-touch.sh hook-side-effects' >/tmp/agent-store-concurrent-mutations-link-hook.out
+    "$agent_store_bin" hook add unlink 'kind=task and status=done' -- './hook-touch.sh hook-side-effects' >/tmp/agent-store-concurrent-mutations-unlink-hook.out
+    "$agent_store_bin" hook add rm 'kind=note and batch=mutation-hook-concurrent' -- './hook-touch.sh hook-side-effects' >/tmp/agent-store-concurrent-mutations-rm-hook.out
+
+    ready_dir="$tmp/ready"
+    start_file="$tmp/start"
+    mkdir "$ready_dir"
+    workers=(alpha beta gamma delta epsilon zeta eta theta)
+    declare -A source_ids
+    declare -A target_ids
+
+    for name in "${workers[@]}"; do
+      source_ids[$name]="$("$agent_store_bin" create task title="source-$name" worker="$name" status=pending batch=mutation-hook-concurrent)"
+      target_ids[$name]="$("$agent_store_bin" create note title="target-$name" worker="$name" batch=mutation-hook-concurrent)"
+    done
+
+    mutator() {
+      local name="$1"
+      local source_id="$2"
+      local target_id="$3"
+      touch "$ready_dir/$name"
+      while [ ! -f "$start_file" ]; do
+        sleep 0.01
+      done
+      "$agent_store_bin" set "$source_id" status=done phase="$name"
+      "$agent_store_bin" link "$source_id" blocks "$target_id"
+      "$agent_store_bin" unlink "$source_id" blocks "$target_id"
+      "$agent_store_bin" rm "$target_id"
+    }
+
+    pids=()
+    for name in "${workers[@]}"; do
+      (mutator "$name" "${source_ids[$name]}" "${target_ids[$name]}") >"$tmp/mutator-$name.out" 2>"$tmp/mutator-$name.err" &
+      pids+=("$!")
+    done
+
+    while [ "$(find "$ready_dir" -type f | wc -l | tr -d ' ')" -lt "${#workers[@]}" ]; do
+      sleep 0.01
+    done
+    touch "$start_file"
+
+    status=0
+    for pid in "${pids[@]}"; do
+      if ! wait "$pid"; then
+        status=1
+      fi
+    done
+    if [ "$status" -ne 0 ]; then
+      cat "$tmp"/mutator-*.err >&2
+      exit 1
+    fi
+    if grep -R "database is locked" "$tmp"/mutator-*.err; then
+      exit 1
+    fi
+
+    expected_workers="${#workers[@]}"
+    expected_hook_runs=$((expected_workers * 4))
+    updated_total="$("$agent_store_bin" find 'kind=task and batch=mutation-hook-concurrent and status=done' | sed '/^$/d' | wc -l | tr -d ' ')"
+    test "$updated_total" = "$expected_workers"
+    remaining_targets="$("$agent_store_bin" find 'kind=note and batch=mutation-hook-concurrent' | sed '/^$/d' | wc -l | tr -d ' ')"
+    test "$remaining_targets" = "0"
+    test "$(find "$hook_side_effects" -type f | wc -l | tr -d ' ')" = "$expected_hook_runs"
+
+    python3 - .agent-store/store.sqlite "$expected_workers" "$expected_hook_runs" <<'PY'
+import sqlite3
+import sys
+
+db, expected_workers_s, expected_hook_runs_s = sys.argv[1:]
+expected_workers = int(expected_workers_s)
+expected_hook_runs = int(expected_hook_runs_s)
+con = sqlite3.connect(db)
+
+event_counts = dict(
+    con.execute(
+        """
+        select event_type, count(*)
+        from store_events
+        where event_type in ('set', 'link', 'unlink', 'rm')
+        group by event_type
+        """
+    ).fetchall()
+)
+assert event_counts == {
+    "set": expected_workers,
+    "link": expected_workers,
+    "unlink": expected_workers,
+    "rm": expected_workers,
+}, event_counts
+
+hook_counts = dict(
+    con.execute(
+        """
+        select event_type, count(*)
+        from hook_runs
+        where event_type in ('set', 'link', 'unlink', 'rm')
+        group by event_type
+        """
+    ).fetchall()
+)
+assert hook_counts == event_counts, (hook_counts, event_counts)
+
+total_hook_runs = con.execute(
+    "select count(*) from hook_runs where event_type in ('set', 'link', 'unlink', 'rm')"
+).fetchone()[0]
+assert total_hook_runs == expected_hook_runs, (total_hook_runs, expected_hook_runs)
+
+remaining_links = con.execute(
+    "select count(*) from record_links where rel = 'blocks'"
+).fetchone()[0]
+assert remaining_links == 0, remaining_links
+
+remaining_targets = con.execute(
+    """
+    select count(*)
+    from records
+    join record_fields on record_fields.record_id = records.id
+    where records.kind = 'note'
+      and record_fields.key = 'batch'
+      and record_fields.raw_value = 'mutation-hook-concurrent'
+    """
+).fetchone()[0]
+assert remaining_targets == 0, remaining_targets
+PY
+    ;;
+
   *)
-    echo "usage: $0 {store_is_project_local|migrations_apply_on_open|initial_schema_tables|records_columns|record_fields_typed_columns|record_links_cardinality_shape|record_links_columns_unique|record_delete_cascades_links|hard_delete_store_event_snapshot|record_mutations_transactional|persistence_open_errors_actionable|migration_checksum_mismatch|concurrent_process_writers|concurrent_process_writers_with_hooks}" >&2
+    echo "usage: $0 {store_is_project_local|migrations_apply_on_open|initial_schema_tables|records_columns|record_fields_typed_columns|record_links_cardinality_shape|record_links_columns_unique|record_delete_cascades_links|hard_delete_store_event_snapshot|record_mutations_transactional|persistence_open_errors_actionable|migration_checksum_mismatch|concurrent_process_writers|concurrent_process_writers_with_hooks|concurrent_process_mutations_with_hooks}" >&2
     exit 2
     ;;
 esac
