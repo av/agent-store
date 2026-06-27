@@ -2171,6 +2171,17 @@ if action == "timeout":
         time.sleep(1)
 PY
 
+    cat > invalid-utf8-hook.py <<'PY'
+import sys
+
+label = sys.argv[1]
+sys.stdout.buffer.write(label.encode("utf-8") + b"-stdout:\xff\xfe\n")
+sys.stdout.buffer.flush()
+sys.stderr.buffer.write(label.encode("utf-8") + b"-stderr:\xfe\xff\n")
+sys.stderr.buffer.flush()
+raise SystemExit(41)
+PY
+
     success_hook_id="$(run_agent_store hook add create title=VerboseSuccess -- 'python3 verbose-hook.py success ok 9000')"
     record_id="$(run_agent_store create task title=VerboseSuccess)"
     printf "%s\n" "$record_id" | grep -Eq "^[a-z0-9]{6,8}$"
@@ -2202,13 +2213,64 @@ PY
     grep -Fq "json-timeout-stderr" "$json_err"
     run_agent_store links "$json_source_id" | grep -Fq "out relates $json_target_id"
 
+    plain_invalid_record_id="$(run_agent_store create task title=PlainInvalidUtf8 status=pending)"
+    plain_invalid_hook_id="$(run_agent_store hook add set 'title=PlainInvalidUtf8 and status=invalid-utf8' -- 'python3 invalid-utf8-hook.py plain-invalid')"
+    plain_invalid_out="$tmp/plain-invalid-utf8.out"
+    plain_invalid_err="$tmp/plain-invalid-utf8.err"
+    if run_agent_store set "$plain_invalid_record_id" status=invalid-utf8 >"$plain_invalid_out" 2>"$plain_invalid_err"; then
+      exit 1
+    fi
+    test ! -s "$plain_invalid_out"
+    grep -Fq "Store mutation already committed" "$plain_invalid_err"
+    grep -Fq "exit status 41" "$plain_invalid_err"
+    grep -Fq "plain-invalid-stderr:" "$plain_invalid_err"
+    run_agent_store get "$plain_invalid_record_id" | grep -Fq "status=invalid-utf8"
+
+    json_invalid_record_id="$(run_agent_store create task title=JsonInvalidUtf8 status=pending)"
+    json_invalid_hook_id="$(run_agent_store hook add set 'title=JsonInvalidUtf8 and status=invalid-utf8' -- 'python3 invalid-utf8-hook.py json-invalid')"
+    json_invalid_out="$tmp/json-invalid-utf8.out"
+    json_invalid_err="$tmp/json-invalid-utf8.err"
+    if run_agent_store --json set "$json_invalid_record_id" status=invalid-utf8 >"$json_invalid_out" 2>"$json_invalid_err"; then
+      exit 1
+    fi
+    test ! -s "$json_invalid_out"
+    grep -Fq "Store mutation already committed" "$json_invalid_err"
+    grep -Fq "exit status 41" "$json_invalid_err"
+    grep -Fq "json-invalid-stderr:" "$json_invalid_err"
+    run_agent_store --json get "$json_invalid_record_id" >"$tmp/json-invalid-after-get.out"
+
+    python3 - "$plain_invalid_err" "$json_invalid_err" "$tmp/json-invalid-after-get.out" "$json_invalid_record_id" <<'PY'
+import json
+import pathlib
+import sys
+
+plain_err, json_err, after_get_path, json_invalid_record_id = sys.argv[1:]
+for path, label in [
+    (plain_err, "plain-invalid-stderr:"),
+    (json_err, "json-invalid-stderr:"),
+]:
+    text = pathlib.Path(path).read_text(encoding="utf-8")
+    assert "Store mutation already committed" in text, (path, text)
+    assert label in text, (path, text)
+    assert "\ufffd" in text, (path, text)
+    assert "panicked" not in text.lower(), (path, text)
+
+payload = json.loads(pathlib.Path(after_get_path).read_text(encoding="utf-8"))
+assert payload["record"]["id"] == json_invalid_record_id, payload
+assert payload["record"]["fields"]["status"] == "invalid-utf8", payload
+PY
+
     python3 - .agent-store/store.sqlite \
       "$success_hook_id" \
       "$plain_hook_id" \
       "$json_hook_id" \
+      "$plain_invalid_hook_id" \
+      "$json_invalid_hook_id" \
       "$record_id" \
       "$plain_record_id" \
-      "$json_source_id" <<'PY'
+      "$json_source_id" \
+      "$plain_invalid_record_id" \
+      "$json_invalid_record_id" <<'PY'
 import sqlite3
 import sys
 
@@ -2217,9 +2279,13 @@ import sys
     success_hook_id,
     plain_hook_id,
     json_hook_id,
+    plain_invalid_hook_id,
+    json_invalid_hook_id,
     record_id,
     plain_record_id,
     json_source_id,
+    plain_invalid_record_id,
+    json_invalid_record_id,
 ) = sys.argv[1:]
 con = sqlite3.connect(db)
 rows = con.execute(
@@ -2230,7 +2296,13 @@ rows = con.execute(
     """
 ).fetchall()
 by_hook = {row[0]: row[1:] for row in rows}
-assert set(by_hook) == {success_hook_id, plain_hook_id, json_hook_id}, rows
+assert set(by_hook) == {
+    success_hook_id,
+    plain_hook_id,
+    json_hook_id,
+    plain_invalid_hook_id,
+    json_invalid_hook_id,
+}, rows
 
 def assert_capped(value, prefix):
     assert len(value) == 8192, (prefix, len(value), value[:80], value[-80:])
@@ -2256,18 +2328,40 @@ assert json_timeout[4][8192:] == "; timed out after 30 seconds", (
     json_timeout[4][-80:],
 )
 
+plain_invalid = by_hook[plain_invalid_hook_id]
+assert plain_invalid[:3] == ("set", plain_invalid_record_id, 41), plain_invalid
+assert plain_invalid[3].startswith("plain-invalid-stdout:"), plain_invalid
+assert plain_invalid[4].startswith("plain-invalid-stderr:"), plain_invalid
+assert "\ufffd" in plain_invalid[3], plain_invalid
+assert "\ufffd" in plain_invalid[4], plain_invalid
+
+json_invalid = by_hook[json_invalid_hook_id]
+assert json_invalid[:3] == ("set", json_invalid_record_id, 41), json_invalid
+assert json_invalid[3].startswith("json-invalid-stdout:"), json_invalid
+assert json_invalid[4].startswith("json-invalid-stderr:"), json_invalid
+assert "\ufffd" in json_invalid[3], json_invalid
+assert "\ufffd" in json_invalid[4], json_invalid
+
 events = con.execute(
     """
     select event_type, record_id
     from store_events
-    where record_id in (?, ?, ?)
+    where record_id in (?, ?, ?, ?, ?)
     order by id
     """,
-    (record_id, plain_record_id, json_source_id),
+    (
+        record_id,
+        plain_record_id,
+        json_source_id,
+        plain_invalid_record_id,
+        json_invalid_record_id,
+    ),
 ).fetchall()
 assert ("create", record_id) in events, events
 assert ("set", plain_record_id) in events, events
 assert ("link", json_source_id) in events, events
+assert ("set", plain_invalid_record_id) in events, events
+assert ("set", json_invalid_record_id) in events, events
 PY
 
     evidence_root="${AGENT_STORE_E2E_DIR:-}"
@@ -2277,21 +2371,31 @@ PY
       cp "$plain_err" "$evidence_root/logs/plain-large-failure.err"
       cp "$json_out" "$evidence_root/logs/json-large-timeout.out"
       cp "$json_err" "$evidence_root/logs/json-large-timeout.err"
+      cp "$plain_invalid_out" "$evidence_root/logs/plain-invalid-utf8.out"
+      cp "$plain_invalid_err" "$evidence_root/logs/plain-invalid-utf8.err"
+      cp "$json_invalid_out" "$evidence_root/logs/json-invalid-utf8.out"
+      cp "$json_invalid_err" "$evidence_root/logs/json-invalid-utf8.err"
+      cp "$tmp/json-invalid-after-get.out" "$evidence_root/logs/json-invalid-after-get.out"
       cat > "$evidence_root/reports/hook-output-capture-caps.md" <<EOF
 # Hook Output Capture Caps
 
 - success_hook_id: $success_hook_id
 - plain_failure_hook_id: $plain_hook_id
 - json_timeout_hook_id: $json_hook_id
+- plain_invalid_utf8_hook_id: $plain_invalid_hook_id
+- json_invalid_utf8_hook_id: $json_invalid_hook_id
 - substantial_output_bytes_per_stream: 131072
 - persisted_capture_limit_bytes: 8192
 - plain_failure_stdout_empty: yes
 - json_timeout_stdout_empty: yes
-- committed_records: $record_id $plain_record_id $json_source_id
+- plain_invalid_utf8_stdout_empty: yes
+- json_invalid_utf8_stdout_empty: yes
+- non_utf8_cli_stderr_valid_utf8: yes
+- committed_records: $record_id $plain_record_id $json_source_id $plain_invalid_record_id $json_invalid_record_id
 EOF
     fi
 
-    printf "hook_output_capture_caps success=%s plain_failure=%s json_timeout=%s\n" "$record_id" "$plain_record_id" "$json_source_id"
+    printf "hook_output_capture_caps success=%s plain_failure=%s json_timeout=%s plain_invalid_utf8=%s json_invalid_utf8=%s\n" "$record_id" "$plain_record_id" "$json_source_id" "$plain_invalid_record_id" "$json_invalid_record_id"
     ;;
 
   hook_signal_termination_reports_committed_mutation)
