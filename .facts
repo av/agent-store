@@ -44,6 +44,9 @@
   id: jjy
   command: bash tests/facts/cli_records.sh json_output
   tags: [implemented]
+- label: agent-store exits quietly with code 141 and no panic or stderr output when stdout's reader closes early during find or --json get output
+  command: bash tests/facts/cli_records.sh broken_pipe_exits_quietly
+  tags: [implemented]
 
 ## init
 - label: agent-store init creates .agent-store/ in the current directory and adds a .agent-store/ ignore rule to .gitignore

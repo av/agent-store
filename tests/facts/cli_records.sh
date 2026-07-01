@@ -640,8 +640,36 @@ PY
     )
     ;;
 
+  broken_pipe_exits_quietly)
+    cd "$tmp"
+    run_agent_store init >/tmp/agent-store-pipe-9pe-init.out
+    for i in $(seq 1 200); do
+      run_agent_store create task title="Task $i" status=open >/dev/null
+    done
+    run_agent_store find kind=task >"$tmp/all-records.out"
+    id_line="$(head -n 1 "$tmp/all-records.out")"
+    id="${id_line%% *}"
+
+    binary="$target_dir/debug/agent-store"
+    test -x "$binary"
+
+    set +e
+    "$binary" find kind=task 2>/tmp/agent-store-pipe-9pe-find.err | head -c 1 >/dev/null
+    find_status="${PIPESTATUS[0]}"
+    "$binary" --json get "$id" 2>/tmp/agent-store-pipe-9pe-get.err | true
+    get_status="${PIPESTATUS[0]}"
+    set -e
+
+    test "$find_status" -eq 0 -o "$find_status" -eq 141
+    test "$get_status" -eq 0 -o "$get_status" -eq 141
+    ! grep -q "panicked" /tmp/agent-store-pipe-9pe-find.err
+    ! grep -q "panicked" /tmp/agent-store-pipe-9pe-get.err
+    test ! -s /tmp/agent-store-pipe-9pe-find.err
+    test ! -s /tmp/agent-store-pipe-9pe-get.err
+    ;;
+
   *)
-    echo "usage: $0 {create_alias_matches_create|find_alias_matches_find|set_updates_fields|unset_removes_fields|find_filters_records|arbitrary_field_queries|query_boolean_syntax|query_argument_parity|query_typed_values|field_empty_null_unset_semantics|record_id_generation_contract|record_id_resolution_errors|json_output|uninitialized_store_errors}" >&2
+    echo "usage: $0 {create_alias_matches_create|find_alias_matches_find|set_updates_fields|unset_removes_fields|find_filters_records|arbitrary_field_queries|query_boolean_syntax|query_argument_parity|query_typed_values|field_empty_null_unset_semantics|record_id_generation_contract|record_id_resolution_errors|json_output|uninitialized_store_errors|broken_pipe_exits_quietly}" >&2
     exit 2
     ;;
 esac

@@ -1,3 +1,33 @@
+/// Exit code used when stdout's reader closes early (128 + SIGPIPE).
+const BROKEN_PIPE_EXIT_CODE: i32 = 141;
+
+/// Terminates quietly with exit 141 when stdout writes hit a closed pipe.
+fn check_stdout(result: std::io::Result<()>) {
+    if let Err(error) = result {
+        if error.kind() == std::io::ErrorKind::BrokenPipe {
+            std::process::exit(BROKEN_PIPE_EXIT_CODE);
+        }
+        eprintln!("error: failed to write to stdout: {error}");
+        std::process::exit(1);
+    }
+}
+
+/// Like `print!`, but exits quietly on a broken stdout pipe.
+macro_rules! out {
+    ($($arg:tt)*) => {{
+        use std::io::Write as _;
+        crate::check_stdout(write!(std::io::stdout(), $($arg)*));
+    }};
+}
+
+/// Like `println!`, but exits quietly on a broken stdout pipe.
+macro_rules! outln {
+    ($($arg:tt)*) => {{
+        use std::io::Write as _;
+        crate::check_stdout(writeln!(std::io::stdout(), $($arg)*));
+    }};
+}
+
 mod cli;
 mod output;
 
@@ -171,10 +201,10 @@ fn main() {
 
     match cli.command {
         CliCommand::Help { topic } => {
-            print!("{}", help_text(topic));
+            out!("{}", help_text(topic));
         }
         CliCommand::Version => {
-            println!("agent-store {}", env!("CARGO_PKG_VERSION"));
+            outln!("agent-store {}", env!("CARGO_PKG_VERSION"));
         }
         CliCommand::Init => {
             if let Err(error) = init_store() {
@@ -185,7 +215,7 @@ fn main() {
             if cli.json_output {
                 print_json(init_json());
             } else {
-                println!("Initialized {STORE_DIR}/");
+                outln!("Initialized {STORE_DIR}/");
             }
         }
         CliCommand::Create { kind, fields } => {
@@ -196,7 +226,7 @@ fn main() {
                     if cli.json_output {
                         print_json(mutation_json("created", &record));
                     } else {
-                        println!("{}", record.id);
+                        outln!("{}", record.id);
                     }
                 }
                 Err(error) => {
@@ -212,7 +242,7 @@ fn main() {
                     if cli.json_output {
                         print_json(single_record_json(&record));
                     } else {
-                        println!("{}", format_record(&record));
+                        outln!("{}", format_record(&record));
                     }
                 }
                 Err(error) => {
@@ -236,7 +266,7 @@ fn main() {
                         print_json(records_json(&records));
                     } else {
                         for record in records {
-                            println!("{}", format_record(&record));
+                            outln!("{}", format_record(&record));
                         }
                     }
                 }
@@ -260,7 +290,7 @@ fn main() {
                     if cli.json_output {
                         print_json(mutation_json("updated", &mutation.record));
                     } else {
-                        println!("Updated {}", mutation.record.id);
+                        outln!("Updated {}", mutation.record.id);
                     }
                 }
                 Err(error) => {
@@ -283,7 +313,7 @@ fn main() {
                     if cli.json_output {
                         print_json(mutation_json("updated", &mutation.record));
                     } else {
-                        println!("Updated {}", mutation.record.id);
+                        outln!("Updated {}", mutation.record.id);
                     }
                 }
                 Err(error) => {
@@ -306,7 +336,7 @@ fn main() {
                     if cli.json_output {
                         print_json(mutation_json("removed", &mutation.record));
                     } else {
-                        println!("Removed {}", mutation.record.id);
+                        outln!("Removed {}", mutation.record.id);
                     }
                 }
                 Err(error) => {
@@ -329,7 +359,7 @@ fn main() {
                     if cli.json_output {
                         print_json(link_mutation_json("linked", &mutation.link));
                     } else {
-                        println!(
+                        outln!(
                             "Linked {} {} {}",
                             mutation.link.from_record_id,
                             mutation.link.rel,
@@ -357,7 +387,7 @@ fn main() {
                     if cli.json_output {
                         print_json(link_mutation_json("unlinked", &mutation.link));
                     } else {
-                        println!(
+                        outln!(
                             "Unlinked {} {} {}",
                             mutation.link.from_record_id,
                             mutation.link.rel,
@@ -382,7 +412,7 @@ fn main() {
                         ));
                     } else {
                         for link in record_links.links {
-                            println!(
+                            outln!(
                                 "{} {} {}",
                                 link.direction.as_str(),
                                 link.rel,
@@ -404,7 +434,7 @@ fn main() {
                     if cli.json_output {
                         print_json(quick_context_json(&summary));
                     } else {
-                        println!("{}", format_quick_context(&summary));
+                        outln!("{}", format_quick_context(&summary));
                     }
                 }
                 Err(error) => {
@@ -425,7 +455,7 @@ fn main() {
                         if cli.json_output {
                             print_json(hook_mutation_json("added", &hook));
                         } else {
-                            println!("{}", hook.id);
+                            outln!("{}", hook.id);
                         }
                     }
                     Err(error) => {
@@ -442,7 +472,7 @@ fn main() {
                             print_json(hooks_json(&hooks));
                         } else {
                             for hook in hooks {
-                                println!("{}", format_hook(&hook));
+                                outln!("{}", format_hook(&hook));
                             }
                         }
                     }
@@ -459,7 +489,7 @@ fn main() {
                         if cli.json_output {
                             print_json(hook_mutation_json("removed", &hook));
                         } else {
-                            println!("Removed {}", hook.id);
+                            outln!("Removed {}", hook.id);
                         }
                     }
                     Err(error) => {

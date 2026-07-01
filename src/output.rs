@@ -156,7 +156,7 @@ pub fn help_text(topic: HelpTopic) -> &'static str {
 }
 
 pub fn print_json(value: Value) {
-    println!("{value}");
+    outln!("{value}");
 }
 
 pub fn init_json() -> Value {
