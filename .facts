@@ -62,6 +62,9 @@
   id: vpz
   command: sh -c "set -eu; repo=\$PWD; tmp=\$(mktemp -d); cd \"\$tmp\"; printf \"user-authored line\\n\" > AGENTS.md; printf \"user-authored line\\n\" > CLAUDE.md; mkdir -p .agents/skills/agent-store .claude/skills/agent-store; printf \"custom agent skill\\n\" > .agents/skills/agent-store/SKILL.md; printf \"custom claude skill\\n\" > .claude/skills/agent-store/SKILL.md; CARGO_TARGET_DIR=\"\$repo/target/facts-vpz\" cargo run --quiet --manifest-path \"\$repo/Cargo.toml\" -- init >/tmp/agent-store-init-vpz-1.out; CARGO_TARGET_DIR=\"\$repo/target/facts-vpz\" cargo run --quiet --manifest-path \"\$repo/Cargo.toml\" -- init >/tmp/agent-store-init-vpz-2.out; test \"\$(grep -Fc \"<!-- agent-store:start -->\" AGENTS.md)\" -eq 1; test \"\$(grep -Fc \"<!-- agent-store:start -->\" CLAUDE.md)\" -eq 1; test \"\$(grep -Fc \".agent-store/\" .gitignore)\" -eq 1; grep -Fxq \"custom agent skill\" .agents/skills/agent-store/SKILL.md; grep -Fxq \"custom claude skill\" .claude/skills/agent-store/SKILL.md; rm -rf \"\$tmp\""
   tags: [implemented]
+- label: every command except init fails with exit code 1 and a no agent-store found; run 'agent-store init' first stderr message when no .agent-store/ exists in the current directory or any ancestor, creates no files or directories as a side effect, and works normally after agent-store init
+  command: bash tests/facts/cli_records.sh uninitialized_store_errors
+  tags: [implemented]
 
 ## aliases
 - label: agent-store cr is a short alias for create with identical arguments, behavior, and output

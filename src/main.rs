@@ -2,7 +2,7 @@ mod cli;
 mod output;
 
 use agent_store::query::Query;
-use agent_store::store::{FieldChange, Hook, Link, LinkEdge, Record, Store, STORE_DIR};
+use agent_store::store::{FieldChange, Hook, Link, LinkEdge, Record, Store, StoreError, STORE_DIR};
 use cli::{CliCommand, HookCliCommand};
 use output::{
     format_hook, format_quick_context, format_record, help_text, hook_mutation_json, hooks_json,
@@ -486,6 +486,10 @@ fn init_store() -> io::Result<()> {
 fn open_store_or_exit() -> Store {
     match Store::open_project() {
         Ok(store) => store,
+        Err(StoreError::NotInitialized) => {
+            eprintln!("error: {}", StoreError::NotInitialized);
+            process::exit(1);
+        }
         Err(error) => {
             eprintln!("error: failed to open store: {error}");
             process::exit(1);

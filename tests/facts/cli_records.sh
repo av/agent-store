@@ -594,8 +594,54 @@ assert rm_data == {"status": "removed", "record": expected_unset}, rm_data
 PY
     ;;
 
+  uninitialized_store_errors)
+    cd "$tmp"
+    expected_err="error: no agent-store found; run 'agent-store init' first"
+    baseline="$(find . | sort)"
+    for cmd in \
+      "create task title=Write" \
+      "get abc123" \
+      "find kind=task" \
+      "ls status=open" \
+      "set abc123 status=done" \
+      "unset abc123 status" \
+      "rm abc123" \
+      "link abc123 blocks def456" \
+      "unlink abc123 blocks def456" \
+      "links abc123" \
+      "hook add create -- true" \
+      "hook ls" \
+      "hook rm abc123" \
+      "ctx" \
+      "--json ctx" \
+      "--json create task title=Write"; do
+      set +e
+      # shellcheck disable=SC2086
+      run_agent_store $cmd >/tmp/agent-store-noinit-8fz.out 2>/tmp/agent-store-noinit-8fz.err
+      status=$?
+      set -e
+      test "$status" -eq 1
+      test ! -s /tmp/agent-store-noinit-8fz.out
+      grep -Fxq "$expected_err" /tmp/agent-store-noinit-8fz.err
+    done
+    test "$(find . | sort)" = "$baseline"
+    test ! -e .agent-store
+
+    run_agent_store init >/tmp/agent-store-noinit-8fz-init.out
+    id="$(run_agent_store create task title=Write)"
+    got="$(run_agent_store get "$id")"
+    test "$got" = "$id task title=Write"
+
+    mkdir -p nested/deeper
+    (
+      cd nested/deeper
+      got_nested="$(run_agent_store get "$id")"
+      test "$got_nested" = "$id task title=Write"
+    )
+    ;;
+
   *)
-    echo "usage: $0 {create_alias_matches_create|find_alias_matches_find|set_updates_fields|unset_removes_fields|find_filters_records|arbitrary_field_queries|query_boolean_syntax|query_argument_parity|query_typed_values|field_empty_null_unset_semantics|record_id_generation_contract|record_id_resolution_errors|json_output}" >&2
+    echo "usage: $0 {create_alias_matches_create|find_alias_matches_find|set_updates_fields|unset_removes_fields|find_filters_records|arbitrary_field_queries|query_boolean_syntax|query_argument_parity|query_typed_values|field_empty_null_unset_semantics|record_id_generation_contract|record_id_resolution_errors|json_output|uninitialized_store_errors}" >&2
     exit 2
     ;;
 esac

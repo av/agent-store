@@ -278,6 +278,7 @@ pub enum StoreError {
     InvalidHookId(String),
     InvalidHookEvent(String),
     EmptyHookCommand,
+    NotInitialized,
     NotFound(String),
     AmbiguousId(String),
     HookNotFound(String),
@@ -328,6 +329,9 @@ impl fmt::Display for StoreError {
                 "hook event '{event}' is not supported; expected create, set, unset, rm, link, or unlink"
             ),
             Self::EmptyHookCommand => write!(f, "hook command cannot be empty"),
+            Self::NotInitialized => {
+                write!(f, "no agent-store found; run 'agent-store init' first")
+            }
             Self::NotFound(id) => write!(f, "record '{id}' was not found"),
             Self::AmbiguousId(id) => write!(f, "record ID prefix '{id}' matches multiple records"),
             Self::HookNotFound(id) => write!(f, "hook '{id}' was not found"),
@@ -390,7 +394,7 @@ fn find_project_root(start: &Path) -> Option<PathBuf> {
 impl Store {
     pub fn open_project() -> StoreResult<Self> {
         let current_dir = std::env::current_dir()?;
-        let project_root = find_project_root(&current_dir).unwrap_or(current_dir);
+        let project_root = find_project_root(&current_dir).ok_or(StoreError::NotInitialized)?;
         Self::open_project_root(project_root)
     }
 

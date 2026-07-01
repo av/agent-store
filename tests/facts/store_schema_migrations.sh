@@ -147,6 +147,7 @@ PY
 
   record_links_cardinality_shape)
     cd "$tmp"
+    run_agent_store init >/dev/null
     first="$(create_record task title=first)"
     second="$(create_record decision title=second)"
     third="$(create_record note title=third)"
@@ -202,6 +203,7 @@ PY
 
   record_links_columns_unique)
     cd "$tmp"
+    run_agent_store init >/dev/null
     from_id="$(create_record task title=from)"
     to_id="$(create_record task title=to)"
     python3 - .agent-store/store.sqlite "$from_id" "$to_id" <<'PY'
@@ -247,6 +249,7 @@ PY
 
   record_delete_cascades_links)
     cd "$tmp"
+    run_agent_store init >/dev/null
     victim="$(create_record task title=victim status=open)"
     source="$(create_record note title=source)"
     target="$(create_record decision title=target)"
@@ -293,6 +296,7 @@ PY
 
   hard_delete_store_event_snapshot)
     cd "$tmp"
+    run_agent_store init >/dev/null
     victim="$(create_record task title=victim status=open note="hello world")"
     run_agent_store rm "$victim" >/tmp/agent-store-rm-vju.out
     grep -Fxq "Removed $victim" /tmp/agent-store-rm-vju.out
@@ -342,6 +346,7 @@ PY
 
   record_mutations_transactional)
     cd "$tmp"
+    run_agent_store init >/dev/null
     seed="$(create_record seed title=existing)"
     python3 - .agent-store/store.sqlite "$seed" <<'PY'
 import sqlite3
