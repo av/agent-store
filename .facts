@@ -84,6 +84,10 @@
   id: nih
   command: bash tests/facts/cli_hooks.sh hook_rm_deletes_metadata
   tags: [implemented]
+- label: agent-store hook add, hook ls, and hook rm accept --json and print structured JSON consistent with record mutation output ({"status":"added","hook":{...}}, {"hooks":[...]}, and {"status":"removed","hook":{...}} with id, event, query-or-null, and command per Hook) while plain output stays unchanged
+  id: hkj
+  command: bash tests/facts/cli_hooks.sh hook_json_output
+  tags: [implemented]
 
 ## context
 - label: agent-store ctx prints a compact deterministic Quick Context summary by default and does not print individual Record IDs or Field key-value pairs
@@ -93,6 +97,10 @@
 - label: agent-store context is a readable alias for ctx with identical behavior and byte-for-byte identical output
   id: i3l
   command: bash tests/facts/cli_context.sh context_alias_matches_ctx
+  tags: [implemented]
+- label: agent-store --json ctx prints one valid JSON object mirroring the plain Quick Context summary with record_count, records_by_kind, fields_by_kind, status_counts_by_kind, date_windows_by_kind, link_count, links_by_relation, hook_count, and latest_activity_at, without individual Record IDs
+  id: cxj
+  command: bash tests/facts/cli_context.sh ctx_json_summary
   tags: [implemented]
 
 ## links
@@ -223,12 +231,6 @@
   command: CARGO_TARGET_DIR=target/facts-5xe cargo test --test persistence_interface persistence_interface_allows_behavior_tests_without_sqlite_layout
   tags: [implemented]
 
-# decisions
-
-## open
-- token-efficient agent usage uses generic CRUD commands plus short aliases instead of type-specific task or calendar subcommands @draft
-- the Rust SQLite crate and async model are chosen based on simple CLI correctness, migration support, and testability rather than background service throughput @draft
-
 # hooks
 - label: Hooks without Query conditions run only after a triggering Store mutation succeeds and commits, can read the committed Record through a nested agent-store command, do not run for failed mutations, and persist one Hook Run per invocation
   id: w5s
@@ -297,7 +299,7 @@
   id: iln
   command: bash tests/facts/cli_context.sh ctx_status_date_summaries
   tags: [implemented]
-- label: agent-store ctx documents an 8192-byte Quick Context output cap in help and writes no more than 8192 bytes to stdout even when Store metadata exceeds that size
+- label: agent-store ctx documents an 8192-byte Quick Context output cap in help, caps summary content before the trailing newline at 8192 bytes even when Store metadata exceeds that size, and always ends stdout with a trailing newline including in the truncated case
   id: uha
   command: bash tests/facts/cli_context.sh ctx_output_byte_limit
   tags: [implemented]

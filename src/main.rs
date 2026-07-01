@@ -5,9 +5,9 @@ use agent_store::query::Query;
 use agent_store::store::{FieldChange, Hook, Link, LinkEdge, Record, Store, STORE_DIR};
 use cli::{CliCommand, HookCliCommand};
 use output::{
-    format_hook, format_quick_context, format_record, help_text, init_json, link_mutation_json,
-    mutation_json, print_json, record_links_json, records_json, single_record_json,
-    QUICK_CONTEXT_OUTPUT_LIMIT_BYTES, USAGE,
+    format_hook, format_quick_context, format_record, help_text, hook_mutation_json, hooks_json,
+    init_json, link_mutation_json, mutation_json, print_json, quick_context_json,
+    record_links_json, records_json, single_record_json, USAGE,
 };
 use std::env;
 use std::fs::{self, OpenOptions};
@@ -401,11 +401,10 @@ fn main() {
             let store = open_store_or_exit();
             match store.quick_context_summary() {
                 Ok(summary) => {
-                    let output = format_quick_context(&summary);
-                    if output.len() < QUICK_CONTEXT_OUTPUT_LIMIT_BYTES {
-                        println!("{output}");
+                    if cli.json_output {
+                        print_json(quick_context_json(&summary));
                     } else {
-                        print!("{output}");
+                        println!("{}", format_quick_context(&summary));
                     }
                 }
                 Err(error) => {
@@ -423,7 +422,11 @@ fn main() {
                 let mut store = open_store_or_exit();
                 match store.add_hook(&event, query, &command) {
                     Ok(hook) => {
-                        println!("{}", hook.id);
+                        if cli.json_output {
+                            print_json(hook_mutation_json("added", &hook));
+                        } else {
+                            println!("{}", hook.id);
+                        }
                     }
                     Err(error) => {
                         eprintln!("error: failed to add hook: {error}");
@@ -435,8 +438,12 @@ fn main() {
                 let store = open_store_or_exit();
                 match store.list_hooks() {
                     Ok(hooks) => {
-                        for hook in hooks {
-                            println!("{}", format_hook(&hook));
+                        if cli.json_output {
+                            print_json(hooks_json(&hooks));
+                        } else {
+                            for hook in hooks {
+                                println!("{}", format_hook(&hook));
+                            }
                         }
                     }
                     Err(error) => {
@@ -449,7 +456,11 @@ fn main() {
                 let mut store = open_store_or_exit();
                 match store.delete_hook(&id) {
                     Ok(hook) => {
-                        println!("Removed {}", hook.id);
+                        if cli.json_output {
+                            print_json(hook_mutation_json("removed", &hook));
+                        } else {
+                            println!("Removed {}", hook.id);
+                        }
                     }
                     Err(error) => {
                         eprintln!("error: failed to remove hook: {error}");

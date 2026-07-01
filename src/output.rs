@@ -192,6 +192,53 @@ pub fn link_mutation_json(status: &str, link: &Link) -> Value {
     })
 }
 
+pub fn hook_mutation_json(status: &str, hook: &Hook) -> Value {
+    json!({
+        "status": status,
+        "hook": hook_json(hook),
+    })
+}
+
+pub fn hooks_json(hooks: &[Hook]) -> Value {
+    json!({
+        "hooks": hooks.iter().map(hook_json).collect::<Vec<_>>(),
+    })
+}
+
+pub fn quick_context_json(summary: &QuickContextSummary) -> Value {
+    json!({
+        "record_count": summary.record_count,
+        "records_by_kind": &summary.records_by_kind,
+        "fields_by_kind": &summary.fields_by_kind,
+        "status_counts_by_kind": &summary.status_counts_by_kind,
+        "date_windows_by_kind": summary
+            .date_windows_by_kind
+            .iter()
+            .map(|(kind, windows)| {
+                (
+                    kind.clone(),
+                    windows
+                        .iter()
+                        .map(|(field, window)| {
+                            (
+                                field.clone(),
+                                json!({
+                                    "earliest": &window.earliest,
+                                    "latest": &window.latest,
+                                }),
+                            )
+                        })
+                        .collect::<BTreeMap<_, _>>(),
+                )
+            })
+            .collect::<BTreeMap<_, _>>(),
+        "link_count": summary.link_count,
+        "links_by_relation": &summary.links_by_relation,
+        "hook_count": summary.hook_count,
+        "latest_activity_at": &summary.latest_activity_at,
+    })
+}
+
 pub fn record_links_json(record_id: &str, links: &[LinkEdge]) -> Value {
     json!({
         "record_id": record_id,
@@ -204,6 +251,15 @@ fn record_json(record: &Record) -> Value {
         "id": &record.id,
         "kind": &record.kind,
         "fields": &record.fields,
+    })
+}
+
+fn hook_json(hook: &Hook) -> Value {
+    json!({
+        "id": &hook.id,
+        "event": &hook.event,
+        "query": &hook.query,
+        "command": &hook.command,
     })
 }
 

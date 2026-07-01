@@ -3901,8 +3901,67 @@ EOF
     fi
     ;;
 
+  hook_json_output)
+    cd "$tmp"
+    run_agent_store init >/tmp/agent-store-hook-json-hkj-init.out
+
+    run_agent_store --json hook add create 'kind=task and status=open' -- echo created >add-with-query.json
+    run_agent_store --json hook add rm -- echo removed >add-without-query.json
+    with_query_id="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["hook"]["id"])' add-with-query.json)"
+    no_query_id="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["hook"]["id"])' add-without-query.json)"
+    run_agent_store --json hook ls >ls.json
+    run_agent_store --json hook rm "$no_query_id" >rm.json
+
+    python3 - add-with-query.json add-without-query.json ls.json rm.json "$with_query_id" "$no_query_id" <<'PY'
+import json
+import sys
+
+add_with_query_path, add_without_query_path, ls_path, rm_path, with_query_id, no_query_id = sys.argv[1:]
+
+def load(path):
+    with open(path) as handle:
+        return json.load(handle)
+
+add_with_query = load(add_with_query_path)
+assert add_with_query == {
+    "status": "added",
+    "hook": {
+        "id": with_query_id,
+        "event": "create",
+        "query": "kind=task and status=open",
+        "command": "echo created",
+    },
+}, add_with_query
+
+add_without_query = load(add_without_query_path)
+assert add_without_query == {
+    "status": "added",
+    "hook": {
+        "id": no_query_id,
+        "event": "rm",
+        "query": None,
+        "command": "echo removed",
+    },
+}, add_without_query
+
+listed = load(ls_path)
+assert listed == {
+    "hooks": sorted(
+        [add_with_query["hook"], add_without_query["hook"]],
+        key=lambda hook: hook["id"],
+    )
+}, listed
+
+removed = load(rm_path)
+assert removed == {"status": "removed", "hook": add_without_query["hook"]}, removed
+PY
+
+    plain_ls="$(run_agent_store hook ls)"
+    test "$plain_ls" = "$with_query_id create query='kind=task and status=open' -- 'echo created'"
+    ;;
+
   *)
-    echo "usage: $0 {hook_add_stores_metadata|hook_ls_deterministic|hook_rm_deletes_metadata|hooks_run_after_commit|hook_query_filters_records|hook_query_uses_mutation_snapshot|hook_stdin_receives_record_snapshot|hook_failure_reports_details|hook_failure_or_timeout_reports_committed_mutation|hook_command_launch_or_execution_failure_reports_committed_mutation|json_mutation_hook_failure_or_timeout_reports_committed_without_success_json|json_multiple_matching_hooks_stop_after_failure_or_timeout|hooks_run_sequentially_from_project_root_with_timeout|hook_env_vars_for_record_events|link_hook_query_source_and_relation_env|hook_failure_preserves_link_context_env|hook_output_capture_caps_and_help|hook_signal_termination_reports_committed_mutation|hook_timeout_terminates_process_group}" >&2
+    echo "usage: $0 {hook_json_output|hook_add_stores_metadata|hook_ls_deterministic|hook_rm_deletes_metadata|hooks_run_after_commit|hook_query_filters_records|hook_query_uses_mutation_snapshot|hook_stdin_receives_record_snapshot|hook_failure_reports_details|hook_failure_or_timeout_reports_committed_mutation|hook_command_launch_or_execution_failure_reports_committed_mutation|json_mutation_hook_failure_or_timeout_reports_committed_without_success_json|json_multiple_matching_hooks_stop_after_failure_or_timeout|hooks_run_sequentially_from_project_root_with_timeout|hook_env_vars_for_record_events|link_hook_query_source_and_relation_env|hook_failure_preserves_link_context_env|hook_output_capture_caps_and_help|hook_signal_termination_reports_committed_mutation|hook_timeout_terminates_process_group}" >&2
     exit 2
     ;;
 esac

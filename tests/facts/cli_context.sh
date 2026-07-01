@@ -242,12 +242,55 @@ Latest activity: $latest"
 
     run_agent_store ctx >ctx.out
     byte_count="$(wc -c <ctx.out | tr -d ' ')"
-    test "$byte_count" -le 8192
+    test "$byte_count" -le 8193
+    test "$(tail -c1 ctx.out)" = ""
+    content_byte_count="$(head -c -1 ctx.out | wc -c | tr -d ' ')"
+    test "$content_byte_count" -le 8192
     grep -Fq "... truncated at 8192 bytes" ctx.out
     ;;
 
+  ctx_json_summary)
+    cd "$tmp"
+    run_agent_store init >/tmp/agent-store-ctx-cxj-init.out
+    task_one="$(run_agent_store create task title=Write status=open due=2026-06-26)"
+    task_two="$(run_agent_store create task title=Ship status=done due=2026-06-30)"
+    note="$(run_agent_store create note title=Plan)"
+    run_agent_store link "$task_one" blocks "$task_two" >/tmp/agent-store-ctx-cxj-link.out
+    run_agent_store hook add create kind=task -- true >/tmp/agent-store-ctx-cxj-hook.out
+
+    latest="$(latest_activity)"
+    run_agent_store --json ctx >ctx.json
+    python3 - ctx.json "$latest" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1]) as handle:
+    summary = json.load(handle)
+
+assert summary["record_count"] == 3, summary
+assert summary["records_by_kind"] == {"note": 1, "task": 2}, summary
+assert summary["fields_by_kind"] == {
+    "note": ["title"],
+    "task": ["due", "status", "title"],
+}, summary
+assert summary["status_counts_by_kind"] == {"task": {"done": 1, "open": 1}}, summary
+assert summary["date_windows_by_kind"] == {
+    "task": {"due": {"earliest": "2026-06-26", "latest": "2026-06-30"}}
+}, summary
+assert summary["link_count"] == 1, summary
+assert summary["links_by_relation"] == {"blocks": 1}, summary
+assert summary["hook_count"] == 1, summary
+assert summary["latest_activity_at"] == sys.argv[2], summary
+PY
+
+    raw="$(cat ctx.json)"
+    case "$raw" in
+      *"$task_one"*|*"$task_two"*|*"$note"*) exit 1 ;;
+    esac
+    ;;
+
   *)
-    echo "usage: $0 {ctx_summary_default|ctx_summary_counts|ctx_domain_summary_contract|context_alias_matches_ctx|ctx_empty_store|ctx_fields_by_kind|ctx_status_date_summaries|ctx_link_summaries|ctx_output_byte_limit}" >&2
+    echo "usage: $0 {ctx_summary_default|ctx_summary_counts|ctx_domain_summary_contract|context_alias_matches_ctx|ctx_empty_store|ctx_fields_by_kind|ctx_status_date_summaries|ctx_link_summaries|ctx_output_byte_limit|ctx_json_summary}" >&2
     exit 2
     ;;
 esac
