@@ -112,6 +112,12 @@ agent-store ctx
 
 Records have a kind plus arbitrary `key=value` fields. Use short IDs printed
 by mutation commands to retrieve or update specific records.
+
+Queries join comparisons with `and`, `or`, `not`, and parentheses. Quote
+comparison values that contain spaces (`title='Write tests'`, single or
+double quotes; backslash escapes an embedded quote), use `field=''` to match
+empty-string fields, and run bare `agent-store find` (or `ls`) to list every
+record.
 "#,
     },
     BuiltinSkill {
@@ -252,15 +258,18 @@ fn main() {
             }
         }
         CliCommand::Find { query } => {
-            let query = match Query::parse(&query) {
-                Ok(query) => query,
-                Err(error) => {
-                    eprintln!("error: invalid query: {error}");
-                    process::exit(2);
-                }
+            let query = match query {
+                Some(raw) => match Query::parse(&raw) {
+                    Ok(query) => Some(query),
+                    Err(error) => {
+                        eprintln!("error: invalid query: {error}");
+                        process::exit(2);
+                    }
+                },
+                None => None,
             };
             let store = open_store_or_exit();
-            match store.find_records(&query) {
+            match store.find_records(query.as_ref()) {
                 Ok(records) => {
                     if cli.json_output {
                         print_json(records_json(&records));

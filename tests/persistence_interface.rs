@@ -54,7 +54,7 @@ fn persistence_interface_allows_behavior_tests_without_sqlite_layout() {
 
     let query = Query::parse("kind=task and status=open and score<3").expect("parse query");
     assert_eq!(
-        store.find_records(&query).expect("find records"),
+        store.find_records(Some(&query)).expect("find records"),
         vec![task.clone()]
     );
 

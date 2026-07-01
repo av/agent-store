@@ -44,7 +44,7 @@ pub enum CliCommand {
         id: String,
     },
     Find {
-        query: String,
+        query: Option<String>,
     },
     Set {
         id: String,
@@ -192,9 +192,9 @@ fn parse_command(
             }
             let query = args.join(" ");
             if query.trim().is_empty() {
-                return Err(CliParseError::new("find requires a query"));
+                return Ok(CliCommand::Find { query: None });
             }
-            Ok(CliCommand::Find { query })
+            Ok(CliCommand::Find { query: Some(query) })
         }
         "set" => {
             if command_help_requested(&args) {
@@ -485,6 +485,23 @@ fn parse_hook_add_args(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bare_find_and_ls_list_all_records() {
+        for command in ["find", "ls"] {
+            let parsed = parse_args([command.to_owned()]).expect("args should parse");
+            assert_eq!(parsed.command, CliCommand::Find { query: None });
+        }
+
+        let parsed = parse_args(["find".to_owned(), "kind=task".to_owned()])
+            .expect("args should parse");
+        assert_eq!(
+            parsed.command,
+            CliCommand::Find {
+                query: Some("kind=task".to_owned())
+            }
+        );
+    }
 
     #[test]
     fn parses_json_flag_from_any_position() {

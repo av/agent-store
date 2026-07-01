@@ -45,14 +45,9 @@ case "$case_name" in
     ls_out="$(run_agent_store ls kind=task and status=open)"
     test "$ls_out" = "$find_out"
 
-    set +e
     run_agent_store find >/tmp/agent-store-ls-8id-find.out 2>/tmp/agent-store-ls-8id-find.err
-    find_status=$?
     run_agent_store ls >/tmp/agent-store-ls-8id-ls.out 2>/tmp/agent-store-ls-8id-ls.err
-    ls_status=$?
-    set -e
-    test "$find_status" -ne 0
-    test "$ls_status" -eq "$find_status"
+    test "$(wc -l </tmp/agent-store-ls-8id-find.out)" -eq 3
     cmp -s /tmp/agent-store-ls-8id-find.out /tmp/agent-store-ls-8id-ls.out
     cmp -s /tmp/agent-store-ls-8id-find.err /tmp/agent-store-ls-8id-ls.err
     ;;
@@ -202,10 +197,66 @@ PY
     none="$(run_agent_store find kind=task and status=missing)"
     test -z "$none"
 
-    if run_agent_store find >/tmp/agent-store-find-m2b-empty.out 2>/tmp/agent-store-find-m2b-empty.err; then
+    all="$(run_agent_store find)"
+    test "$(printf "%s\n" "$all" | wc -l)" -eq 3
+    printf "%s\n" "$all" | grep -Fq "$expected"
+    printf "%s\n" "$all" | grep -Fq "title=Ship"
+    printf "%s\n" "$all" | grep -Fq " note "
+    ;;
+
+  query_quoted_values)
+    cd "$tmp"
+    run_agent_store init >/tmp/agent-store-quoted-q7v-init.out
+    spaced="$(run_agent_store create task note='hello world' status=open)"
+    other="$(run_agent_store create task note=hello status=open)"
+    blank="$(run_agent_store create task note= status=open)"
+
+    spaced_line="$(run_agent_store get "$spaced")"
+    got="$(run_agent_store find "note='hello world'")"
+    test "$got" = "$spaced_line"
+    got="$(run_agent_store find 'note="hello world"')"
+    test "$got" = "$spaced_line"
+    got="$(run_agent_store find kind=task and "note='hello world'")"
+    test "$got" = "$spaced_line"
+
+    quoteful="$(run_agent_store create task note="it's done" status=open)"
+    got="$(run_agent_store find "note='it\\'s done'")"
+    test "$got" = "$(run_agent_store get "$quoteful")"
+
+    got="$(run_agent_store find "note=''")"
+    test "$got" = "$(run_agent_store get "$blank")"
+    not_blank="$(run_agent_store find "note!=''")"
+    printf "%s\n" "$not_blank" | grep -Fq "$spaced"
+    printf "%s\n" "$not_blank" | grep -Fq "$other"
+    if printf "%s\n" "$not_blank" | grep -Fq "$blank"; then
       exit 1
     fi
-    grep -Fq "find requires a query" /tmp/agent-store-find-m2b-empty.err
+
+    unquoted="$(run_agent_store find note=hello)"
+    test "$unquoted" = "$other task note=hello status=open"
+
+    if run_agent_store find "note='oops" >/tmp/agent-store-quoted-q7v-bad.out 2>/tmp/agent-store-quoted-q7v-bad.err; then
+      exit 1
+    fi
+    grep -Fq "unterminated" /tmp/agent-store-quoted-q7v-bad.err
+    ;;
+
+  find_lists_all_records)
+    cd "$tmp"
+    run_agent_store init >/tmp/agent-store-listall-b4f-init.out
+    first="$(run_agent_store create task title=Write)"
+    second="$(run_agent_store create note title=Read)"
+
+    all="$(run_agent_store find)"
+    test "$(printf "%s\n" "$all" | wc -l)" -eq 2
+    printf "%s\n" "$all" | grep -Fq "$first task title=Write"
+    printf "%s\n" "$all" | grep -Fq "$second note title=Read"
+
+    ls_all="$(run_agent_store ls)"
+    test "$ls_all" = "$all"
+
+    json_count="$(run_agent_store --json find | jq -r '.records | length')"
+    test "$json_count" -eq 2
     ;;
 
   arbitrary_field_queries)

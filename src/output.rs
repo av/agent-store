@@ -54,11 +54,21 @@ Print one Record resolved from an unambiguous Record ID prefix.
 ";
 
 const FIND_USAGE: &str = "\
-Usage: agent-store find <Query>
-       agent-store ls <Query>
+Usage: agent-store find [<Query>]
+       agent-store ls [<Query>]
 
 Find Records by query. Query arguments may be quoted as one shell argument or
-passed as multiple arguments that are joined with spaces.
+passed as multiple arguments that are joined with spaces. Without a Query,
+every Record is listed.
+
+Queries combine comparisons with and, or, not, and parentheses; and binds
+tighter than or. Comparisons support =, !=, <, <=, >, and >= over kind and
+Field values, plus link.out/link.in predicates.
+
+Comparison values may be single- or double-quoted to include spaces or
+operator characters, for example note='hello world'. Inside quotes, a
+backslash escapes the next character (\\' \\\" \\\\), and '' matches Fields
+stored as the empty string.
 ";
 
 const SET_USAGE: &str = "\

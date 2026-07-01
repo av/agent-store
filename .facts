@@ -14,7 +14,7 @@
   id: b98
   command: sh -c 'set -eu; repo=$PWD; tmp=$(mktemp -d); trap "rm -rf \"$tmp\"" EXIT; cd "$tmp"; CARGO_TARGET_DIR="$repo/target/facts-b98" cargo run --quiet --manifest-path "$repo/Cargo.toml" -- init >/tmp/agent-store-create-b98-init.out; id=$(CARGO_TARGET_DIR="$repo/target/facts-b98" cargo run --quiet --manifest-path "$repo/Cargo.toml" -- create task title=Write status=open); printf "%s\n" "$id" | grep -Eq "^[a-z0-9]{6,8}$"; out=$(CARGO_TARGET_DIR="$repo/target/facts-b98" cargo run --quiet --manifest-path "$repo/Cargo.toml" -- get "$id"); test "$out" = "$id task status=open title=Write"'
   tags: [implemented]
-- label: agent-store find <Query> accepts either one quoted query argument or multiple unquoted arguments joined with spaces; it supports kind=<value>, Field = and != comparisons joined by and, and prints matching Records in the default record format
+- label: agent-store find <Query> accepts either one quoted query argument or multiple unquoted arguments joined with spaces; it supports kind=<value>, Field = and != comparisons joined by and, prints matching Records in the default record format, and lists every Record when invoked without a Query
   id: m2b
   command: bash tests/facts/cli_records.sh find_filters_records
   tags: [implemented]
@@ -33,6 +33,12 @@
 - label: agent-store unset <ID> key... resolves an unambiguous short Record ID, atomically removes the supplied Fields from the existing Record, leaves other Fields unchanged, keeps the Record, and prints Updated <resolved-id>
   id: d77
   command: bash tests/facts/cli_records.sh unset_removes_fields
+  tags: [implemented]
+- label: agent-store find <Query> accepts single- or double-quoted comparison values that may contain spaces and operator characters, treats backslash inside quotes as an escape for the next character, and matches k='' and k!='' against Fields stored as the empty string
+  command: bash tests/facts/cli_records.sh query_quoted_values
+  tags: [implemented]
+- label: agent-store find and ls without a Query list every stored Record in the default record format and return the same records object shape under --json
+  command: bash tests/facts/cli_records.sh find_lists_all_records
   tags: [implemented]
 
 ## output

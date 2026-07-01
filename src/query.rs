@@ -50,6 +50,7 @@ enum ComparisonOp {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Token {
     Word(String),
+    Quoted(String),
     Equal,
     NotEqual,
     Less,
@@ -333,7 +334,7 @@ impl Parser {
     fn parse_comparison(&mut self) -> Result<Comparison, QueryError> {
         let field = self.expect_word("field name")?;
         let op = ComparisonOp::parse(self.next(), &field)?;
-        let value_raw = self.expect_word("comparison value")?;
+        let value_raw = self.expect_value("comparison value")?;
         let target = parse_comparison_target(&field)?;
         ensure_link_operator(&target, op)?;
         let value = FieldValue::parse(&value_raw);
@@ -344,6 +345,16 @@ impl Parser {
             value_raw,
             value,
         })
+    }
+
+    fn expect_value(&mut self, label: &str) -> Result<String, QueryError> {
+        match self.peek() {
+            Some(Token::Quoted(_)) => match self.next() {
+                Some(Token::Quoted(value)) => Ok(value),
+                _ => unreachable!("peeked quoted token should still be present"),
+            },
+            _ => self.expect_word(label),
+        }
     }
 
     fn expect_word(&mut self, label: &str) -> Result<String, QueryError> {
@@ -449,6 +460,42 @@ fn tokenize(input: &str) -> Result<Vec<Token>, QueryError> {
                 tokens.push(Token::RightParen);
                 index += 1;
             }
+            quote @ (b'\'' | b'"') => {
+                let mut value = String::new();
+                index += 1;
+                loop {
+                    match bytes.get(index) {
+                        Some(&b'\\') => match bytes.get(index + 1) {
+                            Some(_) => {
+                                let end = index + 2 + trailing_continuation_bytes(bytes, index + 2);
+                                value.push_str(&input[index + 1..end]);
+                                index = end;
+                            }
+                            None => {
+                                return Err(QueryError::new(
+                                    "unterminated escape at end of quoted value",
+                                ));
+                            }
+                        },
+                        Some(&byte) if byte == quote => {
+                            index += 1;
+                            break;
+                        }
+                        Some(_) => {
+                            let end = index + 1 + trailing_continuation_bytes(bytes, index + 1);
+                            value.push_str(&input[index..end]);
+                            index = end;
+                        }
+                        None => {
+                            return Err(QueryError::new(format!(
+                                "unterminated {} quoted value",
+                                if quote == b'\'' { "single" } else { "double" }
+                            )));
+                        }
+                    }
+                }
+                tokens.push(Token::Quoted(value));
+            }
             _ => {
                 let start = index;
                 while index < bytes.len()
@@ -465,9 +512,17 @@ fn tokenize(input: &str) -> Result<Vec<Token>, QueryError> {
     Ok(tokens)
 }
 
+fn trailing_continuation_bytes(bytes: &[u8], from: usize) -> usize {
+    bytes[from..]
+        .iter()
+        .take_while(|byte| (0x80..0xC0).contains(*byte))
+        .count()
+}
+
 fn describe_token(token: &Token) -> String {
     match token {
         Token::Word(word) => format!("'{word}'"),
+        Token::Quoted(word) => format!("'{word}'"),
         Token::Equal => "'='".to_owned(),
         Token::NotEqual => "'!='".to_owned(),
         Token::Less => "'<'".to_owned(),
@@ -582,6 +637,86 @@ mod tests {
             let query = Query::parse(query).expect("query should parse");
             assert!(!query.matches(&record()));
         }
+    }
+
+    #[test]
+    fn quoted_values_match_text_with_spaces() {
+        let mut spaced = record();
+        spaced
+            .fields
+            .insert("note".to_owned(), "hello world".to_owned());
+
+        for query in [
+            "note='hello world'",
+            "note=\"hello world\"",
+            "note = 'hello world'",
+            "kind=task and note='hello world'",
+        ] {
+            let query = Query::parse(query).expect("query should parse");
+            assert!(query.matches(&spaced));
+        }
+    }
+
+    #[test]
+    fn quoted_values_support_backslash_escapes() {
+        let mut awkward = record();
+        awkward
+            .fields
+            .insert("note".to_owned(), "it's a \"test\" \\ done".to_owned());
+
+        for query in [
+            r#"note='it\'s a "test" \\ done'"#,
+            r#"note="it's a \"test\" \\ done""#,
+        ] {
+            let query = Query::parse(query).expect("query should parse");
+            assert!(query.matches(&awkward));
+        }
+    }
+
+    #[test]
+    fn empty_quoted_values_match_empty_fields() {
+        let mut blank = record();
+        blank.fields.insert("note".to_owned(), String::new());
+
+        for (input, expected) in [
+            ("note=''", true),
+            ("note=\"\"", true),
+            ("note!=''", false),
+            ("status=''", false),
+            ("status!=''", true),
+        ] {
+            let query = Query::parse(input).expect("query should parse");
+            assert_eq!(query.matches(&blank), expected, "query: {input}");
+        }
+    }
+
+    #[test]
+    fn unterminated_quoted_values_are_errors() {
+        for query in ["note='oops", "note=\"oops", "note='oops\\'"] {
+            let error = Query::parse(query).expect_err("query should not parse");
+            assert!(error.to_string().contains("unterminated"), "query: {query}");
+        }
+    }
+
+    #[test]
+    fn unquoted_values_with_interior_quotes_keep_current_behavior() {
+        let mut possessive = record();
+        possessive
+            .fields
+            .insert("owner".to_owned(), "it's".to_owned());
+
+        let query = Query::parse("owner=it's").expect("query should parse");
+        assert!(query.matches(&possessive));
+    }
+
+    #[test]
+    fn quoted_values_are_not_boolean_keywords() {
+        let query = Query::parse("status='and'").expect("query should parse");
+
+        let mut keywordy = record();
+        keywordy.fields.insert("status".to_owned(), "and".to_owned());
+        assert!(query.matches(&keywordy));
+        assert!(!query.matches(&record()));
     }
 
     #[test]

@@ -516,21 +516,23 @@ impl Store {
         Ok(record)
     }
 
-    pub fn find_records(&self, query: &Query) -> StoreResult<Vec<Record>> {
+    pub fn find_records(&self, query: Option<&Query>) -> StoreResult<Vec<Record>> {
         let tx = self.conn.unchecked_transaction()?;
         let mut stmt = tx.prepare("SELECT id FROM records ORDER BY id")?;
         let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
         let ids: Vec<String> = rows.collect::<Result<_, _>>()?;
         let mut records = Vec::new();
-        let uses_links = query.uses_links();
+        let uses_links = query.is_some_and(Query::uses_links);
 
         for id in ids {
             let record = get_record_by_id(&tx, &id)?;
-            let matches = if uses_links {
-                let links = links_for_record_id(&tx, &id)?;
-                query.matches_with_links(&record, &links)
-            } else {
-                query.matches(&record)
+            let matches = match query {
+                None => true,
+                Some(query) if uses_links => {
+                    let links = links_for_record_id(&tx, &id)?;
+                    query.matches_with_links(&record, &links)
+                }
+                Some(query) => query.matches(&record),
             };
 
             if matches {
