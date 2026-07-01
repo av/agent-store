@@ -1933,7 +1933,9 @@ for path in hook_samples:
         match = hook_line.match(line)
         assert match, (path, line)
         ids.append(match.group(1))
-    assert ids == sorted(ids), (path, ids)
+    # Registration order: stable hooks were registered first and are never
+    # removed, so every sample must list them as its prefix in add order.
+    assert ids[: len(stable_ids)] == stable_ids, (path, ids)
     assert len(ids) == len(set(ids)), (path, ids)
 
 ctx_samples = sorted(glob.glob(str(tmp / "ctx-*.out"))) + [str(tmp / "final-ctx.out")]

@@ -83,12 +83,27 @@ PY
     cd "$tmp"
     run_agent_store init >/tmp/agent-store-hook-ls-pn0-init.out
 
-    first="$(run_agent_store hook add create kind=task -- echo created)"
-    second="$(run_agent_store hook add rm -- echo removed)"
+    # Register two hooks whose IDs sort lexicographically AGAINST their
+    # registration order, so an ID-sorted listing would disagree with it.
+    first=""
+    second=""
+    for _ in $(seq 1 64); do
+      first="$(run_agent_store hook add create kind=task -- echo created)"
+      second="$(run_agent_store hook add rm -- echo removed)"
+      if [ "$second" \< "$first" ]; then
+        break
+      fi
+      run_agent_store hook rm "$first" >/dev/null
+      run_agent_store hook rm "$second" >/dev/null
+      first=""
+      second=""
+    done
+    test -n "$first"
+    test "$second" \< "$first"
 
     first_line="$first create query='kind=task' -- 'echo created'"
     second_line="$second rm -- 'echo removed'"
-    expected="$(printf "%s\n%s\n" "$first_line" "$second_line" | sort)"
+    expected="$(printf "%s\n%s\n" "$first_line" "$second_line")"
     got="$(run_agent_store hook ls)"
     test "$got" = "$expected"
     ;;
@@ -1297,7 +1312,8 @@ assert ("unlink", unlink_source) in event_rows, event_rows
 def split_ids(ids):
     values = [value for value in ids.split(",") if value]
     assert len(values) == 4, values
-    return sorted(values)
+    # Hooks execute in registration order, so keep the order they were added.
+    return values
 
 scenarios = [
     {
@@ -1478,8 +1494,23 @@ printf "%s" "$name"
 SH
     chmod +x hook-sequence.sh
 
-    first_hook_id="$(run_agent_store hook add create title=Sequential -- './hook-sequence.sh first')"
-    second_hook_id="$(run_agent_store hook add create title=Sequential -- './hook-sequence.sh second')"
+    # Register hooks whose IDs sort lexicographically AGAINST registration
+    # order so ID-sorted execution would run them in the wrong order.
+    first_hook_id=""
+    second_hook_id=""
+    for _ in $(seq 1 64); do
+      first_hook_id="$(run_agent_store hook add create title=Sequential -- './hook-sequence.sh first')"
+      second_hook_id="$(run_agent_store hook add create title=Sequential -- './hook-sequence.sh second')"
+      if [ "$second_hook_id" \< "$first_hook_id" ]; then
+        break
+      fi
+      run_agent_store hook rm "$first_hook_id" >/dev/null
+      run_agent_store hook rm "$second_hook_id" >/dev/null
+      first_hook_id=""
+      second_hook_id=""
+    done
+    test -n "$first_hook_id"
+    test "$second_hook_id" \< "$first_hook_id"
 
     cd "$tmp/subdir"
     sequential_record_id="$(run_agent_store create task title=Sequential)"
@@ -1507,8 +1538,11 @@ for index in (0, 2):
     assert pathlib.Path(start_root).resolve() == root_path, lines
     assert pathlib.Path(end_root).resolve() == root_path, lines
 
-seen = {lines[0].split(":", 1)[0], lines[2].split(":", 1)[0]}
-assert seen == {"first", "second"}, lines
+# Registration order: the first-registered hook must run first even though
+# its ID sorts lexicographically after the second hook's ID.
+assert second_hook_id < first_hook_id, (first_hook_id, second_hook_id)
+assert lines[0].split(":", 1)[0] == "first", lines
+assert lines[2].split(":", 1)[0] == "second", lines
 
 con = sqlite3.connect(root_path / ".agent-store/store.sqlite")
 rows = con.execute(
@@ -1518,11 +1552,11 @@ rows = con.execute(
     order by id
     """
 ).fetchall()
-expected = {
+expected = [
     (first_hook_id, "create", record_id, 0, "first", ""),
     (second_hook_id, "create", record_id, 0, "second", ""),
-}
-assert set(rows) == expected, rows
+]
+assert rows == expected, rows
 PY
 
     cat > plain-multi-hook.sh <<'SH'
@@ -1802,7 +1836,8 @@ assert ("unlink", unlink_source) in event_rows, event_rows
 def split_ids(ids):
     values = [value for value in ids.split(",") if value]
     assert len(values) == 4, values
-    return sorted(values)
+    # Hooks execute in registration order, so keep the order they were added.
+    return values
 
 scenarios = [
     {
@@ -2807,7 +2842,8 @@ assert json_special_details is None, json_special_details
 def split_hook_ids(ids):
     values = [value for value in ids.split(",") if value]
     assert len(values) == 4, values
-    return sorted(values)
+    # Hooks execute in registration order, so keep the order they were added.
+    return values
 
 plain_multi_context_set_hook_ids = split_hook_ids(plain_multi_context_set_hook_ids_s)
 json_multi_context_link_hook_ids = split_hook_ids(json_multi_context_link_hook_ids_s)
@@ -3945,11 +3981,9 @@ assert add_without_query == {
 }, add_without_query
 
 listed = load(ls_path)
+# hook ls lists hooks in registration order, matching execution order.
 assert listed == {
-    "hooks": sorted(
-        [add_with_query["hook"], add_without_query["hook"]],
-        key=lambda hook: hook["id"],
-    )
+    "hooks": [add_with_query["hook"], add_without_query["hook"]],
 }, listed
 
 removed = load(rm_path)

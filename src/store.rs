@@ -963,7 +963,7 @@ impl Store {
             r#"
             SELECT id, event, query, command
             FROM hooks
-            ORDER BY id
+            ORDER BY rowid
             "#,
         )?;
         let rows = stmt.query_map([], |row| {

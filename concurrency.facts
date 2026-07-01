@@ -21,7 +21,7 @@
   id: hmr
   command: bash tests/facts/store_schema_migrations.sh concurrent_hook_lifecycle_mutation_races
   tags: [implemented]
-- label: simultaneous hook add and hook rm churn while hook ls and ctx read the Store finishes without database lock errors or panics, keeps every hook ls output parseable and sorted, keeps every ctx output within the Quick Context contract, and leaves final Hook counts consistent with successful adds and removals
+- label: simultaneous hook add and hook rm churn while hook ls and ctx read the Store finishes without database lock errors or panics, keeps every hook ls output parseable and in registration order, keeps every ctx output within the Quick Context contract, and leaves final Hook counts consistent with successful adds and removals
   command: bash tests/facts/store_schema_migrations.sh concurrent_hook_churn_reads
   tags: [implemented]
 - label: simultaneous find, get, and links reads while create, rm, link, and unlink mutations with matching Hooks are running finish without database lock errors or panics, keep every read output parseable, keep stable get and links reads consistent, and persist Hook Runs for committed mutations
