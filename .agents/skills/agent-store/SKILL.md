@@ -22,7 +22,10 @@ agent-store ctx
 ```
 
 Records have a kind plus arbitrary `key=value` fields. Use short IDs printed
-by mutation commands to retrieve or update specific records.
+by mutation commands to retrieve or update specific records. Kinds and field
+names cannot contain whitespace, control characters, quotes, or `=`; `kind`
+and `id` are reserved field names (in queries, `kind` always addresses the
+record kind). Field values are unrestricted.
 
 Queries join comparisons with `and`, `or`, `not`, and parentheses. Quote
 comparison values that contain spaces (`title='Write tests'`, single or

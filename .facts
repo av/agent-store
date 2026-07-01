@@ -40,6 +40,9 @@
 - label: agent-store find and ls without a Query list every stored Record in the default record format and return the same records object shape under --json
   command: bash tests/facts/cli_records.sh find_lists_all_records
   tags: [implemented]
+- label: agent-store create and set reject with exit code 2 and an error: message any kind or field name containing whitespace, control characters, quotes, or =, and reject the reserved field names kind and id, while field values stay unrestricted and previously valid unicode/dot/dash/underscore identifiers keep working
+  command: bash tests/facts/cli_records.sh identifier_validation_rejects_unsafe_names
+  tags: [implemented]
 
 ## output
 - label: agent-store prints Records one per line as <id> <kind> key=value... with stable field ordering and shell-quoted values when needed
@@ -147,7 +150,7 @@
   id: 6hu
   command: bash tests/facts/cli_records.sh json_output
   tags: [implemented]
-- label: a Field is a key-value attribute attached to a Record
+- label: a Field is a key-value attribute attached to a Record; Field names and kinds exclude whitespace, control characters, quotes, and '=', and 'kind' and 'id' are reserved names while values are unrestricted
   id: ypj
   command: bash tests/facts/cli_records.sh field_empty_null_unset_semantics
   tags: [implemented]

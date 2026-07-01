@@ -168,6 +168,9 @@ fn parse_command(
             let kind = args
                 .next()
                 .ok_or_else(|| CliParseError::new("create requires a kind"))?;
+            if has_unsupported_identifier_chars(&kind) {
+                return Err(CliParseError::new("kind contains unsupported characters"));
+            }
             let fields = parse_fields(args)?;
             Ok(CliCommand::Create { kind, fields })
         }
@@ -375,6 +378,15 @@ fn take_json_flag(args: &mut Vec<String>) -> bool {
     json_output
 }
 
+/// Rejects characters that would break line-oriented output or the query
+/// grammar in kinds and field names: whitespace, control characters, quotes,
+/// and `=`. Field values stay unrestricted (they are quoted on output).
+fn has_unsupported_identifier_chars(value: &str) -> bool {
+    value
+        .chars()
+        .any(|c| c.is_whitespace() || c.is_control() || matches!(c, '=' | '\'' | '"'))
+}
+
 fn parse_fields(
     args: impl Iterator<Item = String>,
 ) -> Result<BTreeMap<String, String>, CliParseError> {
@@ -388,6 +400,16 @@ fn parse_fields(
         };
         if key.is_empty() {
             return Err(CliParseError::new("field names cannot be empty"));
+        }
+        if key == "kind" || key == "id" {
+            return Err(CliParseError::new(format!(
+                "'{key}' is a reserved field name"
+            )));
+        }
+        if has_unsupported_identifier_chars(key) {
+            return Err(CliParseError::new(
+                "field name contains unsupported characters",
+            ));
         }
 
         fields.insert(key.to_owned(), value.to_owned());

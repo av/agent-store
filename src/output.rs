@@ -45,6 +45,10 @@ Usage: agent-store create <kind> [key=value...]
        agent-store cr <kind> [key=value...]
 
 Create a Record with the supplied kind and fields, then print its Record ID.
+
+Kinds and field names cannot contain whitespace, control characters, quotes,
+or '='; 'kind' and 'id' are reserved field names. Field values are
+unrestricted.
 ";
 
 const GET_USAGE: &str = "\
@@ -69,12 +73,18 @@ Comparison values may be single- or double-quoted to include spaces or
 operator characters, for example note='hello world'. Inside quotes, a
 backslash escapes the next character (\\' \\\" \\\\), and '' matches Fields
 stored as the empty string.
+
+In queries, kind always addresses the Record kind: 'kind' and 'id' are
+reserved and can never be Field names.
 ";
 
 const SET_USAGE: &str = "\
 Usage: agent-store set <ID> key=value...
 
 Resolve a Record ID prefix and update the supplied fields atomically.
+
+Field names cannot contain whitespace, control characters, quotes, or '=';
+'kind' and 'id' are reserved field names. Field values are unrestricted.
 ";
 
 const UNSET_USAGE: &str = "\

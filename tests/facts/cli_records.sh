@@ -719,8 +719,59 @@ PY
     test ! -s /tmp/agent-store-pipe-9pe-get.err
     ;;
 
+  identifier_validation_rejects_unsafe_names)
+    cd "$tmp"
+    run_agent_store init >/tmp/agent-store-ident-6vl-init.out
+
+    reject() {
+      set +e
+      run_agent_store "$@" >/tmp/agent-store-ident-6vl.out 2>/tmp/agent-store-ident-6vl.err
+      status=$?
+      set -e
+      test "$status" -eq 2
+      grep -Fq "error: $expected" /tmp/agent-store-ident-6vl.err
+      test ! -s /tmp/agent-store-ident-6vl.out
+    }
+
+    # Kinds with newline, whitespace, '=', control chars, or quotes are rejected.
+    expected="kind contains unsupported characters"
+    reject create "$(printf 'k\nd')" x=1
+    reject create "a b" x=1
+    reject create "k=v"
+    reject create "$(printf 'k\033[31m')" x=1
+    reject create "k'q" x=1
+    reject create 'k"q' x=1
+    reject cr "a b" x=1
+
+    # Field keys with whitespace, control chars, or quotes are rejected.
+    expected="field name contains unsupported characters"
+    reject create note "a b=1"
+    reject create note "$(printf 'a\tb')=1"
+    reject create note "a'b=1"
+
+    # 'kind' and 'id' are reserved field names on create and set.
+    expected="'kind' is a reserved field name"
+    reject create note kind=fake
+    expected="'id' is a reserved field name"
+    reject create note id=fake
+
+    id="$(run_agent_store create note ok=1)"
+    expected="'kind' is a reserved field name"
+    reject set "$id" kind=fake
+    expected="field name contains unsupported characters"
+    reject set "$id" "a b=1"
+
+    # Previously valid identifiers keep working; values stay unrestricted.
+    id2="$(run_agent_store create täsk-2.note über_key=hi dotted.key='a = "b"')"
+    got="$(run_agent_store get "$id2")"
+    test "$got" = "$id2 täsk-2.note dotted.key='a = \"b\"' über_key=hi"
+
+    # No polluted record leaked into kind= queries.
+    test "$(run_agent_store find kind=note)" = "$id note ok=1"
+    ;;
+
   *)
-    echo "usage: $0 {create_alias_matches_create|find_alias_matches_find|set_updates_fields|unset_removes_fields|find_filters_records|arbitrary_field_queries|query_boolean_syntax|query_argument_parity|query_typed_values|field_empty_null_unset_semantics|record_id_generation_contract|record_id_resolution_errors|json_output|uninitialized_store_errors|broken_pipe_exits_quietly}" >&2
+    echo "usage: $0 {create_alias_matches_create|find_alias_matches_find|set_updates_fields|unset_removes_fields|find_filters_records|arbitrary_field_queries|query_boolean_syntax|query_argument_parity|query_typed_values|field_empty_null_unset_semantics|record_id_generation_contract|record_id_resolution_errors|json_output|uninitialized_store_errors|broken_pipe_exits_quietly|identifier_validation_rejects_unsafe_names}" >&2
     exit 2
     ;;
 esac
