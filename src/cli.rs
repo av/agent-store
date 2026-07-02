@@ -233,12 +233,7 @@ fn parse_command(
                 })?),
                 None => None,
             };
-            let query = args.join(" ");
-            let query = if query.trim().is_empty() {
-                None
-            } else {
-                Some(query)
-            };
+            let query = join_query_args(&args);
             Ok(CliCommand::Find {
                 query,
                 timestamps,
@@ -510,6 +505,27 @@ fn take_json_flag(args: &mut Vec<String>) -> bool {
         }
     });
     json_output
+}
+
+/// Joins positional find/ls query arguments into one query string. A single
+/// argument (or arguments that already form a valid query when space-joined,
+/// such as an unquoted `kind=task and status=pending`) is kept as-is; when
+/// the space-joined form does not parse, the arguments are retried joined
+/// with an implicit `and`, so `find kind=task status=pending` means
+/// `find 'kind=task and status=pending'`. When neither form parses, the
+/// space-joined form is returned so the query error names the user's input.
+fn join_query_args(args: &[String]) -> Option<String> {
+    let space_joined = args.join(" ");
+    if space_joined.trim().is_empty() {
+        return None;
+    }
+    if args.len() > 1 && Query::parse(&space_joined).is_err() {
+        let and_joined = args.join(" and ");
+        if Query::parse(&and_joined).is_ok() {
+            return Some(and_joined);
+        }
+    }
+    Some(space_joined)
 }
 
 /// Rejects characters that would break line-oriented output or the query
@@ -804,6 +820,70 @@ mod tests {
                 desc: true,
                 limit: Some(5),
                 count: true,
+            }
+        );
+    }
+
+    #[test]
+    fn find_joins_multiple_bare_query_arguments_with_an_implicit_and() {
+        let parsed = parse_args([
+            "find".to_owned(),
+            "kind=task".to_owned(),
+            "status=pending".to_owned(),
+        ])
+        .expect("args should parse");
+        assert_eq!(
+            parsed.command,
+            CliCommand::Find {
+                query: Some("kind=task and status=pending".to_owned()),
+                timestamps: false,
+                sort: None,
+                desc: false,
+                limit: None,
+                count: false,
+            }
+        );
+    }
+
+    #[test]
+    fn find_keeps_unquoted_query_arguments_that_already_form_a_valid_query() {
+        let parsed = parse_args([
+            "find".to_owned(),
+            "kind=task".to_owned(),
+            "or".to_owned(),
+            "kind=note".to_owned(),
+        ])
+        .expect("args should parse");
+        assert_eq!(
+            parsed.command,
+            CliCommand::Find {
+                query: Some("kind=task or kind=note".to_owned()),
+                timestamps: false,
+                sort: None,
+                desc: false,
+                limit: None,
+                count: false,
+            }
+        );
+    }
+
+    #[test]
+    fn find_keeps_invalid_queries_space_joined_for_error_reporting() {
+        let parsed = parse_args([
+            "find".to_owned(),
+            "kind=task".to_owned(),
+            "bogus".to_owned(),
+        ])
+        .expect("query validity is checked at execution, not parse");
+        assert_eq!(
+            parsed.command,
+            CliCommand::Find {
+                query: Some("kind=task bogus".to_owned()),
+                timestamps: false,
+                sort: None,
+                desc: false,
+                limit: None,
+                count: false,
             }
         );
     }

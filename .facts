@@ -59,7 +59,7 @@
 - label: find Queries support ~= as a case-insensitive substring comparison on kind and Field values, composing with and/or/not and parentheses, and find --help plus the installed skill query docs document the ~= operator
   command: d=$(mktemp -d) && cd $d && agent-store init >/dev/null && agent-store create task title="Fix Login Page" >/dev/null && agent-store create task title="update docs" >/dev/null && test "$(agent-store find "title~='login'" --json | jq ".records | length")" = 1 && test "$(agent-store find "title~=LOGIN" --json | jq ".records | length")" = 1 && test "$(agent-store find "not title~=login" --json | jq ".records | length")" = 1 && agent-store find --help | grep -q "~=" 
   tags: [implemented]
-- label: agent-store create --stdin reads JSONL from stdin (one {"kind":...,"fields":{...}} object per line, the find --json record shape, ignoring extra keys like id and timestamps so exports round-trip), creates one Record per line firing Hooks per record, prints each created ID on its own line (a JSON array of records under --json), and fails with a non-zero exit and no partial silent skip on an invalid line
+- label: agent-store create --stdin reads JSONL from stdin (one {"kind":...,"fields":{...}} object per line, the find --json record shape, ignoring extra keys like id and timestamps so exports round-trip), creates one Record per line firing Hooks per record, prints each created ID on its own line (a {"records":[...]} envelope under --json), and fails with a non-zero exit and no partial silent skip on an invalid line
   command: d=$(mktemp -d) && cd $d && agent-store init >/dev/null && printf "%s\n%s\n" "{\"kind\":\"task\",\"fields\":{\"title\":\"a\"}}" "{\"kind\":\"task\",\"fields\":{\"title\":\"b\"}}" | agent-store create --stdin | wc -l | grep -qx 2 && agent-store find --json | jq ".records" > exp.json && agent-store find --json | jq -c ".records[]" | (mkdir d2 && cd d2 && agent-store init >/dev/null && agent-store create --stdin >/dev/null && test "$(agent-store find --count)" = 2) && ! echo "not json" | agent-store create --stdin 2>/dev/null
   tags: [implemented]
 
@@ -392,4 +392,9 @@
 - label: agent-store get, set, unset, rm, link, unlink, and links require unambiguous existing short Record ID prefixes, report ambiguous and not-found prefixes as non-zero errors, and do not create Records or Links on those failures
   id: r03
   command: bash tests/facts/cli_records.sh record_id_resolution_errors
+  tags: [implemented]
+
+# records
+- label: find and ls join multiple positional query arguments with an implicit and, so find kind=task status=pending matches only Records satisfying both comparisons, while a single quoted query string and unquoted queries already containing and/or/not keep their existing meaning
+  command: d=$(mktemp -d) && cd $d && agent-store init >/dev/null && agent-store create task status=pending >/dev/null && agent-store create task status=done >/dev/null && agent-store create note status=pending >/dev/null && test "$(agent-store find kind=task status=pending --count)" = 1 && test "$(agent-store find kind=task and status=pending --count)" = 1 && test "$(agent-store find "kind=task and status=pending" --count)" = 1 && test "$(agent-store find "kind=task or kind=note" --count)" = 3
   tags: [implemented]

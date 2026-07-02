@@ -119,7 +119,9 @@ names cannot contain whitespace, control characters, quotes, or `=`; `kind`
 and `id` are reserved field names (in queries, `kind` always addresses the
 record kind). Field values are unrestricted.
 
-Queries join comparisons with `and`, `or`, `not`, and parentheses.
+Queries join comparisons with `and`, `or`, `not`, and parentheses. Multiple
+bare query arguments are joined with an implicit `and`, so
+`find kind=task status=pending` means `find 'kind=task and status=pending'`.
 Comparisons support `=`, `!=`, `<`, `<=`, `>`, `>=`, and `~=` (case-insensitive
 substring match, e.g. `title~=login`) over the record kind and fields. Quote
 comparison values that contain spaces (`title='Write tests'`, single or
@@ -141,6 +143,10 @@ last), `--desc` to reverse the order, `--limit <N>` to cap the output, and
 agent-store find kind=task status=pending --sort created_at --desc --limit 5
 agent-store find kind=task --count
 ```
+
+`agent-store ctx` prints a compact project summary capped at 8192 bytes. It
+ends with a Recent records section listing the 10 most recently updated
+records with field values truncated, dropped oldest-first to fit the cap.
 
 Hooks run a bash command after matching mutations. The mutation commits
 before hooks run, and each hook command is killed after a 30-second timeout:

@@ -84,9 +84,12 @@ const FIND_USAGE: &str = "\
 Usage: agent-store find [--timestamps] [--sort <field>] [--desc] [--limit <N>] [--count] [<Query>]
        agent-store ls [--timestamps] [--sort <field>] [--desc] [--limit <N>] [--count] [<Query>]
 
-Find Records by query. Query arguments may be quoted as one shell argument or
-passed as multiple arguments that are joined with spaces. Without a Query,
-every Record is listed in creation order, oldest first.
+Find Records by query. A Query may be quoted as one shell argument or passed
+as multiple arguments: multiple arguments are joined with an implicit and
+when needed, so `find kind=task status=pending` means
+`find 'kind=task and status=pending'`, while unquoted queries that already
+spell out and/or/not keep their meaning. Without a Query, every Record is
+listed in creation order, oldest first.
 
 Options:
   --timestamps    Append created_at=... and updated_at=... to each record line
@@ -158,6 +161,10 @@ Usage: agent-store ctx
        agent-store context
 
 Print a compact Quick Context summary capped at 8192 bytes.
+
+The summary ends with a Recent records section listing the 10 most recently
+updated Records with field values truncated to 100 characters; recent-record
+lines are dropped oldest-first to stay within the byte cap.
 ";
 
 const HOOK_USAGE: &str = "\
