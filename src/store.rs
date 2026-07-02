@@ -149,6 +149,8 @@ const MIGRATIONS: &[Migration] = &[
 pub struct Record {
     pub id: String,
     pub kind: String,
+    pub created_at: String,
+    pub updated_at: String,
     pub fields: BTreeMap<String, String>,
 }
 
@@ -239,7 +241,10 @@ pub struct QuickContextSummary {
     pub links_by_relation: BTreeMap<String, i64>,
     pub hook_count: i64,
     pub latest_activity_at: Option<String>,
+    pub recent_records: Vec<Record>,
 }
+
+pub const QUICK_CONTEXT_RECENT_RECORDS_LIMIT: usize = 10;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DateWindow {
@@ -499,11 +504,7 @@ impl Store {
                 .transaction_with_behavior(TransactionBehavior::Immediate)?;
             match insert_record(&tx, &id, kind, &fields) {
                 Ok(()) => {
-                    let record = Record {
-                        id,
-                        kind: kind.to_owned(),
-                        fields,
-                    };
+                    let record = get_record_by_id(&tx, &id)?;
                     insert_store_event(&tx, "create", &record)?;
                     tx.commit()?;
                     return Ok(record);
@@ -528,7 +529,7 @@ impl Store {
 
     pub fn find_records(&self, query: Option<&Query>) -> StoreResult<Vec<Record>> {
         let tx = self.conn.unchecked_transaction()?;
-        let mut stmt = tx.prepare("SELECT id FROM records ORDER BY id")?;
+        let mut stmt = tx.prepare("SELECT id FROM records ORDER BY created_at, rowid")?;
         let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
         let ids: Vec<String> = rows.collect::<Result<_, _>>()?;
         let mut records = Vec::new();
@@ -677,6 +678,24 @@ impl Store {
         }
         drop(stmt);
 
+        let mut recent_records = Vec::new();
+        let mut stmt = tx.prepare(
+            r#"
+            SELECT id
+            FROM records
+            ORDER BY updated_at DESC, rowid DESC
+            LIMIT ?1
+            "#,
+        )?;
+        let rows = stmt.query_map([QUICK_CONTEXT_RECENT_RECORDS_LIMIT as i64], |row| {
+            row.get::<_, String>(0)
+        })?;
+        let recent_ids: Vec<String> = rows.collect::<Result<_, _>>()?;
+        drop(stmt);
+        for id in recent_ids {
+            recent_records.push(get_record_by_id(&tx, &id)?);
+        }
+
         let hook_count = tx.query_row("SELECT COUNT(*) FROM hooks", [], |row| row.get(0))?;
         let latest_activity_at = tx
             .query_row(
@@ -698,6 +717,7 @@ impl Store {
             links_by_relation,
             hook_count,
             latest_activity_at,
+            recent_records,
         })
     }
 
@@ -1137,10 +1157,23 @@ fn hook_run_from_row(row: &rusqlite::Row<'_>) -> Result<HookRun, rusqlite::Error
 }
 
 fn get_record_by_id(conn: &Connection, id: &str) -> StoreResult<Record> {
-    let kind = conn.query_row(
-        "SELECT kind FROM records WHERE id = ?1",
+    let (kind, created_at, updated_at) = conn.query_row(
+        r#"
+        SELECT
+            kind,
+            COALESCE(NULLIF(created_at, ''), strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+            COALESCE(NULLIF(updated_at, ''), strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+        FROM records
+        WHERE id = ?1
+        "#,
         params![id],
-        |row| row.get::<_, String>(0),
+        |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        },
     )?;
 
     let mut fields = BTreeMap::new();
@@ -1157,6 +1190,8 @@ fn get_record_by_id(conn: &Connection, id: &str) -> StoreResult<Record> {
     Ok(Record {
         id: id.to_owned(),
         kind,
+        created_at,
+        updated_at,
         fields,
     })
 }
@@ -1549,14 +1584,13 @@ mod tests {
             .unwrap();
 
         assert_eq!(record.id, "bbbbbb");
+        let fetched = store.get_record("bbbbbb").unwrap();
+        assert_eq!(fetched.kind, "task");
         assert_eq!(
-            store.get_record("bbbbbb").unwrap(),
-            Record {
-                id: "bbbbbb".to_owned(),
-                kind: "task".to_owned(),
-                fields: BTreeMap::from([("title".into(), "write".into())]),
-            }
+            fetched.fields,
+            BTreeMap::from([("title".into(), "write".into())])
         );
+        assert_eq!(fetched, record);
 
         drop(store);
         fs::remove_dir_all(dir).unwrap();
@@ -1586,6 +1620,48 @@ mod tests {
 
         drop(store);
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn create_sets_timestamps_and_set_unset_bump_updated_at() {
+        let dir = std::env::temp_dir().join(format!("agent-store-test-{}", generate_id()));
+        fs::create_dir_all(&dir).unwrap();
+        let db_path = dir.join("store.sqlite");
+        let mut store = Store::open(db_path).unwrap();
+
+        let created = store
+            .create_record("task", BTreeMap::from([("title".into(), "write".into())]))
+            .unwrap();
+        assert!(is_utc_rfc3339(&created.created_at), "{}", created.created_at);
+        assert!(is_utc_rfc3339(&created.updated_at), "{}", created.updated_at);
+        assert_eq!(created.created_at, created.updated_at);
+
+        thread::sleep(Duration::from_millis(5));
+        let updated = store
+            .set_record(&created.id, BTreeMap::from([("status".into(), "open".into())]))
+            .unwrap();
+        assert_eq!(updated.created_at, created.created_at);
+        assert!(updated.updated_at > created.updated_at);
+
+        thread::sleep(Duration::from_millis(5));
+        let unset = store
+            .unset_record(&created.id, vec!["status".to_owned()])
+            .unwrap();
+        assert_eq!(unset.created_at, created.created_at);
+        assert!(unset.updated_at > updated.updated_at);
+
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    fn is_utc_rfc3339(value: &str) -> bool {
+        let bytes = value.as_bytes();
+        bytes.len() > 20
+            && bytes[..10].iter().enumerate().all(|(index, byte)| match index {
+                4 | 7 => *byte == b'-',
+                _ => byte.is_ascii_digit(),
+            })
+            && bytes[10] == b'T'
+            && value.ends_with('Z')
     }
 
     #[test]

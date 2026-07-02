@@ -44,21 +44,21 @@ Record kinds:
     fields: status, title
     status: done=1, open=1
 Hooks: 1
-Latest activity: $latest"
+Latest activity: $latest
+Recent records:
+  $note note status=open title=Plan
+  $task_two task status=done title=Ship
+  $task_one task status=open title=Write"
     got="$(run_agent_store ctx)"
     test "$got" = "$expected"
-
-    case "$got" in
-      *"$task_one"*|*"$task_two"*|*"$note"*|*"title="*|*"status="*) exit 1 ;;
-    esac
     ;;
 
   ctx_summary_counts)
     cd "$tmp"
     run_agent_store init >/tmp/agent-store-ctx-raf-init.out
-    run_agent_store create task title=Write >/tmp/agent-store-ctx-raf-task-1.out
-    run_agent_store create task title=Ship >/tmp/agent-store-ctx-raf-task-2.out
-    run_agent_store create bug title=Fix >/tmp/agent-store-ctx-raf-bug.out
+    task_one="$(run_agent_store create task title=Write)"
+    task_two="$(run_agent_store create task title=Ship)"
+    bug="$(run_agent_store create bug title=Fix)"
     run_agent_store hook add rm -- true >/tmp/agent-store-ctx-raf-hook.out
 
     latest="$(latest_activity)"
@@ -70,7 +70,11 @@ Record kinds:
   task: 2
     fields: title
 Hooks: 1
-Latest activity: $latest"
+Latest activity: $latest
+Recent records:
+  $bug bug title=Fix
+  $task_two task title=Ship
+  $task_one task title=Write"
     got="$(run_agent_store ctx)"
     test "$got" = "$expected"
     ;;
@@ -95,15 +99,22 @@ Record kinds:
     status: open=1
     due: 2026-07-20..2026-07-20
 Hooks: 1
-Latest activity: $latest"
+Latest activity: $latest
+Recent records:
+  $note_id note title='Private Note' topic=confidential
+  $task_id task due=2026-07-20 notes=hidden status=open title='Secret Plan'"
     got="$(run_agent_store ctx)"
     test "$got" = "$expected"
 
     byte_count="$(printf "%s" "$got" | wc -c | tr -d ' ')"
     test "$byte_count" -le 8192
 
-    case "$got" in
+    aggregates="${got%%Recent records:*}"
+    case "$aggregates" in
       *"$task_id"*|*"$note_id"*|*"$hook_id"*|*"Secret Plan"*|*"Private Note"*|*"confidential"*|*"hidden"*|*"kind=task"*|*"status=open"*|*"hook-command-ran"*) exit 1 ;;
+    esac
+    case "$got" in
+      *"$hook_id"*|*"hook-command-ran"*) exit 1 ;;
     esac
     ;;
 
@@ -138,9 +149,9 @@ Latest activity: none"
   ctx_fields_by_kind)
     cd "$tmp"
     run_agent_store init >/tmp/agent-store-ctx-261-init.out
-    run_agent_store create task title=Write phase=open deadline=2026-06-30 task_only=yes >/tmp/agent-store-ctx-261-task-1.out
-    run_agent_store create task title=Ship priority=high >/tmp/agent-store-ctx-261-task-2.out
-    run_agent_store create note title=Plan topic=agents note_only=yes >/tmp/agent-store-ctx-261-note.out
+    task_one="$(run_agent_store create task title=Write phase=open deadline=2026-06-30 task_only=yes)"
+    task_two="$(run_agent_store create task title=Ship priority=high)"
+    note="$(run_agent_store create note title=Plan topic=agents note_only=yes)"
 
     latest="$(latest_activity)"
     expected="Quick Context
@@ -151,11 +162,16 @@ Record kinds:
   task: 2
     fields: deadline, phase, priority, task_only, title
 Hooks: 0
-Latest activity: $latest"
+Latest activity: $latest
+Recent records:
+  $note note note_only=yes title=Plan topic=agents
+  $task_two task priority=high title=Ship
+  $task_one task deadline=2026-06-30 phase=open task_only=yes title=Write"
     got="$(run_agent_store ctx)"
     test "$got" = "$expected"
 
-    case "$got" in
+    aggregates="${got%%Recent records:*}"
+    case "$aggregates" in
       *"Fields:"*|*"Write"*|*"open"*|*"2026-06-30"*|*"agents"*|*"high"*|*"yes"*) exit 1 ;;
     esac
     ;;
@@ -163,11 +179,11 @@ Latest activity: $latest"
   ctx_status_date_summaries)
     cd "$tmp"
     run_agent_store init >/tmp/agent-store-ctx-iln-init.out
-    run_agent_store create task title=Plan status=open due=2026-07-15 start=2026-06-01 >/tmp/agent-store-ctx-iln-task-1.out
-    run_agent_store create task title=Build status=open due=2026-06-28 start=2026-06-03T09:30:00Z >/tmp/agent-store-ctx-iln-task-2.out
-    run_agent_store create task title=Ship status=done due=2026-07-01 >/tmp/agent-store-ctx-iln-task-3.out
-    run_agent_store create bug title=Fix status=open due=2026-07-10 >/tmp/agent-store-ctx-iln-bug-1.out
-    run_agent_store create bug title=Triage status=open due=2026-06-29 >/tmp/agent-store-ctx-iln-bug-2.out
+    task_one="$(run_agent_store create task title=Plan status=open due=2026-07-15 start=2026-06-01)"
+    task_two="$(run_agent_store create task title=Build status=open due=2026-06-28 start=2026-06-03T09:30:00Z)"
+    task_three="$(run_agent_store create task title=Ship status=done due=2026-07-01)"
+    bug_one="$(run_agent_store create bug title=Fix status=open due=2026-07-10)"
+    bug_two="$(run_agent_store create bug title=Triage status=open due=2026-06-29)"
 
     latest="$(latest_activity)"
     expected="Quick Context
@@ -183,7 +199,13 @@ Record kinds:
     due: 2026-06-28..2026-07-15
     start: 2026-06-01..2026-06-03T09:30:00Z
 Hooks: 0
-Latest activity: $latest"
+Latest activity: $latest
+Recent records:
+  $bug_two bug due=2026-06-29 status=open title=Triage
+  $bug_one bug due=2026-07-10 status=open title=Fix
+  $task_three task due=2026-07-01 status=done title=Ship
+  $task_two task due=2026-06-28 start=2026-06-03T09:30:00Z status=open title=Build
+  $task_one task due=2026-07-15 start=2026-06-01 status=open title=Plan"
     got="$(run_agent_store ctx)"
     test "$got" = "$expected"
     ;;
@@ -220,13 +242,14 @@ Links: 4
   relates_to: 1
   tracks: 1
 Hooks: 0
-Latest activity: $latest"
+Latest activity: $latest
+Recent records:
+  $milestone_id milestone title=Launch
+  $bug_id bug title=Fix
+  $task_two_id task title=Ship
+  $task_one_id task title=Write"
     got="$(run_agent_store ctx)"
     test "$got" = "$expected"
-
-    case "$got" in
-      *"$task_one_id"*|*"$task_two_id"*|*"$bug_id"*|*"$milestone_id"*) exit 1 ;;
-    esac
     ;;
 
   ctx_output_byte_limit)
@@ -260,7 +283,7 @@ Latest activity: $latest"
 
     latest="$(latest_activity)"
     run_agent_store --json ctx >ctx.json
-    python3 - ctx.json "$latest" <<'PY'
+    python3 - ctx.json "$latest" "$note" "$task_two" "$task_one" <<'PY'
 import json
 import sys
 
@@ -281,16 +304,98 @@ assert summary["link_count"] == 1, summary
 assert summary["links_by_relation"] == {"blocks": 1}, summary
 assert summary["hook_count"] == 1, summary
 assert summary["latest_activity_at"] == sys.argv[2], summary
+assert summary["recent_records"] == [
+    {"id": sys.argv[3], "kind": "note", "fields": {"title": "Plan"}},
+    {
+        "id": sys.argv[4],
+        "kind": "task",
+        "fields": {"due": "2026-06-30", "status": "done", "title": "Ship"},
+    },
+    {
+        "id": sys.argv[5],
+        "kind": "task",
+        "fields": {"due": "2026-06-26", "status": "open", "title": "Write"},
+    },
+], summary
 PY
 
-    raw="$(cat ctx.json)"
-    case "$raw" in
-      *"$task_one"*|*"$task_two"*|*"$note"*) exit 1 ;;
+    byte_count="$(wc -c <ctx.json | tr -d ' ')"
+    test "$byte_count" -le 8193
+    ;;
+
+  ctx_recent_value_truncation)
+    cd "$tmp"
+    run_agent_store init >/tmp/agent-store-ctx-trunc-init.out
+    long_value="$(printf 'a%.0s' $(seq 1 300))"
+    record="$(run_agent_store create note body="$long_value")"
+
+    truncated="$(printf 'a%.0s' $(seq 1 100))..."
+    got="$(run_agent_store ctx)"
+    case "$got" in
+      *"$long_value"*) exit 1 ;;
     esac
+    case "$got" in
+      *"  $record note body=$truncated"*) ;;
+      *) exit 1 ;;
+    esac
+
+    run_agent_store --json ctx >ctx.json
+    test "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["recent_records"][0]["fields"]["body"])' ctx.json)" = "$truncated"
+    ;;
+
+  ctx_recent_cap_large_field)
+    cd "$tmp"
+    run_agent_store init >/tmp/agent-store-ctx-cap-init.out
+    run_agent_store create handoff summary='Refactor auth module next' >/tmp/agent-store-ctx-cap-handoff.out
+    big="$(head -c 20000 /dev/zero | tr '\0' 'x')"
+    run_agent_store create blob data="$big" >/tmp/agent-store-ctx-cap-blob.out
+
+    run_agent_store ctx >ctx.out
+    grep -Fq "Recent records:" ctx.out
+    grep -Fq "Refactor auth module next" ctx.out
+    test "$(wc -c <ctx.out | tr -d ' ')" -le 8192
+    if grep -Fq "$big" ctx.out; then exit 1; fi
+
+    run_agent_store --json ctx >ctx.json
+    test "$(wc -c <ctx.json | tr -d ' ')" -le 8192
+    python3 - ctx.json <<'PY'
+import json
+import sys
+
+with open(sys.argv[1]) as handle:
+    summary = json.load(handle)
+
+assert len(summary["recent_records"]) >= 1, summary
+for record in summary["recent_records"]:
+    for value in record["fields"].values():
+        assert len(value) <= 103, record
+PY
+    ;;
+
+  ctx_recent_ordering)
+    cd "$tmp"
+    run_agent_store init >/tmp/agent-store-ctx-order-init.out
+    first="$(run_agent_store create task title=First)"
+    second="$(run_agent_store create task title=Second)"
+    third="$(run_agent_store create task title=Third)"
+    run_agent_store set "$first" status=open >/tmp/agent-store-ctx-order-set.out
+
+    expected_recent="Recent records:
+  $first task status=open title=First
+  $third task title=Third
+  $second task title=Second"
+    got="$(run_agent_store ctx)"
+    case "$got" in
+      *"$expected_recent"*) ;;
+      *) exit 1 ;;
+    esac
+
+    run_agent_store --json ctx >ctx.json
+    test "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["recent_records"][0]["id"])' ctx.json)" = "$first"
     ;;
 
   *)
-    echo "usage: $0 {ctx_summary_default|ctx_summary_counts|ctx_domain_summary_contract|context_alias_matches_ctx|ctx_empty_store|ctx_fields_by_kind|ctx_status_date_summaries|ctx_link_summaries|ctx_output_byte_limit|ctx_json_summary}" >&2
+    echo "usage: $0 {ctx_summary_default|ctx_summary_counts|ctx_domain_summary_contract|context_alias_matches_ctx|ctx_empty_store|ctx_fields_by_kind|ctx_status_date_summaries|ctx_link_summaries|ctx_output_byte_limit|ctx_json_summary|ctx_recent_value_truncation|ctx_recent_cap_large_field|ctx_recent_ordering}" >&2
     exit 2
     ;;
 esac

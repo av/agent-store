@@ -41,11 +41,18 @@ pub enum CliCommand {
         kind: String,
         fields: BTreeMap<String, String>,
     },
+    CreateStdin,
     Get {
         id: String,
+        timestamps: bool,
     },
     Find {
         query: Option<String>,
+        timestamps: bool,
+        sort: Option<String>,
+        desc: bool,
+        limit: Option<usize>,
+        count: bool,
     },
     Set {
         id: String,
@@ -167,16 +174,21 @@ fn parse_command(
             if command_help_requested(&args) {
                 return Ok(help_command(HelpTopic::Create));
             }
+            let mut args = args;
+            let stdin = take_bool_flag(&mut args, "--stdin");
+            if stdin {
+                if let Some(extra) = args.first() {
+                    return Err(CliParseError::new(format!(
+                        "create --stdin does not accept positional argument '{extra}'"
+                    )));
+                }
+                return Ok(CliCommand::CreateStdin);
+            }
             let mut args = args.into_iter();
             let kind = args
                 .next()
                 .ok_or_else(|| CliParseError::new("create requires a kind"))?;
-            if has_unsupported_identifier_chars(&kind) {
-                return Err(CliParseError::new("kind contains unsupported characters"));
-            }
-            if kind == "not" {
-                return Err(CliParseError::new("'not' is a reserved kind"));
-            }
+            validate_kind(&kind)?;
             let fields = parse_fields(args)?;
             Ok(CliCommand::Create { kind, fields })
         }
@@ -184,6 +196,8 @@ fn parse_command(
             if command_help_requested(&args) {
                 return Ok(help_command(HelpTopic::Get));
             }
+            let mut args = args;
+            let timestamps = take_timestamps_flag(&mut args);
             let mut args = args.into_iter();
             let id = args
                 .next()
@@ -193,17 +207,46 @@ fn parse_command(
                     "get does not accept argument '{extra}'"
                 )));
             }
-            Ok(CliCommand::Get { id })
+            Ok(CliCommand::Get { id, timestamps })
         }
         "find" | "ls" => {
             if command_help_requested(&args) {
                 return Ok(help_command(HelpTopic::Find));
             }
-            let query = args.join(" ");
-            if query.trim().is_empty() {
-                return Ok(CliCommand::Find { query: None });
+            let mut args = args;
+            let timestamps = take_timestamps_flag(&mut args);
+            let desc = take_bool_flag(&mut args, "--desc");
+            let count = take_bool_flag(&mut args, "--count");
+            let sort = take_value_flag(&mut args, "--sort")?;
+            if let Some(field) = &sort {
+                if field.is_empty() || has_unsupported_identifier_chars(field) {
+                    return Err(CliParseError::new(format!(
+                        "invalid --sort field '{field}'"
+                    )));
+                }
             }
-            Ok(CliCommand::Find { query: Some(query) })
+            let limit = match take_value_flag(&mut args, "--limit")? {
+                Some(value) => Some(value.parse::<usize>().map_err(|_| {
+                    CliParseError::new(format!(
+                        "invalid --limit value '{value}': expected a non-negative number"
+                    ))
+                })?),
+                None => None,
+            };
+            let query = args.join(" ");
+            let query = if query.trim().is_empty() {
+                None
+            } else {
+                Some(query)
+            };
+            Ok(CliCommand::Find {
+                query,
+                timestamps,
+                sort,
+                desc,
+                limit,
+                count,
+            })
         }
         "set" => {
             if command_help_requested(&args) {
@@ -413,6 +456,49 @@ fn hook_add_help_requested(args: &[String]) -> bool {
     false
 }
 
+fn take_timestamps_flag(args: &mut Vec<String>) -> bool {
+    let mut timestamps = false;
+    args.retain(|arg| {
+        if arg == "--timestamps" {
+            timestamps = true;
+            false
+        } else {
+            true
+        }
+    });
+    timestamps
+}
+
+fn take_bool_flag(args: &mut Vec<String>, flag: &str) -> bool {
+    let mut present = false;
+    args.retain(|arg| {
+        if arg == flag {
+            present = true;
+            false
+        } else {
+            true
+        }
+    });
+    present
+}
+
+fn take_value_flag(args: &mut Vec<String>, flag: &str) -> Result<Option<String>, CliParseError> {
+    let Some(position) = args.iter().position(|arg| arg == flag) else {
+        return Ok(None);
+    };
+    if position + 1 >= args.len() {
+        return Err(CliParseError::new(format!("{flag} requires a value")));
+    }
+    let value = args.remove(position + 1);
+    args.remove(position);
+    if args.iter().any(|arg| arg == flag) {
+        return Err(CliParseError::new(format!(
+            "{flag} may only be given once"
+        )));
+    }
+    Ok(Some(value))
+}
+
 fn take_json_flag(args: &mut Vec<String>) -> bool {
     let mut json_output = false;
     args.retain(|arg| {
@@ -435,6 +521,33 @@ fn has_unsupported_identifier_chars(value: &str) -> bool {
         .any(|c| c.is_whitespace() || c.is_control() || matches!(c, '=' | '\'' | '"'))
 }
 
+fn validate_kind(kind: &str) -> Result<(), CliParseError> {
+    if has_unsupported_identifier_chars(kind) {
+        return Err(CliParseError::new("kind contains unsupported characters"));
+    }
+    if kind == "not" {
+        return Err(CliParseError::new("'not' is a reserved kind"));
+    }
+    Ok(())
+}
+
+fn validate_field_key(key: &str) -> Result<(), CliParseError> {
+    if key.is_empty() {
+        return Err(CliParseError::new("field names cannot be empty"));
+    }
+    if key == "kind" || key == "id" || key == "not" {
+        return Err(CliParseError::new(format!(
+            "'{key}' is a reserved field name"
+        )));
+    }
+    if has_unsupported_identifier_chars(key) {
+        return Err(CliParseError::new(
+            "field name contains unsupported characters",
+        ));
+    }
+    Ok(())
+}
+
 fn parse_fields(
     args: impl Iterator<Item = String>,
 ) -> Result<BTreeMap<String, String>, CliParseError> {
@@ -446,24 +559,60 @@ fn parse_fields(
                 "field argument '{arg}' must use key=value syntax"
             )));
         };
-        if key.is_empty() {
-            return Err(CliParseError::new("field names cannot be empty"));
-        }
-        if key == "kind" || key == "id" || key == "not" {
-            return Err(CliParseError::new(format!(
-                "'{key}' is a reserved field name"
-            )));
-        }
-        if has_unsupported_identifier_chars(key) {
-            return Err(CliParseError::new(
-                "field name contains unsupported characters",
-            ));
-        }
+        validate_field_key(key)?;
 
         fields.insert(key.to_owned(), value.to_owned());
     }
 
     Ok(fields)
+}
+
+/// Parses one JSONL import line of the shape `{"kind": ..., "fields": {...}}`
+/// into the same (kind, fields) pair argv `create <kind> key=value...` would
+/// produce. Extra top-level keys (id, created_at, updated_at, ...) are
+/// ignored so `find --json` exports round-trip; non-string field values
+/// (numbers, booleans, null) are stored as their raw textual form, matching
+/// how argv `key=value` input stores them.
+pub fn parse_jsonl_record(line: &str) -> Result<(String, BTreeMap<String, String>), CliParseError> {
+    let value: serde_json::Value = serde_json::from_str(line)
+        .map_err(|error| CliParseError::new(format!("invalid JSON: {error}")))?;
+    let object = value
+        .as_object()
+        .ok_or_else(|| CliParseError::new("expected a JSON object"))?;
+
+    let kind = object
+        .get("kind")
+        .ok_or_else(|| CliParseError::new("missing 'kind' key"))?
+        .as_str()
+        .ok_or_else(|| CliParseError::new("'kind' must be a JSON string"))?;
+    if kind.is_empty() {
+        return Err(CliParseError::new("'kind' cannot be empty"));
+    }
+    validate_kind(kind)?;
+
+    let mut fields = BTreeMap::new();
+    if let Some(raw_fields) = object.get("fields") {
+        let field_object = raw_fields
+            .as_object()
+            .ok_or_else(|| CliParseError::new("'fields' must be a JSON object"))?;
+        for (key, field_value) in field_object {
+            validate_field_key(key)?;
+            let text = match field_value {
+                serde_json::Value::String(text) => text.clone(),
+                serde_json::Value::Number(number) => number.to_string(),
+                serde_json::Value::Bool(boolean) => boolean.to_string(),
+                serde_json::Value::Null => "null".to_owned(),
+                serde_json::Value::Array(_) | serde_json::Value::Object(_) => {
+                    return Err(CliParseError::new(format!(
+                        "field '{key}' must be a string, number, boolean, or null"
+                    )));
+                }
+            };
+            fields.insert(key.clone(), text);
+        }
+    }
+
+    Ok((kind.to_owned(), fields))
 }
 
 fn parse_field_keys(args: impl Iterator<Item = String>) -> Result<Vec<String>, CliParseError> {
@@ -560,7 +709,17 @@ mod tests {
     fn bare_find_and_ls_list_all_records() {
         for command in ["find", "ls"] {
             let parsed = parse_args([command.to_owned()]).expect("args should parse");
-            assert_eq!(parsed.command, CliCommand::Find { query: None });
+            assert_eq!(
+                parsed.command,
+                CliCommand::Find {
+                    query: None,
+                    timestamps: false,
+                    sort: None,
+                    desc: false,
+                    limit: None,
+                    count: false,
+                }
+            );
         }
 
         let parsed = parse_args(["find".to_owned(), "kind=task".to_owned()])
@@ -568,9 +727,109 @@ mod tests {
         assert_eq!(
             parsed.command,
             CliCommand::Find {
-                query: Some("kind=task".to_owned())
+                query: Some("kind=task".to_owned()),
+                timestamps: false,
+                sort: None,
+                desc: false,
+                limit: None,
+                count: false,
             }
         );
+    }
+
+    #[test]
+    fn get_and_find_accept_timestamps_flag_in_any_position() {
+        let parsed = parse_args(["get".to_owned(), "--timestamps".to_owned(), "abc123".to_owned()])
+            .expect("args should parse");
+        assert_eq!(
+            parsed.command,
+            CliCommand::Get {
+                id: "abc123".to_owned(),
+                timestamps: true,
+            }
+        );
+
+        let parsed = parse_args([
+            "find".to_owned(),
+            "kind=task".to_owned(),
+            "--timestamps".to_owned(),
+        ])
+        .expect("args should parse");
+        assert_eq!(
+            parsed.command,
+            CliCommand::Find {
+                query: Some("kind=task".to_owned()),
+                timestamps: true,
+                sort: None,
+                desc: false,
+                limit: None,
+                count: false,
+            }
+        );
+
+        let parsed = parse_args(["ls".to_owned(), "--timestamps".to_owned()])
+            .expect("args should parse");
+        assert_eq!(
+            parsed.command,
+            CliCommand::Find {
+                query: None,
+                timestamps: true,
+                sort: None,
+                desc: false,
+                limit: None,
+                count: false,
+            }
+        );
+    }
+
+    #[test]
+    fn find_accepts_sort_desc_limit_and_count_flags_alongside_a_query() {
+        let parsed = parse_args([
+            "find".to_owned(),
+            "--sort".to_owned(),
+            "n".to_owned(),
+            "kind=task".to_owned(),
+            "--desc".to_owned(),
+            "--limit".to_owned(),
+            "5".to_owned(),
+            "--count".to_owned(),
+        ])
+        .expect("args should parse");
+        assert_eq!(
+            parsed.command,
+            CliCommand::Find {
+                query: Some("kind=task".to_owned()),
+                timestamps: false,
+                sort: Some("n".to_owned()),
+                desc: true,
+                limit: Some(5),
+                count: true,
+            }
+        );
+    }
+
+    #[test]
+    fn find_flags_report_clear_errors() {
+        let error = parse_args(["find".to_owned(), "--limit".to_owned(), "abc".to_owned()])
+            .expect_err("non-numeric limit should fail");
+        assert_eq!(
+            error.to_string(),
+            "invalid --limit value 'abc': expected a non-negative number"
+        );
+
+        let error = parse_args(["ls".to_owned(), "--sort".to_owned()])
+            .expect_err("missing sort value should fail");
+        assert_eq!(error.to_string(), "--sort requires a value");
+
+        let error = parse_args([
+            "find".to_owned(),
+            "--sort".to_owned(),
+            "a".to_owned(),
+            "--sort".to_owned(),
+            "b".to_owned(),
+        ])
+        .expect_err("repeated sort should fail");
+        assert_eq!(error.to_string(), "--sort may only be given once");
     }
 
     #[test]

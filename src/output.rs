@@ -5,6 +5,9 @@ use std::collections::BTreeMap;
 
 pub const QUICK_CONTEXT_OUTPUT_LIMIT_BYTES: usize = 8192;
 
+const QUICK_CONTEXT_FIELD_VALUE_LIMIT_CHARS: usize = 100;
+const QUICK_CONTEXT_FIELD_VALUE_ELLIPSIS: &str = "...";
+
 pub const USAGE: &str = "\
 Usage: agent-store [OPTIONS] <COMMAND>
 
@@ -43,31 +46,63 @@ agent-store instructions to existing AGENTS.md and CLAUDE.md files.
 const CREATE_USAGE: &str = "\
 Usage: agent-store create <kind> [key=value...]
        agent-store cr <kind> [key=value...]
+       agent-store create --stdin
+       agent-store cr --stdin
 
 Create a Record with the supplied kind and fields, then print its Record ID.
 
 Kinds and field names cannot contain whitespace, control characters, quotes,
 or '='; 'kind' and 'id' are reserved field names, and 'not' is reserved as a
 kind and field name. Field values are unrestricted.
+
+Options:
+  --stdin  Bulk-import JSONL from stdin instead of argv: one JSON object per
+           line of the shape {\"kind\": \"...\", \"fields\": {\"k\": \"v\"}},
+           the same record shape find --json emits. Extra keys (id,
+           created_at, updated_at) are ignored so exports round-trip, and
+           number, boolean, and null field values are stored as their raw
+           text just like argv key=value input. Empty lines are skipped.
+           One Record is created per line and its ID printed per line in
+           input order (--json prints a records array instead); Hooks fire
+           per created Record. Every line is validated before any Record is
+           created, so an invalid line (bad JSON, missing or invalid kind,
+           invalid field name) exits non-zero naming the line number with
+           nothing imported. --stdin cannot be combined with positional
+           kind or key=value arguments.
 ";
 
 const GET_USAGE: &str = "\
-Usage: agent-store get <ID>
+Usage: agent-store get [--timestamps] <ID>
 
 Print one Record resolved from an unambiguous Record ID prefix.
+
+Options:
+  --timestamps  Append created_at=... and updated_at=... to the record line
 ";
 
 const FIND_USAGE: &str = "\
-Usage: agent-store find [<Query>]
-       agent-store ls [<Query>]
+Usage: agent-store find [--timestamps] [--sort <field>] [--desc] [--limit <N>] [--count] [<Query>]
+       agent-store ls [--timestamps] [--sort <field>] [--desc] [--limit <N>] [--count] [<Query>]
 
 Find Records by query. Query arguments may be quoted as one shell argument or
 passed as multiple arguments that are joined with spaces. Without a Query,
-every Record is listed.
+every Record is listed in creation order, oldest first.
+
+Options:
+  --timestamps    Append created_at=... and updated_at=... to each record line
+  --sort <field>  Sort by a Field name or the built-ins created_at,
+                  updated_at, kind, or id; Records missing the field sort last
+  --desc          Reverse the listing order
+  --limit <N>     Output at most N records
+  --count         Print only the number of matching records
 
 Queries combine comparisons with and, or, not, and parentheses; and binds
 tighter than or. Comparisons support =, !=, <, <=, >, and >= over kind and
-Field values, plus link.out/link.in predicates.
+Field values, plus link.out/link.in predicates. The ~= operator matches when
+the value is a case-insensitive substring of kind or a Field value, for
+example title~=login. The built-in created_at and
+updated_at record timestamps compare like Fields (for example
+created_at>2026-01-01), unless shadowed by a Field with the same name.
 
 Comparison values may be single- or double-quoted to include spaces or
 operator characters, for example note='hello world'. Inside quotes, a
@@ -135,6 +170,23 @@ Commands:
   ls            List Hooks
   rm            Remove a Hook by ID
   runs          List recent Hook Runs or show one run's captured output
+
+Each Hook command receives the affected Record snapshot on stdin as one
+default-format Record line, plus these environment variables:
+
+  AGENT_STORE_EVENT      always: the event (create, set, unset, rm, link, unlink)
+  AGENT_STORE_ID         always: the affected Record's ID
+  AGENT_STORE_KIND       always: the affected Record's kind
+  AGENT_STORE_REL        link and unlink only: the Link relation
+  AGENT_STORE_TARGET_ID  link and unlink only: the Link target Record ID
+  AGENT_STORE_FIELD      set/unset of exactly one field: the field key
+  AGENT_STORE_KEY        set/unset of exactly one field: same as AGENT_STORE_FIELD
+  AGENT_STORE_VALUE      set/unset of exactly one field: the new value (the old
+                         value on unset)
+  AGENT_STORE_OLD_VALUE  set/unset of exactly one field: the previous value
+                         (empty when the field did not exist)
+  AGENT_STORE_NEW_VALUE  set/unset of exactly one field: the new value (empty
+                         on unset)
 ";
 
 const HOOK_ADD_USAGE: &str = "\
@@ -143,7 +195,13 @@ Usage: agent-store hook add <event> [<Query>] -- <bash command>
 Store a Hook for create, set, unset, rm, link, or unlink. When a Query is
 provided, the Hook runs only for matching Records.
 
-Hook bash commands are killed after a 30-second timeout.
+Hook bash commands are killed after a 30-second timeout. Each Hook command
+receives the affected Record snapshot on stdin as one default-format Record
+line, plus AGENT_STORE_EVENT, AGENT_STORE_ID, and AGENT_STORE_KIND (always),
+AGENT_STORE_REL and AGENT_STORE_TARGET_ID (link/unlink), and AGENT_STORE_FIELD,
+AGENT_STORE_KEY, AGENT_STORE_VALUE, AGENT_STORE_OLD_VALUE, and
+AGENT_STORE_NEW_VALUE (set/unset of exactly one field). See
+`agent-store hook --help` for details.
 ";
 
 const HOOK_LIST_USAGE: &str = "\
@@ -199,6 +257,10 @@ pub fn init_json(already_initialized: bool) -> Value {
         "status": if already_initialized { "already-initialized" } else { "initialized" },
         "store_dir": agent_store::store::STORE_DIR,
     })
+}
+
+pub fn count_json(count: usize) -> Value {
+    json!({ "count": count })
 }
 
 pub fn single_record_json(record: &Record) -> Value {
@@ -287,6 +349,18 @@ pub fn format_hook_run_detail(run: &HookRun) -> String {
 }
 
 pub fn quick_context_json(summary: &QuickContextSummary) -> Value {
+    // Include as many recent records as fit within the output byte cap,
+    // dropping the least recently updated entries first.
+    for keep in (0..=summary.recent_records.len()).rev() {
+        let value = quick_context_json_with_recent(summary, keep);
+        if keep == 0 || value.to_string().len() <= QUICK_CONTEXT_OUTPUT_LIMIT_BYTES {
+            return value;
+        }
+    }
+    unreachable!("the keep == 0 iteration always returns")
+}
+
+fn quick_context_json_with_recent(summary: &QuickContextSummary, keep: usize) -> Value {
     json!({
         "record_count": summary.record_count,
         "records_by_kind": &summary.records_by_kind,
@@ -317,7 +391,47 @@ pub fn quick_context_json(summary: &QuickContextSummary) -> Value {
         "links_by_relation": &summary.links_by_relation,
         "hook_count": summary.hook_count,
         "latest_activity_at": &summary.latest_activity_at,
+        "recent_records": summary.recent_records[..keep]
+            .iter()
+            .map(recent_record_json)
+            .collect::<Vec<_>>(),
     })
+}
+
+fn recent_record_json(record: &Record) -> Value {
+    json!({
+        "id": &record.id,
+        "kind": &record.kind,
+        "fields": record
+            .fields
+            .iter()
+            .map(|(key, value)| (key.clone(), truncate_field_value(value)))
+            .collect::<BTreeMap<_, _>>(),
+    })
+}
+
+fn truncate_field_value(value: &str) -> String {
+    if value.chars().count() <= QUICK_CONTEXT_FIELD_VALUE_LIMIT_CHARS {
+        return value.to_owned();
+    }
+
+    let mut truncated: String = value
+        .chars()
+        .take(QUICK_CONTEXT_FIELD_VALUE_LIMIT_CHARS)
+        .collect();
+    truncated.push_str(QUICK_CONTEXT_FIELD_VALUE_ELLIPSIS);
+    truncated
+}
+
+fn format_recent_record(record: &Record) -> String {
+    let mut output = format!("{} {}", record.id, record.kind);
+    for (key, value) in &record.fields {
+        output.push(' ');
+        output.push_str(key);
+        output.push('=');
+        output.push_str(&shell_quote_value(&truncate_field_value(value)));
+    }
+    output
 }
 
 pub fn record_links_json(record_id: &str, links: &[LinkEdge]) -> Value {
@@ -331,6 +445,8 @@ fn record_json(record: &Record) -> Value {
     json!({
         "id": &record.id,
         "kind": &record.kind,
+        "created_at": &record.created_at,
+        "updated_at": &record.updated_at,
         "fields": &record.fields,
     })
 }
@@ -379,6 +495,15 @@ pub fn format_record(record: &Record) -> String {
         output.push('=');
         output.push_str(&shell_quote_value(value));
     }
+    output
+}
+
+pub fn format_record_with_timestamps(record: &Record) -> String {
+    let mut output = format_record(record);
+    output.push_str(" created_at=");
+    output.push_str(&shell_quote_value(&record.created_at));
+    output.push_str(" updated_at=");
+    output.push_str(&shell_quote_value(&record.updated_at));
     output
 }
 
@@ -437,7 +562,35 @@ pub fn format_quick_context(summary: &QuickContextSummary) -> String {
         "Latest activity: {}",
         summary.latest_activity_at.as_deref().unwrap_or("none")
     ));
-    cap_quick_context_output(lines.join("\n"))
+
+    let mut output = lines.join("\n");
+    append_recent_records_section(&mut output, summary);
+    cap_quick_context_output(output)
+}
+
+fn append_recent_records_section(output: &mut String, summary: &QuickContextSummary) {
+    if summary.recent_records.is_empty() {
+        return;
+    }
+
+    // Append recent record lines only while the total output stays within the
+    // byte cap, dropping the least recently updated entries first.
+    let header = "\nRecent records:";
+    let mut section = String::new();
+    for record in &summary.recent_records {
+        let line = format!("\n  {}", format_recent_record(record));
+        if output.len() + header.len() + section.len() + line.len()
+            > QUICK_CONTEXT_OUTPUT_LIMIT_BYTES
+        {
+            break;
+        }
+        section.push_str(&line);
+    }
+
+    if !section.is_empty() {
+        output.push_str(header);
+        output.push_str(&section);
+    }
 }
 
 fn format_status_counts(status_counts: &BTreeMap<String, i64>) -> String {
@@ -494,6 +647,8 @@ mod tests {
         let record = Record {
             id: "abc123".to_owned(),
             kind: "note".to_owned(),
+            created_at: "2026-07-01T10:00:00.000Z".to_owned(),
+            updated_at: "2026-07-02T11:00:00.000Z".to_owned(),
             fields: BTreeMap::from([
                 ("title".to_owned(), "hello world".to_owned()),
                 ("empty".to_owned(), String::new()),
@@ -504,6 +659,11 @@ mod tests {
         assert_eq!(
             format_record(&record),
             "abc123 note empty='' status=open title='hello world'"
+        );
+        assert_eq!(
+            format_record_with_timestamps(&record),
+            "abc123 note empty='' status=open title='hello world' \
+             created_at=2026-07-01T10:00:00.000Z updated_at=2026-07-02T11:00:00.000Z"
         );
     }
 
@@ -545,12 +705,92 @@ mod tests {
             ]),
             hook_count: 1,
             latest_activity_at: Some("2026-06-26T12:34:56.789Z".to_owned()),
+            recent_records: vec![Record {
+                id: "abc123".to_owned(),
+                kind: "note".to_owned(),
+                created_at: "2026-06-26T12:00:00.000Z".to_owned(),
+                updated_at: "2026-06-26T12:34:56.789Z".to_owned(),
+                fields: BTreeMap::from([("title".to_owned(), "hello world".to_owned())]),
+            }],
         };
 
         assert_eq!(
             format_quick_context(&summary),
-            "Quick Context\nRecords: 3\nRecord kinds:\n  note: 1\n    fields: title\n  task: 2\n    fields: due, status, title\n    status: open=2\n    due: 2026-06-26..2026-06-30\nLinks: 3\n  blocks: 2\n  depends_on: 1\nHooks: 1\nLatest activity: 2026-06-26T12:34:56.789Z"
+            "Quick Context\nRecords: 3\nRecord kinds:\n  note: 1\n    fields: title\n  task: 2\n    fields: due, status, title\n    status: open=2\n    due: 2026-06-26..2026-06-30\nLinks: 3\n  blocks: 2\n  depends_on: 1\nHooks: 1\nLatest activity: 2026-06-26T12:34:56.789Z\nRecent records:\n  abc123 note title='hello world'"
         );
+    }
+
+    #[test]
+    fn recent_record_values_are_truncated_with_ellipsis() {
+        let record = Record {
+            id: "abc123".to_owned(),
+            kind: "note".to_owned(),
+            created_at: "2026-06-26T12:00:00.000Z".to_owned(),
+            updated_at: "2026-06-26T12:34:56.789Z".to_owned(),
+            fields: BTreeMap::from([("body".to_owned(), "x".repeat(500))]),
+        };
+
+        let line = format_recent_record(&record);
+        assert_eq!(
+            line,
+            format!("abc123 note body={}...", "x".repeat(100))
+        );
+
+        let value = recent_record_json(&record);
+        assert_eq!(
+            value["fields"]["body"],
+            json!(format!("{}...", "x".repeat(100)))
+        );
+    }
+
+    #[test]
+    fn quick_context_recent_section_respects_byte_cap() {
+        let recent_records = (0..10)
+            .map(|index| Record {
+                id: format!("record{index:04}"),
+                kind: "note".to_owned(),
+                created_at: "2026-06-26T12:00:00.000Z".to_owned(),
+                updated_at: "2026-06-26T12:34:56.789Z".to_owned(),
+                fields: BTreeMap::from([
+                    ("a".to_owned(), "y".repeat(20_000)),
+                    ("b".to_owned(), "z".repeat(20_000)),
+                    ("c".to_owned(), "w".repeat(20_000)),
+                    ("d".to_owned(), "v".repeat(20_000)),
+                    ("e".to_owned(), "u".repeat(20_000)),
+                ]),
+            })
+            .collect::<Vec<_>>();
+        let summary = QuickContextSummary {
+            record_count: 10,
+            records_by_kind: BTreeMap::from([("note".to_owned(), 10)]),
+            fields_by_kind: BTreeMap::from([(
+                "note".to_owned(),
+                vec![
+                    "a".to_owned(),
+                    "b".to_owned(),
+                    "c".to_owned(),
+                    "d".to_owned(),
+                    "e".to_owned(),
+                ],
+            )]),
+            status_counts_by_kind: BTreeMap::new(),
+            date_windows_by_kind: BTreeMap::new(),
+            link_count: 0,
+            links_by_relation: BTreeMap::new(),
+            hook_count: 0,
+            latest_activity_at: Some("2026-06-26T12:34:56.789Z".to_owned()),
+            recent_records,
+        };
+
+        let output = format_quick_context(&summary);
+        assert!(output.len() <= QUICK_CONTEXT_OUTPUT_LIMIT_BYTES);
+        assert!(output.contains("Recent records:"));
+        assert!(output.contains("record0000"));
+        assert!(!output.contains("... truncated at"));
+
+        let json_output = quick_context_json(&summary).to_string();
+        assert!(json_output.len() <= QUICK_CONTEXT_OUTPUT_LIMIT_BYTES);
+        assert!(json_output.contains("record0000"));
     }
 
     #[test]
@@ -568,6 +808,7 @@ mod tests {
             links_by_relation: BTreeMap::new(),
             hook_count: 0,
             latest_activity_at: None,
+            recent_records: Vec::new(),
         };
 
         let output = format_quick_context(&summary);

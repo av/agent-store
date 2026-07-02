@@ -31,15 +31,17 @@ macro_rules! outln {
 mod cli;
 mod output;
 
-use agent_store::query::Query;
+use agent_store::query::{record_sort_value, Query};
 use agent_store::store::{FieldChange, Hook, Link, LinkEdge, Record, Store, StoreError, STORE_DIR};
+use agent_store::value::FieldValue;
 use cli::{CliCommand, HookCliCommand};
 use output::{
-    format_hook, format_hook_run_detail, format_hook_run_summary, format_quick_context,
-    format_record, help_text, hook_mutation_json, hook_runs_json, hooks_json, init_json,
+    count_json, format_hook, format_hook_run_detail, format_hook_run_summary, format_quick_context,
+    format_record, format_record_with_timestamps, help_text, hook_mutation_json, hook_runs_json, hooks_json, init_json,
     link_mutation_json, mutation_json, print_json, quick_context_json, record_links_json,
     records_json, single_hook_run_json, single_record_json, USAGE,
 };
+use std::cmp::Ordering;
 use std::env;
 use std::fs::{self, OpenOptions};
 use std::io::{self, Read, Write};
@@ -117,11 +119,28 @@ names cannot contain whitespace, control characters, quotes, or `=`; `kind`
 and `id` are reserved field names (in queries, `kind` always addresses the
 record kind). Field values are unrestricted.
 
-Queries join comparisons with `and`, `or`, `not`, and parentheses. Quote
+Queries join comparisons with `and`, `or`, `not`, and parentheses.
+Comparisons support `=`, `!=`, `<`, `<=`, `>`, `>=`, and `~=` (case-insensitive
+substring match, e.g. `title~=login`) over the record kind and fields. Quote
 comparison values that contain spaces (`title='Write tests'`, single or
 double quotes; backslash escapes an embedded quote), use `field=''` to match
 empty-string fields, and run bare `agent-store find` (or `ls`) to list every
-record.
+record in creation order, oldest first.
+
+Every record carries `created_at` and `updated_at` timestamps. `--json` output
+of `get` and `find` includes them, `--timestamps` appends them to text output,
+and queries can compare them like fields (`created_at>2026-01-01`) unless
+shadowed by a field with the same name.
+
+`find` and `ls` also take `--sort <field>` (a field name or the built-ins
+`created_at`, `updated_at`, `kind`, `id`; records missing the field sort
+last), `--desc` to reverse the order, `--limit <N>` to cap the output, and
+`--count` to print only the number of matches:
+
+```bash
+agent-store find kind=task status=pending --sort created_at --desc --limit 5
+agent-store find kind=task --count
+```
 
 Hooks run a bash command after matching mutations. The mutation commits
 before hooks run, and each hook command is killed after a 30-second timeout:
@@ -132,6 +151,16 @@ agent-store hook ls
 agent-store hook runs            # recent runs; `hook runs <run-id>` for detail
 agent-store hook rm <hook-id>
 ```
+
+Each hook command receives the affected record snapshot on stdin as one
+default-format record line, plus environment variables: `AGENT_STORE_EVENT`
+(create, set, unset, rm, link, or unlink), `AGENT_STORE_ID`, and
+`AGENT_STORE_KIND` are always set. `AGENT_STORE_REL` and
+`AGENT_STORE_TARGET_ID` are set on link/unlink. When a set or unset touches
+exactly one field, `AGENT_STORE_FIELD` and `AGENT_STORE_KEY` hold the field
+key, `AGENT_STORE_VALUE` the new value (the old value on unset), and
+`AGENT_STORE_OLD_VALUE`/`AGENT_STORE_NEW_VALUE` the before/after values
+(empty when absent).
 "#,
     },
     BuiltinSkill {
@@ -159,6 +188,8 @@ Task tracking:
 ```bash
 agent-store create task title="Fix parser" status=pending priority=high
 agent-store find 'kind=task and status!=done'
+agent-store find kind=task status=pending --sort created_at --limit 5   # oldest open work first
+agent-store find 'kind=task and status!=done' --count
 agent-store set <id> status=done
 ```
 
@@ -167,7 +198,12 @@ Decision log:
 ```bash
 agent-store create decision area=storage choice=sqlite reason="single-file project-local store"
 agent-store find 'kind=decision and area=storage'
+agent-store find kind=decision --sort created_at --desc --limit 3 --timestamps   # latest decisions
 ```
+
+Chronology is built in: listings default to creation order (oldest first),
+and the `created_at`/`updated_at` timestamps are sortable and queryable, so
+records do not need a manual date field.
 "#,
     },
     BuiltinSkill {
@@ -191,11 +227,31 @@ while IFS= read -r line; do
 done < notes.txt
 ```
 
+Bulk import JSONL with `create --stdin` (one `{"kind":...,"fields":{...}}`
+object per line, the `find --json` record shape; extra keys like `id` and
+timestamps are ignored, so exports round-trip):
+
+```bash
+agent-store find kind=task --json | jq -c '.records[]' | agent-store create --stdin
+```
+
+Every line is validated before any record is created; an invalid line exits
+non-zero naming the line number with nothing imported.
+
 Filter and format: `--json` list output wraps records in a
 `{"records":[...]}` envelope, so iterate with `.records[]`:
 
 ```bash
 agent-store find 'kind=task and status=pending' --json | jq -r '.records[].id'
+```
+
+JSON records include `created_at` and `updated_at` timestamps. Prefer the
+built-in `--sort`, `--desc`, `--limit`, and `--count` flags over shell-side
+`sort`, `head`, or `wc -l`:
+
+```bash
+agent-store find kind=log --sort updated_at --desc --limit 10
+agent-store find kind=note --count
 ```
 
 Capture command output:
@@ -261,12 +317,63 @@ fn main() {
                 }
             }
         }
-        CliCommand::Get { id } => {
+        CliCommand::CreateStdin => {
+            let mut input = String::new();
+            if let Err(error) = io::stdin().read_to_string(&mut input) {
+                eprintln!("error: failed to read stdin: {error}");
+                process::exit(1);
+            }
+
+            // Validate every line before creating anything so an invalid
+            // line never leaves a partial import behind.
+            let mut parsed_lines = Vec::new();
+            for (index, line) in input.lines().enumerate() {
+                if line.trim().is_empty() {
+                    continue;
+                }
+                match cli::parse_jsonl_record(line) {
+                    Ok(parsed) => parsed_lines.push(parsed),
+                    Err(error) => {
+                        eprintln!("error: stdin line {}: {error}", index + 1);
+                        process::exit(1);
+                    }
+                }
+            }
+
+            let mut store = open_store_or_exit();
+            let mut created = Vec::with_capacity(parsed_lines.len());
+            for (kind, fields) in parsed_lines {
+                match store.create_record(&kind, fields) {
+                    Ok(record) => {
+                        run_hooks_or_exit(&mut store, "create", &record, Some(&[]), &[]);
+                        created.push(record);
+                    }
+                    Err(error) => {
+                        eprintln!(
+                            "error: failed to create record after {} records were already created: {error}",
+                            created.len()
+                        );
+                        process::exit(1);
+                    }
+                }
+            }
+
+            if cli.json_output {
+                print_json(records_json(&created));
+            } else {
+                for record in created {
+                    outln!("{}", record.id);
+                }
+            }
+        }
+        CliCommand::Get { id, timestamps } => {
             let store = open_store_or_exit();
             match store.get_record(&id) {
                 Ok(record) => {
                     if cli.json_output {
                         print_json(single_record_json(&record));
+                    } else if timestamps {
+                        outln!("{}", format_record_with_timestamps(&record));
                     } else {
                         outln!("{}", format_record(&record));
                     }
@@ -277,7 +384,14 @@ fn main() {
                 }
             }
         }
-        CliCommand::Find { query } => {
+        CliCommand::Find {
+            query,
+            timestamps,
+            sort,
+            desc,
+            limit,
+            count,
+        } => {
             let query = match query {
                 Some(raw) => match Query::parse(&raw) {
                     Ok(query) => Some(query),
@@ -290,12 +404,30 @@ fn main() {
             };
             let store = open_store_or_exit();
             match store.find_records(query.as_ref()) {
-                Ok(records) => {
-                    if cli.json_output {
+                Ok(mut records) => {
+                    if let Some(field) = &sort {
+                        sort_records(&mut records, field, desc);
+                    } else if desc {
+                        records.reverse();
+                    }
+                    if let Some(limit) = limit {
+                        records.truncate(limit);
+                    }
+                    if count {
+                        if cli.json_output {
+                            print_json(count_json(records.len()));
+                        } else {
+                            outln!("{}", records.len());
+                        }
+                    } else if cli.json_output {
                         print_json(records_json(&records));
                     } else {
                         for record in records {
-                            outln!("{}", format_record(&record));
+                            if timestamps {
+                                outln!("{}", format_record_with_timestamps(&record));
+                            } else {
+                                outln!("{}", format_record(&record));
+                            }
                         }
                     }
                 }
@@ -572,6 +704,47 @@ fn main() {
 }
 
 /// Returns whether the store directory already existed before this run.
+/// Sorts records by a field using the same typed values as query
+/// comparisons. Records missing the field always sort last; the stable sort
+/// preserves creation order among equal keys.
+fn sort_records(records: &mut [Record], field: &str, desc: bool) {
+    records.sort_by(|left, right| {
+        match (
+            record_sort_value(left, field),
+            record_sort_value(right, field),
+        ) {
+            (Some(left), Some(right)) => {
+                let ordering = compare_sort_values(&left, &right);
+                if desc {
+                    ordering.reverse()
+                } else {
+                    ordering
+                }
+            }
+            (Some(_), None) => Ordering::Less,
+            (None, Some(_)) => Ordering::Greater,
+            (None, None) => Ordering::Equal,
+        }
+    });
+}
+
+fn compare_sort_values(left: &FieldValue, right: &FieldValue) -> Ordering {
+    left.value_ordering(right)
+        .unwrap_or_else(|| sort_type_rank(left).cmp(&sort_type_rank(right)))
+}
+
+/// Groups values of different (incomparable) types into a predictable order:
+/// booleans, numbers, dates/timestamps, text, then nulls.
+fn sort_type_rank(value: &FieldValue) -> u8 {
+    match value {
+        FieldValue::Boolean(_) => 0,
+        FieldValue::Number(_) => 1,
+        FieldValue::Date(_) | FieldValue::Timestamp(_) => 2,
+        FieldValue::Text(_) => 3,
+        FieldValue::Null => 4,
+    }
+}
+
 fn init_store() -> io::Result<bool> {
     let already_initialized = Path::new(STORE_DIR).is_dir();
     fs::create_dir_all(STORE_DIR)?;

@@ -103,8 +103,25 @@ case "$case_name" in
     )
     ;;
 
+  hook_help_documents_env_vars)
+    cd "$tmp"
+    assert_help "AGENT_STORE_EVENT" hook --help
+    assert_help "AGENT_STORE_ID" hook --help
+    assert_help "AGENT_STORE_KIND" hook --help
+    assert_help "AGENT_STORE_REL" hook --help
+    assert_help "AGENT_STORE_TARGET_ID" hook --help
+    assert_help "AGENT_STORE_FIELD" hook --help
+    assert_help "AGENT_STORE_KEY" hook --help
+    assert_help "AGENT_STORE_VALUE" hook --help
+    assert_help "AGENT_STORE_OLD_VALUE" hook --help
+    assert_help "AGENT_STORE_NEW_VALUE" hook --help
+    assert_help "stdin" hook --help
+    assert_help "AGENT_STORE_EVENT" hook add --help
+    assert_help "stdin" hook add --help
+    ;;
+
   *)
-    echo "usage: $0 {subcommand_help_is_read_only}" >&2
+    echo "usage: $0 {subcommand_help_is_read_only|hook_help_documents_env_vars}" >&2
     exit 2
     ;;
 esac

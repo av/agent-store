@@ -1687,7 +1687,12 @@ assert event_counts == {"set": 1, "unset": 1, "rm": 1}, event_counts
 for event_type, record_id, snapshot_raw in event_rows:
     assert record_id == record_ids[event_type], (event_type, record_id)
     snapshot = json.loads(snapshot_raw)
-    assert snapshot == payloads[event_type]["record"], (snapshot, payloads[event_type])
+    payload_record = {
+        key: value
+        for key, value in payloads[event_type]["record"].items()
+        if key not in ("created_at", "updated_at")
+    }
+    assert snapshot == payload_record, (snapshot, payloads[event_type])
 
 set_fields = dict(
     con.execute(
@@ -2514,9 +2519,11 @@ def load_json(path):
 
 
 def assert_record_shape(record):
-    assert set(record) == {"id", "kind", "fields"}, record
+    assert set(record) == {"id", "kind", "created_at", "updated_at", "fields"}, record
     assert id_re.fullmatch(record["id"]), record
     assert isinstance(record["kind"], str), record
+    assert isinstance(record["created_at"], str), record
+    assert isinstance(record["updated_at"], str), record
     assert isinstance(record["fields"], dict), record
 
 
@@ -2530,6 +2537,7 @@ def assert_volatile_record(record):
 
 def assert_stable_record(record):
     assert_record_shape(record)
+    record = {key: value for key, value in record.items() if key not in ("created_at", "updated_at")}
     assert record == {
         "id": stable_source,
         "kind": "task",

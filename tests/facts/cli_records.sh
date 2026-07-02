@@ -310,6 +310,42 @@ $note note lane=gamma priority=high status=open title=Note"
     test "$got" = "$note note lane=gamma priority=high status=open title=Note"
     ;;
 
+  query_contains_operator)
+    cd "$tmp"
+    run_agent_store init >/tmp/agent-store-query-ooj-init.out
+    login="$(run_agent_store create task title='Fix Login Page' status=open)"
+    docs="$(run_agent_store create task title='update docs' status=open)"
+    note="$(run_agent_store create note title='Login notes')"
+
+    expected_login="$login task status=open title='Fix Login Page'"
+    expected_docs="$docs task status=open title='update docs'"
+
+    # Case-insensitive substring match, in either direction.
+    test "$(run_agent_store find "title~='login'")" = "$expected_login
+$note note title='Login notes'"
+    test "$(run_agent_store find 'kind=task and title~=LOGIN')" = "$expected_login"
+    test "$(run_agent_store find "title~='fix login'")" = "$expected_login"
+
+    # ~= applies to kind as well.
+    test "$(run_agent_store find 'kind~=OTE')" = "$note note title='Login notes'"
+
+    # No match when the substring is absent; missing fields never match.
+    test -z "$(run_agent_store find 'title~=logout')"
+    test -z "$(run_agent_store find 'absent~=login')"
+
+    # Composes with not, and, or, and parentheses.
+    test "$(run_agent_store find 'kind=task and not title~=login')" = "$expected_docs"
+    test "$(run_agent_store find '(title~=docs or title~=logout) and kind=task')" = "$expected_docs"
+
+    # Bare '~' without '=' is rejected.
+    set +e
+    run_agent_store find 'title~login' >/tmp/agent-store-query-ooj.out 2>/tmp/agent-store-query-ooj.err
+    status=$?
+    set -e
+    test "$status" -ne 0
+    grep -q "expected '=' after '~'" /tmp/agent-store-query-ooj.err
+    ;;
+
   query_argument_parity)
     cd "$tmp"
     run_agent_store init >/tmp/agent-store-query-ly7-init.out
@@ -626,12 +662,28 @@ PY
 
     python3 - "$id" "$get_json" "$find_json" "$ls_json" "$set_json" "$unset_json" "$rm_json" <<'PY'
 import json
+import re
 import sys
 
 record_id = sys.argv[1]
 get_data, find_data, ls_data, set_data, unset_data, rm_data = [
     json.loads(raw) for raw in sys.argv[2:]
 ]
+
+UTC_RFC3339 = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z")
+
+
+def strip_timestamps(record):
+    record = dict(record)
+    for key in ("created_at", "updated_at"):
+        assert UTC_RFC3339.fullmatch(record.pop(key)), record
+    return record
+
+
+for data in (get_data, set_data, unset_data, rm_data):
+    data["record"] = strip_timestamps(data["record"])
+for data in (find_data, ls_data):
+    data["records"] = [strip_timestamps(record) for record in data["records"]]
 
 expected_open = {
     "id": record_id,
@@ -793,8 +845,68 @@ PY
     test "$(run_agent_store find kind=note)" = "$id note ok=1"
     ;;
 
+  create_stdin_imports_jsonl)
+    cd "$tmp"
+    run_agent_store init >/tmp/agent-store-stdin-2p1-init.out
+
+    # Hooks fire per imported record.
+    run_agent_store hook add create 'kind=task' -- 'echo "$AGENT_STORE_ID" >> hook.log' \
+      >/tmp/agent-store-stdin-2p1-hook.out
+
+    # Multi-line import with typed values, extra keys, and a blank line.
+    printf '%s\n\n%s\n' \
+      '{"kind":"task","id":"ignored","created_at":"x","updated_at":"y","fields":{"title":"a","n":3,"done":true,"note":null}}' \
+      '{"kind":"task","fields":{"title":"b"}}' \
+      | run_agent_store create --stdin >/tmp/agent-store-stdin-2p1-ids.out
+    test "$(wc -l </tmp/agent-store-stdin-2p1-ids.out)" -eq 2
+    first="$(sed -n 1p /tmp/agent-store-stdin-2p1-ids.out)"
+    second="$(sed -n 2p /tmp/agent-store-stdin-2p1-ids.out)"
+    got="$(run_agent_store get "$first")"
+    test "$got" = "$first task done=true n=3 note=null title=a"
+    got="$(run_agent_store get "$second")"
+    test "$got" = "$second task title=b"
+    cmp -s hook.log /tmp/agent-store-stdin-2p1-ids.out
+
+    # Round-trip: find --json output re-imports into a fresh store.
+    run_agent_store find --json >/tmp/agent-store-stdin-2p1-export.json
+    mkdir fresh
+    (
+      cd fresh
+      run_agent_store init >/dev/null
+      jq -c '.records[]' </tmp/agent-store-stdin-2p1-export.json | run_agent_store create --stdin >/dev/null
+      test "$(run_agent_store find --count)" -eq 2
+      test "$(run_agent_store find 'kind=task and title=a' --json | jq -r '.records[0].fields.n')" = 3
+    )
+
+    # --json output wraps full created record objects in a records array.
+    echo '{"kind":"note","fields":{"k":"v"}}' | run_agent_store create --stdin --json \
+      >/tmp/agent-store-stdin-2p1-json.out
+    test "$(jq -r '.records | length' /tmp/agent-store-stdin-2p1-json.out)" -eq 1
+    test "$(jq -r '.records[0].kind' /tmp/agent-store-stdin-2p1-json.out)" = note
+    test "$(jq -r '.records[0].fields.k' /tmp/agent-store-stdin-2p1-json.out)" = v
+    jq -e '.records[0].id and .records[0].created_at and .records[0].updated_at' \
+      /tmp/agent-store-stdin-2p1-json.out >/dev/null
+
+    # Invalid line fails naming the line number and imports nothing.
+    before="$(run_agent_store find --count)"
+    set +e
+    printf '%s\n%s\n' '{"kind":"task","fields":{"title":"ok"}}' 'not json' \
+      | run_agent_store create --stdin >/tmp/agent-store-stdin-2p1-bad.out 2>/tmp/agent-store-stdin-2p1-bad.err
+    bad_status=$?
+    run_agent_store create --stdin task title=x \
+      >/tmp/agent-store-stdin-2p1-conflict.out 2>/tmp/agent-store-stdin-2p1-conflict.err
+    conflict_status=$?
+    set -e
+    test "$bad_status" -ne 0
+    grep -Fq "stdin line 2" /tmp/agent-store-stdin-2p1-bad.err
+    test ! -s /tmp/agent-store-stdin-2p1-bad.out
+    test "$(run_agent_store find --count)" = "$before"
+    test "$conflict_status" -eq 2
+    grep -Fq "does not accept positional argument" /tmp/agent-store-stdin-2p1-conflict.err
+    ;;
+
   *)
-    echo "usage: $0 {create_alias_matches_create|find_alias_matches_find|set_updates_fields|unset_removes_fields|find_filters_records|arbitrary_field_queries|query_boolean_syntax|query_argument_parity|query_typed_values|field_empty_null_unset_semantics|record_id_generation_contract|record_id_resolution_errors|json_output|uninitialized_store_errors|broken_pipe_exits_quietly|identifier_validation_rejects_unsafe_names}" >&2
+    echo "usage: $0 {create_alias_matches_create|find_alias_matches_find|set_updates_fields|unset_removes_fields|find_filters_records|arbitrary_field_queries|query_boolean_syntax|query_contains_operator|query_argument_parity|query_typed_values|field_empty_null_unset_semantics|record_id_generation_contract|record_id_resolution_errors|json_output|uninitialized_store_errors|broken_pipe_exits_quietly|identifier_validation_rejects_unsafe_names|create_stdin_imports_jsonl}" >&2
     exit 2
     ;;
 esac

@@ -45,6 +45,7 @@ enum ComparisonOp {
     LessOrEqual,
     Greater,
     GreaterOrEqual,
+    Contains,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -57,6 +58,7 @@ enum Token {
     LessOrEqual,
     Greater,
     GreaterOrEqual,
+    Contains,
     LeftParen,
     RightParen,
 }
@@ -147,6 +149,15 @@ impl Comparison {
     }
 
     fn matches_record_field(&self, record: &Record, field: &str) -> bool {
+        if self.op == ComparisonOp::Contains {
+            return match record_raw_value(record, field) {
+                Some(actual) => actual
+                    .to_lowercase()
+                    .contains(&self.value_raw.to_lowercase()),
+                None => false,
+            };
+        }
+
         match record_value(record, field) {
             Some(actual) => match self.op {
                 ComparisonOp::Equal => actual.value_equals(&self.value),
@@ -163,6 +174,9 @@ impl Comparison {
                     actual.value_ordering(&self.value),
                     Some(Ordering::Greater | Ordering::Equal)
                 ),
+                ComparisonOp::Contains => {
+                    unreachable!("contains comparisons are handled before typed matching")
+                }
             },
             None => false,
         }
@@ -248,6 +262,7 @@ impl ComparisonOp {
             Some(Token::LessOrEqual) => Ok(Self::LessOrEqual),
             Some(Token::Greater) => Ok(Self::Greater),
             Some(Token::GreaterOrEqual) => Ok(Self::GreaterOrEqual),
+            Some(Token::Contains) => Ok(Self::Contains),
             Some(token) => Err(QueryError::new(format!(
                 "expected comparison operator after '{field}', found {}",
                 describe_token(&token)
@@ -259,15 +274,47 @@ impl ComparisonOp {
     }
 }
 
+/// Resolves a sort field to a typed value using the same lookup rules as
+/// query comparisons, plus the built-in `id`. Returns None when the record
+/// has no value for the field.
+pub fn record_sort_value(record: &Record, field: &str) -> Option<FieldValue> {
+    if field == "id" {
+        return Some(FieldValue::Text(record.id.clone()));
+    }
+
+    record_value(record, field)
+}
+
+fn record_raw_value(record: &Record, field: &str) -> Option<String> {
+    if field == "kind" {
+        return Some(record.kind.clone());
+    }
+
+    if let Some(value) = record.fields.get(field) {
+        return Some(value.clone());
+    }
+
+    match field {
+        "created_at" => Some(record.created_at.clone()),
+        "updated_at" => Some(record.updated_at.clone()),
+        _ => None,
+    }
+}
+
 fn record_value(record: &Record, field: &str) -> Option<FieldValue> {
     if field == "kind" {
         return Some(FieldValue::Text(record.kind.clone()));
     }
 
-    record
-        .fields
-        .get(field)
-        .map(|value| FieldValue::parse(value))
+    if let Some(value) = record.fields.get(field) {
+        return Some(FieldValue::parse(value));
+    }
+
+    match field {
+        "created_at" => Some(FieldValue::parse(&record.created_at)),
+        "updated_at" => Some(FieldValue::parse(&record.updated_at)),
+        _ => None,
+    }
 }
 
 struct Parser {
@@ -434,6 +481,14 @@ fn tokenize(input: &str) -> Result<Vec<Token>, QueryError> {
                     return Err(QueryError::new("expected '=' after '!'"));
                 }
             }
+            b'~' => {
+                if bytes.get(index + 1) == Some(&b'=') {
+                    tokens.push(Token::Contains);
+                    index += 2;
+                } else {
+                    return Err(QueryError::new("expected '=' after '~'"));
+                }
+            }
             b'<' => {
                 if bytes.get(index + 1) == Some(&b'=') {
                     tokens.push(Token::LessOrEqual);
@@ -500,7 +555,7 @@ fn tokenize(input: &str) -> Result<Vec<Token>, QueryError> {
                 let start = index;
                 while index < bytes.len()
                     && !bytes[index].is_ascii_whitespace()
-                    && !matches!(bytes[index], b'=' | b'!' | b'<' | b'>' | b'(' | b')')
+                    && !matches!(bytes[index], b'=' | b'!' | b'<' | b'>' | b'~' | b'(' | b')')
                 {
                     index += 1;
                 }
@@ -529,6 +584,7 @@ fn describe_token(token: &Token) -> String {
         Token::LessOrEqual => "'<='".to_owned(),
         Token::Greater => "'>'".to_owned(),
         Token::GreaterOrEqual => "'>='".to_owned(),
+        Token::Contains => "'~='".to_owned(),
         Token::LeftParen => "'('".to_owned(),
         Token::RightParen => "')'".to_owned(),
     }
@@ -543,6 +599,8 @@ mod tests {
         Record {
             id: "abc123".to_owned(),
             kind: "task".to_owned(),
+            created_at: "2026-01-01T10:00:00.000Z".to_owned(),
+            updated_at: "2026-01-01T11:00:00.000Z".to_owned(),
             fields: BTreeMap::from([
                 ("status".to_owned(), "open".to_owned()),
                 ("priority".to_owned(), "high".to_owned()),
@@ -683,6 +741,40 @@ mod tests {
     }
 
     #[test]
+    fn contains_comparisons_match_case_insensitive_substrings() {
+        let mut titled = record();
+        titled
+            .fields
+            .insert("title".to_owned(), "Fix Login Page".to_owned());
+
+        for query in [
+            "title~=login",
+            "title~=LOGIN",
+            "title~='Login Page'",
+            "kind~=TAS",
+            "created_at~=2026-01",
+            "kind=task and title~=login",
+            "not title~=logout",
+            "(title~=logout or title~=login) and not status~=closed",
+        ] {
+            let parsed = Query::parse(query).expect("query should parse");
+            assert!(parsed.matches(&titled), "query should match: {query}");
+        }
+
+        for query in ["title~=logout", "absent~=anything", "not title~=login"] {
+            let parsed = Query::parse(query).expect("query should parse");
+            assert!(!parsed.matches(&titled), "query should not match: {query}");
+        }
+    }
+
+    #[test]
+    fn bare_tilde_is_a_tokenizer_error() {
+        let error = Query::parse("title~login").expect_err("query should not parse");
+
+        assert!(error.to_string().contains("expected '=' after '~'"));
+    }
+
+    #[test]
     fn quoted_values_match_text_with_spaces() {
         let mut spaced = record();
         spaced
@@ -760,6 +852,44 @@ mod tests {
         keywordy.fields.insert("status".to_owned(), "and".to_owned());
         assert!(query.matches(&keywordy));
         assert!(!query.matches(&record()));
+    }
+
+    #[test]
+    fn builtin_timestamps_compare_alongside_field_predicates() {
+        for query in [
+            "created_at>2020-01-01",
+            "created_at<2999-01-01",
+            "created_at>=2026-01-01T10:00:00.000Z",
+            "updated_at>2026-01-01T10:30:00Z",
+            "updated_at<=2026-01-01T11:00:00.000Z",
+            "created_at>2020-01-01 and kind=task",
+            "kind=note or updated_at>2026-01-01",
+        ] {
+            let parsed = Query::parse(query).expect("query should parse");
+            assert!(parsed.matches(&record()), "query should match: {query}");
+        }
+
+        for query in [
+            "created_at>2999-01-01",
+            "updated_at<2026-01-01",
+            "created_at>2020-01-01 and kind=note",
+        ] {
+            let parsed = Query::parse(query).expect("query should parse");
+            assert!(!parsed.matches(&record()), "query should not match: {query}");
+        }
+    }
+
+    #[test]
+    fn user_fields_shadow_builtin_timestamps() {
+        let mut shadowed = record();
+        shadowed
+            .fields
+            .insert("created_at".to_owned(), "custom".to_owned());
+
+        let query = Query::parse("created_at=custom").expect("query should parse");
+        assert!(query.matches(&shadowed));
+        let query = Query::parse("created_at>2020-01-01").expect("query should parse");
+        assert!(!query.matches(&shadowed));
     }
 
     #[test]

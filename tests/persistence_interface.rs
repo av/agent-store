@@ -93,3 +93,63 @@ fn persistence_interface_allows_behavior_tests_without_sqlite_layout() {
     assert_eq!(summary.link_count, 1);
     assert_eq!(summary.links_by_relation.get("mentions"), Some(&1));
 }
+
+#[test]
+fn record_timestamps_persist_and_compare_in_queries() {
+    let project = TestProject::new("record-timestamps");
+    let mut store = Store::open_project_root(&project.root).expect("open store at project root");
+
+    let created = store
+        .create_record("note", fields(&[("k", "v")]))
+        .expect("create note through Store API");
+    assert!(created.created_at.ends_with('Z'));
+    assert_eq!(created.created_at, created.updated_at);
+
+    std::thread::sleep(std::time::Duration::from_millis(5));
+    let updated = store
+        .set_record(&created.id, fields(&[("k", "w")]))
+        .expect("update note through Store API");
+    assert_eq!(updated.created_at, created.created_at);
+    assert!(updated.updated_at > created.updated_at);
+
+    let reopened = Store::open_project_root(&project.root).expect("reopen store");
+    let fetched = reopened.get_record(&created.id).expect("get record");
+    assert_eq!(fetched.created_at, created.created_at);
+    assert_eq!(fetched.updated_at, updated.updated_at);
+
+    let matching = Query::parse("created_at>2020-01-01 and kind=note").expect("parse query");
+    assert_eq!(
+        reopened
+            .find_records(Some(&matching))
+            .expect("find records")
+            .len(),
+        1
+    );
+    let future = Query::parse("created_at>2999-01-01").expect("parse query");
+    assert!(reopened
+        .find_records(Some(&future))
+        .expect("find records")
+        .is_empty());
+}
+
+#[test]
+fn find_records_lists_in_creation_order_oldest_first() {
+    let project = TestProject::new("creation-order");
+    let mut store = Store::open_project_root(&project.root).expect("open store at project root");
+
+    let mut created_ids = Vec::new();
+    for n in 0..10 {
+        let record = store
+            .create_record("task", fields(&[("n", &n.to_string())]))
+            .expect("create record");
+        created_ids.push(record.id);
+    }
+
+    let listed_ids: Vec<String> = store
+        .find_records(None)
+        .expect("find records")
+        .into_iter()
+        .map(|record| record.id)
+        .collect();
+    assert_eq!(listed_ids, created_ids);
+}
