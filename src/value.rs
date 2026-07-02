@@ -76,10 +76,29 @@ impl FieldValue {
             (Self::Date(left), Self::Date(right))
             | (Self::Timestamp(left), Self::Timestamp(right))
             | (Self::Text(left), Self::Text(right)) => Some(left.cmp(right)),
+            (Self::Date(date), Self::Timestamp(timestamp)) => {
+                Some(date_midnight_utc(date).as_str().cmp(timestamp.as_str()))
+            }
+            (Self::Timestamp(timestamp), Self::Date(date)) => {
+                Some(timestamp.as_str().cmp(date_midnight_utc(date).as_str()))
+            }
             (Self::Number(left), Self::Number(right)) => left.partial_cmp(right),
             _ => None,
         }
     }
+
+    pub fn value_equals(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Date(_), Self::Timestamp(_)) | (Self::Timestamp(_), Self::Date(_)) => {
+                self.value_ordering(other) == Some(Ordering::Equal)
+            }
+            _ => self == other,
+        }
+    }
+}
+
+fn date_midnight_utc(date: &str) -> String {
+    format!("{date}T00:00:00Z")
 }
 
 fn looks_like_date(raw: &str) -> bool {
@@ -103,6 +122,35 @@ fn looks_like_timestamp(raw: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn date_and_timestamp_compare_as_midnight_utc_instant() {
+        let date = FieldValue::Date("2026-07-10".to_owned());
+        let midnight = FieldValue::Timestamp("2026-07-10T00:00:00Z".to_owned());
+        let later = FieldValue::Timestamp("2026-07-10T09:30:00Z".to_owned());
+
+        assert_eq!(date.value_ordering(&midnight), Some(Ordering::Equal));
+        assert_eq!(midnight.value_ordering(&date), Some(Ordering::Equal));
+        assert_eq!(date.value_ordering(&later), Some(Ordering::Less));
+        assert_eq!(later.value_ordering(&date), Some(Ordering::Greater));
+
+        assert!(date.value_equals(&midnight));
+        assert!(midnight.value_equals(&date));
+        assert!(!date.value_equals(&later));
+        assert!(!later.value_equals(&date));
+    }
+
+    #[test]
+    fn text_values_do_not_compare_with_dates_or_timestamps() {
+        let text = FieldValue::Text("2026-07-10ish".to_owned());
+        let date = FieldValue::Date("2026-07-10".to_owned());
+        let stamp = FieldValue::Timestamp("2026-07-10T00:00:00Z".to_owned());
+
+        assert_eq!(text.value_ordering(&date), None);
+        assert_eq!(text.value_ordering(&stamp), None);
+        assert!(!text.value_equals(&date));
+        assert!(!text.value_equals(&stamp));
+    }
 
     #[test]
     fn parses_values_by_specificity() {

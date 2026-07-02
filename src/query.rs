@@ -149,8 +149,8 @@ impl Comparison {
     fn matches_record_field(&self, record: &Record, field: &str) -> bool {
         match record_value(record, field) {
             Some(actual) => match self.op {
-                ComparisonOp::Equal => actual == self.value,
-                ComparisonOp::NotEqual => actual != self.value,
+                ComparisonOp::Equal => actual.value_equals(&self.value),
+                ComparisonOp::NotEqual => !actual.value_equals(&self.value),
                 ComparisonOp::Less => actual.value_ordering(&self.value) == Some(Ordering::Less),
                 ComparisonOp::LessOrEqual => matches!(
                     actual.value_ordering(&self.value),
@@ -622,6 +622,49 @@ mod tests {
         ] {
             let query = Query::parse(query).expect("query should parse");
             assert!(query.matches(&record()));
+        }
+    }
+
+    #[test]
+    fn dates_and_timestamps_compare_on_a_common_timeline() {
+        // Record: due=2026-01-02 (date), stamp=2026-01-02T03:04:05Z (timestamp)
+        for query in [
+            // date field vs timestamp literal
+            "due<2026-01-02T03:04:05Z",
+            "due<=2026-01-02T00:00:00Z",
+            "due>=2026-01-02T00:00:00Z",
+            "due>2026-01-01T23:00:00Z",
+            "due=2026-01-02T00:00:00Z",
+            "due!=2026-01-02T03:04:05Z",
+            // timestamp field vs date literal
+            "stamp>2026-01-02",
+            "stamp>=2026-01-02",
+            "stamp<2026-01-03",
+            "stamp<=2026-01-03",
+            "stamp!=2026-01-02",
+        ] {
+            let parsed = Query::parse(query).expect("query should parse");
+            assert!(parsed.matches(&record()), "query should match: {query}");
+        }
+
+        for query in [
+            "due>2026-01-02T00:00:00Z",
+            "due<2026-01-01T23:00:00Z",
+            "due=2026-01-02T03:04:05Z",
+            "due!=2026-01-02T00:00:00Z",
+            "stamp<2026-01-02",
+            "stamp<=2026-01-02",
+            "stamp=2026-01-02",
+            // missing field never matches, even against date/timestamp literals
+            "absent>=2026-01-01",
+            "absent!=2026-01-01T00:00:00Z",
+            // text values stay incomparable with dates and timestamps
+            "priority<2026-01-02",
+            "priority>=2026-01-02T00:00:00Z",
+            "priority=2026-01-02",
+        ] {
+            let parsed = Query::parse(query).expect("query should parse");
+            assert!(!parsed.matches(&record()), "query should not match: {query}");
         }
     }
 

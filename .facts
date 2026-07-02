@@ -336,7 +336,7 @@
   id: ly7
   command: bash tests/facts/cli_records.sh query_argument_parity
   tags: [implemented]
-- label: agent-store find <Query> parses Field values and query literals as null, boolean, date, timestamp, number, or text, uses type-aware equality and inequality, orders only same-typed values, and treats missing Fields as non-matches
+- label: agent-store find <Query> parses Field values and query literals as null, boolean, date, timestamp, number, or text, uses type-aware equality and ordering, compares dates and timestamps on one UTC timeline where a plain date equals its midnight UTC instant (2026-07-10 = 2026-07-10T00:00:00Z), keeps other mixed types unordered, and treats missing Fields as non-matches
   id: t2s
   command: bash tests/facts/cli_records.sh query_typed_values
   tags: [implemented]

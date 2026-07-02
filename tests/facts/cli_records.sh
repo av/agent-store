@@ -363,6 +363,20 @@ $text_line"
     got="$(run_agent_store find 'lane>alpha and lane<zeta and title!=Sparse')"
     test "$(printf "%s\n" "$got" | sort)" = "$(printf "%s\n" "$expected" | sort)"
 
+    got="$(run_agent_store find 'due>=2026-01-01T00:00:00Z and due<2026-01-03T00:00:00Z')"
+    test "$(printf "%s\n" "$got" | sort)" = "$(printf "%s\n" "$high_line
+$low_line" | sort)"
+
+    got="$(run_agent_store find 'stamp>2026-01-02 and stamp<2026-01-03')"
+    test "$(printf "%s\n" "$got" | sort)" = "$(printf "%s\n" "$high_line
+$low_line" | sort)"
+
+    got="$(run_agent_store find 'due=2026-01-02T00:00:00Z')"
+    test "$got" = "$high_line"
+
+    test -z "$(run_agent_store find 'stamp=2026-01-02')"
+    test -z "$(run_agent_store find 'title>=2026-01-01')"
+
     test -z "$(run_agent_store find 'score<zzz')"
     test -z "$(run_agent_store find 'due<zzz')"
     test -z "$(run_agent_store find 'stamp<zzz')"
