@@ -47,8 +47,8 @@ Usage: agent-store create <kind> [key=value...]
 Create a Record with the supplied kind and fields, then print its Record ID.
 
 Kinds and field names cannot contain whitespace, control characters, quotes,
-or '='; 'kind' and 'id' are reserved field names. Field values are
-unrestricted.
+or '='; 'kind' and 'id' are reserved field names, and 'not' is reserved as a
+kind and field name. Field values are unrestricted.
 ";
 
 const GET_USAGE: &str = "\
@@ -84,7 +84,8 @@ Usage: agent-store set <ID> key=value...
 Resolve a Record ID prefix and update the supplied fields atomically.
 
 Field names cannot contain whitespace, control characters, quotes, or '=';
-'kind' and 'id' are reserved field names. Field values are unrestricted.
+'kind', 'id', and 'not' are reserved field names. Field values are
+unrestricted.
 ";
 
 const UNSET_USAGE: &str = "\
@@ -127,7 +128,7 @@ Print a compact Quick Context summary capped at 8192 bytes.
 const HOOK_USAGE: &str = "\
 Usage: agent-store hook <COMMAND>
 
-Manage stored hooks.
+Manage stored hooks. Hook bash commands are killed after a 30-second timeout.
 
 Commands:
   add           Add a Hook
@@ -140,6 +141,8 @@ Usage: agent-store hook add <event> [<Query>] -- <bash command>
 
 Store a Hook for create, set, unset, rm, link, or unlink. When a Query is
 provided, the Hook runs only for matching Records.
+
+Hook bash commands are killed after a 30-second timeout.
 ";
 
 const HOOK_LIST_USAGE: &str = "\
@@ -179,9 +182,9 @@ pub fn print_json(value: Value) {
     outln!("{value}");
 }
 
-pub fn init_json() -> Value {
+pub fn init_json(already_initialized: bool) -> Value {
     json!({
-        "status": "initialized",
+        "status": if already_initialized { "already-initialized" } else { "initialized" },
         "store_dir": agent_store::store::STORE_DIR,
     })
 }

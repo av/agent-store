@@ -769,9 +769,18 @@ PY
     expected="'id' is a reserved field name"
     reject create note id=fake
 
+    # 'not' is a query keyword: reserved as a kind and field name so records
+    # stay queryable.
+    expected="'not' is a reserved kind"
+    reject create not x=1
+    expected="'not' is a reserved field name"
+    reject create note not=really
+
     id="$(run_agent_store create note ok=1)"
     expected="'kind' is a reserved field name"
     reject set "$id" kind=fake
+    expected="'not' is a reserved field name"
+    reject set "$id" not=really
     expected="field name contains unsupported characters"
     reject set "$id" "a b=1"
 

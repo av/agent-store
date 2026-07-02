@@ -216,13 +216,18 @@ fn main() {
             outln!("agent-store {}", env!("CARGO_PKG_VERSION"));
         }
         CliCommand::Init => {
-            if let Err(error) = init_store() {
-                eprintln!("error: failed to initialize store: {error}");
-                process::exit(1);
-            }
+            let already_initialized = match init_store() {
+                Ok(already_initialized) => already_initialized,
+                Err(error) => {
+                    eprintln!("error: failed to initialize store: {error}");
+                    process::exit(1);
+                }
+            };
 
             if cli.json_output {
-                print_json(init_json());
+                print_json(init_json(already_initialized));
+            } else if already_initialized {
+                outln!("Already initialized {STORE_DIR}/");
             } else {
                 outln!("Initialized {STORE_DIR}/");
             }
@@ -518,7 +523,9 @@ fn main() {
     }
 }
 
-fn init_store() -> io::Result<()> {
+/// Returns whether the store directory already existed before this run.
+fn init_store() -> io::Result<bool> {
+    let already_initialized = Path::new(STORE_DIR).is_dir();
     fs::create_dir_all(STORE_DIR)?;
     ensure_gitignore_rule(Path::new(GITIGNORE_PATH), GITIGNORE_RULE)?;
     install_builtin_skills(Path::new(AGENT_SKILLS_DIR))?;
@@ -526,7 +533,7 @@ fn init_store() -> io::Result<()> {
     for instruction_file in INSTRUCTION_FILES {
         ensure_instruction_block(Path::new(instruction_file))?;
     }
-    Ok(())
+    Ok(already_initialized)
 }
 
 fn open_store_or_exit() -> Store {

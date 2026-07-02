@@ -128,9 +128,7 @@ pub fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Cli, CliPars
 
     let command = match args.next() {
         Some(command) => parse_command(command, args)?,
-        None => CliCommand::Help {
-            topic: HelpTopic::Top,
-        },
+        None => return Err(CliParseError::with_usage("missing command")),
     };
 
     Ok(Cli {
@@ -170,6 +168,9 @@ fn parse_command(
                 .ok_or_else(|| CliParseError::new("create requires a kind"))?;
             if has_unsupported_identifier_chars(&kind) {
                 return Err(CliParseError::new("kind contains unsupported characters"));
+            }
+            if kind == "not" {
+                return Err(CliParseError::new("'not' is a reserved kind"));
             }
             let fields = parse_fields(args)?;
             Ok(CliCommand::Create { kind, fields })
@@ -401,7 +402,7 @@ fn parse_fields(
         if key.is_empty() {
             return Err(CliParseError::new("field names cannot be empty"));
         }
-        if key == "kind" || key == "id" {
+        if key == "kind" || key == "id" || key == "not" {
             return Err(CliParseError::new(format!(
                 "'{key}' is a reserved field name"
             )));
@@ -636,6 +637,31 @@ mod tests {
                 command: "echo created".to_owned(),
             })
         );
+    }
+
+    #[test]
+    fn bare_invocation_requests_usage_error() {
+        let error = parse_args([]).expect_err("bare invocation should fail");
+
+        assert_eq!(error.to_string(), "missing command");
+        assert!(error.include_usage());
+    }
+
+    #[test]
+    fn not_is_reserved_as_kind_and_field_name() {
+        let error = parse_args(["create".to_owned(), "not".to_owned()])
+            .expect_err("reserved kind should fail");
+        assert_eq!(error.to_string(), "'not' is a reserved kind");
+
+        for command in ["create", "set"] {
+            let error = parse_args([
+                command.to_owned(),
+                "note".to_owned(),
+                "not=really".to_owned(),
+            ])
+            .expect_err("reserved field name should fail");
+            assert_eq!(error.to_string(), "'not' is a reserved field name");
+        }
     }
 
     #[test]

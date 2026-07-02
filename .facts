@@ -1,7 +1,7 @@
 # agent-store
-- label: agent-store builds a Rust CLI binary named agent-store that exits 0 for --help and prints usage
+- label: agent-store builds a Rust CLI binary named agent-store that exits 0 for --help and prints usage, while bare invocation without a subcommand prints an error plus usage to stderr and exits 2
   id: 28o
-  command: sh -c 'cargo run --quiet -- --help > /tmp/agent-store-help-28o.txt && grep -Fq "Usage: agent-store" /tmp/agent-store-help-28o.txt'
+  command: sh -c 'cargo run --quiet -- --help > /tmp/agent-store-help-28o.txt && grep -Fq "Usage: agent-store" /tmp/agent-store-help-28o.txt && set +e; cargo run --quiet -- >/tmp/agent-store-bare-28o.out 2>/tmp/agent-store-bare-28o.err; status=$?; set -e; test "$status" -eq 2 && test ! -s /tmp/agent-store-bare-28o.out && grep -Fq "error: missing command" /tmp/agent-store-bare-28o.err && grep -Fq "Usage: agent-store" /tmp/agent-store-bare-28o.err'
   tags: [implemented]
 - label: agent-store has separate internal boundaries for CLI argument parsing, command execution, persistence access, and user-facing text/JSON output formatting
   id: 1gb
@@ -40,7 +40,8 @@
 - label: agent-store find and ls without a Query list every stored Record in the default record format and return the same records object shape under --json
   command: bash tests/facts/cli_records.sh find_lists_all_records
   tags: [implemented]
-- label: agent-store create and set reject with exit code 2 and an error: message any kind or field name containing whitespace, control characters, quotes, or =, and reject the reserved field names kind and id, while field values stay unrestricted and previously valid unicode/dot/dash/underscore identifiers keep working
+- label: agent-store create and set reject with exit code 2 and an error: message any kind or field name containing whitespace, control characters, quotes, or =, reject the reserved field names kind, id, and not, and reject not as a kind, while field values stay unrestricted and previously valid unicode/dot/dash/underscore identifiers keep working
+  id: ol0
   command: bash tests/facts/cli_records.sh identifier_validation_rejects_unsafe_names
   tags: [implemented]
 
@@ -70,9 +71,9 @@
   id: ciy
   command: sh -c "set -eu; repo=\$PWD; tmp=\$(mktemp -d); cd \"\$tmp\"; printf \"user-authored line\\n\" > AGENTS.md; printf \"user-authored line\\n\" > CLAUDE.md; CARGO_TARGET_DIR=\"\$repo/target/facts-ciy\" cargo run --quiet --manifest-path \"\$repo/Cargo.toml\" -- init >/tmp/agent-store-init-ciy.out; for doc in AGENTS.md CLAUDE.md; do grep -Fq \"user-authored line\" \"\$doc\"; grep -Fq \"<!-- agent-store:start -->\" \"\$doc\"; grep -Fq \"agent-store init\" \"\$doc\"; grep -Fq \"<!-- agent-store:end -->\" \"\$doc\"; done; rm -rf \"\$tmp\""
   tags: [implemented]
-- label: agent-store init can be run repeatedly without duplicating managed instruction blocks or overwriting pre-existing skill files
+- label: agent-store init can be run repeatedly without duplicating managed instruction blocks or overwriting pre-existing skill files, and repeat runs report Already initialized (exit 0, JSON status already-initialized) instead of Initialized
   id: vpz
-  command: sh -c "set -eu; repo=\$PWD; tmp=\$(mktemp -d); cd \"\$tmp\"; printf \"user-authored line\\n\" > AGENTS.md; printf \"user-authored line\\n\" > CLAUDE.md; mkdir -p .agents/skills/agent-store .claude/skills/agent-store; printf \"custom agent skill\\n\" > .agents/skills/agent-store/SKILL.md; printf \"custom claude skill\\n\" > .claude/skills/agent-store/SKILL.md; CARGO_TARGET_DIR=\"\$repo/target/facts-vpz\" cargo run --quiet --manifest-path \"\$repo/Cargo.toml\" -- init >/tmp/agent-store-init-vpz-1.out; CARGO_TARGET_DIR=\"\$repo/target/facts-vpz\" cargo run --quiet --manifest-path \"\$repo/Cargo.toml\" -- init >/tmp/agent-store-init-vpz-2.out; test \"\$(grep -Fc \"<!-- agent-store:start -->\" AGENTS.md)\" -eq 1; test \"\$(grep -Fc \"<!-- agent-store:start -->\" CLAUDE.md)\" -eq 1; test \"\$(grep -Fc \".agent-store/\" .gitignore)\" -eq 1; grep -Fxq \"custom agent skill\" .agents/skills/agent-store/SKILL.md; grep -Fxq \"custom claude skill\" .claude/skills/agent-store/SKILL.md; rm -rf \"\$tmp\""
+  command: sh -c "set -eu; repo=\$PWD; tmp=\$(mktemp -d); cd \"\$tmp\"; printf \"user-authored line\\n\" > AGENTS.md; printf \"user-authored line\\n\" > CLAUDE.md; mkdir -p .agents/skills/agent-store .claude/skills/agent-store; printf \"custom agent skill\\n\" > .agents/skills/agent-store/SKILL.md; printf \"custom claude skill\\n\" > .claude/skills/agent-store/SKILL.md; CARGO_TARGET_DIR=\"\$repo/target/facts-vpz\" cargo run --quiet --manifest-path \"\$repo/Cargo.toml\" -- init >/tmp/agent-store-init-vpz-1.out; CARGO_TARGET_DIR=\"\$repo/target/facts-vpz\" cargo run --quiet --manifest-path \"\$repo/Cargo.toml\" -- init >/tmp/agent-store-init-vpz-2.out; CARGO_TARGET_DIR=\"\$repo/target/facts-vpz\" cargo run --quiet --manifest-path \"\$repo/Cargo.toml\" -- --json init >/tmp/agent-store-init-vpz-3.out; grep -Fxq \"Initialized .agent-store/\" /tmp/agent-store-init-vpz-1.out; grep -Fxq \"Already initialized .agent-store/\" /tmp/agent-store-init-vpz-2.out; grep -Fq \"\\\"status\\\":\\\"already-initialized\\\"\" /tmp/agent-store-init-vpz-3.out; test \"\$(grep -Fc \"<!-- agent-store:start -->\" AGENTS.md)\" -eq 1; test \"\$(grep -Fc \"<!-- agent-store:start -->\" CLAUDE.md)\" -eq 1; test \"\$(grep -Fc \".agent-store/\" .gitignore)\" -eq 1; grep -Fxq \"custom agent skill\" .agents/skills/agent-store/SKILL.md; grep -Fxq \"custom claude skill\" .claude/skills/agent-store/SKILL.md; rm -rf \"\$tmp\""
   tags: [implemented]
 - label: every command except init fails with exit code 1 and a no agent-store found; run 'agent-store init' first stderr message when no .agent-store/ exists in the current directory or any ancestor, creates no files or directories as a side effect, and works normally after agent-store init
   command: bash tests/facts/cli_records.sh uninitialized_store_errors
@@ -150,7 +151,7 @@
   id: 6hu
   command: bash tests/facts/cli_records.sh json_output
   tags: [implemented]
-- label: a Field is a key-value attribute attached to a Record; Field names and kinds exclude whitespace, control characters, quotes, and '=', and 'kind' and 'id' are reserved names while values are unrestricted
+- label: a Field is a key-value attribute attached to a Record; Field names and kinds exclude whitespace, control characters, quotes, and '=', 'kind' and 'id' are reserved names, 'not' is reserved as a kind and field name, and values are unrestricted
   id: ypj
   command: bash tests/facts/cli_records.sh field_empty_null_unset_semantics
   tags: [implemented]
@@ -266,7 +267,7 @@
   id: hxt
   command: bash tests/facts/cli_hooks.sh hook_failure_reports_details
   tags: [implemented]
-- label: Matching Hooks for plain create, set, unset, rm, link, and unlink mutations run sequentially in registration order (oldest Hook first, even when Hook IDs sort differently) after the triggering mutation commits; earlier-registered successful Hook Runs persist, the first failing or timed-out Hook Run persists and makes the CLI exit non-zero with empty stdout and useful stderr, later-registered matching Hooks do not run, the Store mutation remains committed, and each Bash command starts in the project root with the default 30-second timeout
+- label: Matching Hooks for plain create, set, unset, rm, link, and unlink mutations run sequentially in registration order (oldest Hook first, even when Hook IDs sort differently) after the triggering mutation commits; earlier-registered successful Hook Runs persist, the first failing or timed-out Hook Run persists and makes the CLI exit non-zero with empty stdout and useful stderr, later-registered matching Hooks do not run, the Store mutation remains committed, and each Bash command starts in the project root with the default 30-second timeout that hook and hook add help document
   id: 4as
   command: bash tests/facts/cli_hooks.sh hooks_run_sequentially_from_project_root_with_timeout
   tags: [implemented]

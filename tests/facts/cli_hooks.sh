@@ -2044,6 +2044,10 @@ assert stdout_summary == "", rows
 assert "hook-timeout-stderr" in stderr_summary, rows
 assert "timed out after 30 seconds" in stderr_summary, rows
 PY
+
+    # The 30-second hook timeout is documented in hook help.
+    run_agent_store hook add --help | grep -Fq "30-second timeout"
+    run_agent_store hook --help | grep -Fq "30-second timeout"
     ;;
 
   hook_env_vars_for_record_events)
