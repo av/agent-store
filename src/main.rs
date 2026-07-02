@@ -407,6 +407,10 @@ fn main() {
                         );
                     }
                 }
+                Err(error @ StoreError::LinkNotFound { .. }) => {
+                    eprintln!("error: {error}");
+                    process::exit(1);
+                }
                 Err(error) => {
                     eprintln!("error: failed to unlink records: {error}");
                     process::exit(1);

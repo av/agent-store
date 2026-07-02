@@ -44,10 +44,10 @@ assert rows == [(from_id, "blocks", to_id)], rows
 PY
     ;;
 
-  unlink_removes_idempotently)
+  unlink_removes_and_missing_fails)
     cd "$tmp"
     run_agent_store init >/tmp/agent-store-unlink-80k-init.out
-    from_id="$(run_agent_store create task title=source)"
+    from_id="$(run_agent_store create task title=source status=open)"
     to_id="$(run_agent_store create task title=target)"
     other_id="$(run_agent_store create note title=other)"
     from_prefix="$(printf "%s" "$from_id" | cut -c1-4)"
@@ -55,19 +55,42 @@ PY
 
     run_agent_store link "$from_id" blocks "$to_id" >/tmp/agent-store-unlink-80k-link.out
     run_agent_store link "$from_id" mentions "$other_id" >/tmp/agent-store-unlink-80k-other.out
+    hook_id="$(run_agent_store hook add unlink 'kind=task and status=open' -- 'true')"
+
+    expect_unlink_missing() {
+      local json_flag="$1"
+      shift
+      set +e
+      if [ "$json_flag" = "json" ]; then
+        run_agent_store --json unlink "$@" >"$tmp/missing.out" 2>"$tmp/missing.err"
+      else
+        run_agent_store unlink "$@" >"$tmp/missing.out" 2>"$tmp/missing.err"
+      fi
+      local code="$?"
+      set -e
+      test "$code" != "0"
+      test ! -s "$tmp/missing.out"
+      grep -Fq "error: no such link" "$tmp/missing.err"
+    }
+
+    # Unlink with a relation that never existed fails.
+    expect_unlink_missing plain "$from_prefix" neverexisted "$to_prefix"
 
     out="$(run_agent_store unlink "$from_prefix" blocks "$to_prefix")"
     test "$out" = "Unlinked $from_id blocks $to_id"
-    repeated="$(run_agent_store unlink "$from_prefix" blocks "$to_prefix")"
-    test "$repeated" = "$out"
+
+    # Second unlink of the same pair fails, plain and --json.
+    expect_unlink_missing plain "$from_prefix" blocks "$to_prefix"
+    expect_unlink_missing json "$from_prefix" blocks "$to_prefix"
+
     links="$(run_agent_store links "$from_id")"
     test "$links" = "out mentions $other_id"
 
-    python3 - .agent-store/store.sqlite "$from_id" "$to_id" "$other_id" <<'PY'
+    python3 - .agent-store/store.sqlite "$from_id" "$to_id" "$other_id" "$hook_id" <<'PY'
 import sqlite3
 import sys
 
-db, from_id, to_id, other_id = sys.argv[1:]
+db, from_id, to_id, other_id, hook_id = sys.argv[1:]
 con = sqlite3.connect(db)
 rows = con.execute(
     """
@@ -85,6 +108,16 @@ assert con.execute(
     """,
     (from_id, to_id),
 ).fetchone()[0] == 0
+# Only the single successful unlink records a Store Event and Hook Run;
+# not-found unlinks are not committed mutations.
+unlink_events = con.execute(
+    "select count(*) from store_events where event_type = 'unlink'"
+).fetchone()[0]
+assert unlink_events == 1, unlink_events
+unlink_hook_runs = con.execute(
+    "select count(*) from hook_runs where event_type = 'unlink'"
+).fetchone()[0]
+assert unlink_hook_runs == 1, unlink_hook_runs
 PY
     ;;
 
@@ -158,7 +191,7 @@ $target_line"
     ;;
 
   *)
-    echo "usage: $0 {link_adds_idempotently|unlink_removes_idempotently|links_lists_deterministically|find_filters_links}" >&2
+    echo "usage: $0 {link_adds_idempotently|unlink_removes_and_missing_fails|links_lists_deterministically|find_filters_links}" >&2
     exit 2
     ;;
 esac

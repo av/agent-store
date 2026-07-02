@@ -3492,11 +3492,18 @@ PY
     if grep -R "database is locked" "$tmp"/unlink-*.err; then
       exit 1
     fi
+    unlink_successes=0
     for name in "${unlink_workers[@]}"; do
-      test "$(cat "$tmp/unlink-$name.status")" = "0"
-      grep -Fxq "Unlinked $source_id blocks $target_id" "$tmp/unlink-$name.out"
+      if [ "$(cat "$tmp/unlink-$name.status")" = "0" ]; then
+        grep -Fxq "Unlinked $source_id blocks $target_id" "$tmp/unlink-$name.out"
+        unlink_successes=$((unlink_successes + 1))
+      else
+        test ! -s "$tmp/unlink-$name.out"
+        grep -Fq "error: no such link $source_id blocks $target_id" "$tmp/unlink-$name.err"
+      fi
     done
-    python3 - .agent-store/store.sqlite "$source_id" "$target_id" "${#unlink_workers[@]}" <<'PY'
+    test "$unlink_successes" = "1"
+    python3 - .agent-store/store.sqlite "$source_id" "$target_id" "$unlink_successes" <<'PY'
 import sqlite3
 import sys
 
@@ -3633,7 +3640,7 @@ PY
 
     expected_set=$((record_set_successes + mixed_set_successes))
     expected_unset=$((record_unset_successes + mixed_unset_successes))
-    expected_total_hooks=$((${#link_workers[@]} + ${#unlink_workers[@]} + expected_set + expected_unset + rm_successes))
+    expected_total_hooks=$((${#link_workers[@]} + unlink_successes + expected_set + expected_unset + rm_successes))
 
     python3 - \
       .agent-store/store.sqlite \
@@ -3641,7 +3648,7 @@ PY
       "$target_id" \
       "$record_id" \
       "${#link_workers[@]}" \
-      "${#unlink_workers[@]}" \
+      "$unlink_successes" \
       "$expected_set" \
       "$expected_unset" \
       "$rm_successes" \
@@ -3931,7 +3938,7 @@ bad_fragments = [
     "constraint failed",
 ]
 counts = {
-    op: {"success": 0, "ambiguous": 0, "not_found": 0}
+    op: {"success": 0, "ambiguous": 0, "not_found": 0, "link_missing": 0}
     for op in ops
 }
 link_success_pairs = set()
@@ -3985,6 +3992,8 @@ for op in ops:
                     counts[op]["ambiguous"] += 1
                 elif "was not found" in err:
                     counts[op]["not_found"] += 1
+                elif op == "unlink" and "no such link" in err:
+                    counts[op]["link_missing"] += 1
                 else:
                     raise AssertionError((op, worker, index, status, err))
 
@@ -4350,7 +4359,7 @@ bad_fragments = [
     "query returned no rows",
 ]
 counts = {
-    op: {"success": 0, "ambiguous": 0, "not_found": 0}
+    op: {"success": 0, "ambiguous": 0, "not_found": 0, "link_missing": 0}
     for op in json_ops + ["hook_rm"]
 }
 link_success_pairs = Counter()
@@ -4364,6 +4373,8 @@ def classify_error(err):
         return "ambiguous"
     if "was not found" in err:
         return "not_found"
+    if "no such link" in err:
+        return "link_missing"
     raise AssertionError(err)
 
 for op in json_ops:

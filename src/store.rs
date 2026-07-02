@@ -280,6 +280,11 @@ pub enum StoreError {
     EmptyHookCommand,
     NotInitialized,
     NotFound(String),
+    LinkNotFound {
+        from: String,
+        rel: String,
+        to: String,
+    },
     AmbiguousId(String),
     HookNotFound(String),
     AmbiguousHookId(String),
@@ -333,6 +338,9 @@ impl fmt::Display for StoreError {
                 write!(f, "no agent-store found; run 'agent-store init' first")
             }
             Self::NotFound(id) => write!(f, "record '{id}' was not found"),
+            Self::LinkNotFound { from, rel, to } => {
+                write!(f, "no such link {from} {rel} {to}")
+            }
             Self::AmbiguousId(id) => write!(f, "record ID prefix '{id}' matches multiple records"),
             Self::HookNotFound(id) => write!(f, "hook '{id}' was not found"),
             Self::AmbiguousHookId(id) => {
@@ -885,13 +893,20 @@ impl Store {
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         let from_id = resolve_id(&tx, from_prefix)?;
         let to_id = resolve_id(&tx, to_prefix)?;
-        tx.execute(
+        let deleted = tx.execute(
             r#"
             DELETE FROM record_links
             WHERE from_record_id = ?1 AND rel = ?2 AND to_record_id = ?3
             "#,
             params![&from_id, rel, &to_id],
         )?;
+        if deleted == 0 {
+            return Err(StoreError::LinkNotFound {
+                from: from_id,
+                rel: rel.to_owned(),
+                to: to_id,
+            });
+        }
         let source = get_record_by_id(&tx, &from_id)?;
         let source_links = links_for_record_id(&tx, &from_id)?;
         insert_store_event(&tx, "unlink", &source)?;

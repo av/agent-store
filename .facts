@@ -123,9 +123,9 @@
   id: q59
   command: bash tests/facts/cli_links.sh link_adds_idempotently
   tags: [implemented]
-- label: agent-store unlink <from> <rel> <to> resolves unambiguous short Record IDs, removes that directional Link, prints Unlinked <from-id> <rel> <to-id>, and exits successfully without changing other Links when repeated
+- label: agent-store unlink <from> <rel> <to> resolves unambiguous short Record IDs, removes that directional Link, and prints Unlinked <from-id> <rel> <to-id>; when no such Link exists it exits non-zero with an error no such link message on stderr, prints nothing on stdout (plain and --json), fires no Hooks, and records no Store Event or Hook Run
   id: 80k
-  command: bash tests/facts/cli_links.sh unlink_removes_idempotently
+  command: bash tests/facts/cli_links.sh unlink_removes_and_missing_fails
   tags: [implemented]
 - label: agent-store links <ID> resolves an unambiguous short Record ID and prints outgoing Links as out <rel> <to-id> lines followed by incoming Links as in <rel> <from-id> lines, each sorted by relation and peer Record ID
   id: cav
@@ -236,7 +236,7 @@
 - label: simultaneous agent-store set, link, unlink, and rm processes with matching Hooks all finish without database lock errors, persist each committed mutation, and persist one Hook Run per mutation
   command: bash tests/facts/store_schema_migrations.sh concurrent_process_mutations_with_hooks
   tags: [implemented]
-- label: simultaneous agent-store set, unset, and rm processes targeting the same Record and simultaneous idempotent link and unlink processes targeting the same Link pair finish without database lock errors, leave one final link state per pair, allow only one successful rm, and persist Hook Runs for committed mutations
+- label: simultaneous agent-store set, unset, and rm processes targeting the same Record and simultaneous link and unlink processes targeting the same Link pair finish without database lock errors, leave one final link state per pair, allow only one successful rm and one successful unlink per existing Link (later unlinks fail with a no such link error), and persist Hook Runs only for committed mutations
   command: bash tests/facts/store_schema_migrations.sh concurrent_same_record_and_link_races
   tags: [implemented]
 
