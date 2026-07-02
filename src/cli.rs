@@ -27,6 +27,7 @@ pub enum HelpTopic {
     HookAdd,
     HookList,
     HookRemove,
+    HookRuns,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -84,6 +85,10 @@ pub enum HookCliCommand {
     List,
     Remove {
         id: String,
+    },
+    Runs {
+        limit: usize,
+        run_id: Option<i64>,
     },
 }
 
@@ -334,11 +339,53 @@ fn parse_hook_command(args: Vec<String>) -> Result<CliCommand, CliParseError> {
             }
             Ok(CliCommand::Hook(HookCliCommand::Remove { id }))
         }
+        Some("runs") => {
+            if command_help_requested(&args[1..]) {
+                return Ok(help_command(HelpTopic::HookRuns));
+            }
+            parse_hook_runs_args(args.into_iter().skip(1))
+        }
         Some(command) => Err(CliParseError::new(format!(
             "unrecognized hook command '{command}'"
         ))),
-        None => Err(CliParseError::new("hook requires add, ls, or rm")),
+        None => Err(CliParseError::new("hook requires add, ls, rm, or runs")),
     }
+}
+
+const DEFAULT_HOOK_RUNS_LIMIT: usize = 20;
+
+fn parse_hook_runs_args(
+    args: impl Iterator<Item = String>,
+) -> Result<CliCommand, CliParseError> {
+    let mut args = args.peekable();
+    let mut limit = DEFAULT_HOOK_RUNS_LIMIT;
+    let mut run_id = None;
+
+    while let Some(arg) = args.next() {
+        if arg == "--limit" {
+            let value = args
+                .next()
+                .ok_or_else(|| CliParseError::new("hook runs --limit requires a number"))?;
+            limit = value.parse::<usize>().map_err(|_| {
+                CliParseError::new(format!("invalid hook runs --limit value '{value}'"))
+            })?;
+            if limit == 0 {
+                return Err(CliParseError::new(
+                    "hook runs --limit requires a positive number",
+                ));
+            }
+        } else if run_id.is_none() && !arg.starts_with('-') {
+            run_id = Some(arg.parse::<i64>().map_err(|_| {
+                CliParseError::new(format!("invalid hook run ID '{arg}': expected a number"))
+            })?);
+        } else {
+            return Err(CliParseError::new(format!(
+                "hook runs does not accept argument '{arg}'"
+            )));
+        }
+    }
+
+    Ok(CliCommand::Hook(HookCliCommand::Runs { limit, run_id }))
 }
 
 fn help_command(topic: HelpTopic) -> CliCommand {

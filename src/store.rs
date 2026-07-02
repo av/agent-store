@@ -287,6 +287,7 @@ pub enum StoreError {
     },
     AmbiguousId(String),
     HookNotFound(String),
+    HookRunNotFound(i64),
     AmbiguousHookId(String),
 }
 
@@ -343,6 +344,7 @@ impl fmt::Display for StoreError {
             }
             Self::AmbiguousId(id) => write!(f, "record ID prefix '{id}' matches multiple records"),
             Self::HookNotFound(id) => write!(f, "hook '{id}' was not found"),
+            Self::HookRunNotFound(id) => write!(f, "hook run {id} was not found"),
             Self::AmbiguousHookId(id) => {
                 write!(f, "hook ID prefix '{id}' matches multiple hooks")
             }
@@ -1061,6 +1063,30 @@ impl Store {
         let rows = stmt.query_map([], hook_run_from_row)?;
 
         Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    /// Returns the most recent hook runs, newest first.
+    pub fn list_recent_hook_runs(&self, limit: usize) -> StoreResult<Vec<HookRun>> {
+        let mut stmt = self.conn.prepare(
+            r#"
+            SELECT id, hook_id, event_type, record_id, exit_status, stdout_summary, stderr_summary, created_at
+            FROM hook_runs
+            ORDER BY id DESC
+            LIMIT ?1
+            "#,
+        )?;
+        let rows = stmt.query_map(params![limit as i64], hook_run_from_row)?;
+
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    pub fn get_hook_run(&self, id: i64) -> StoreResult<HookRun> {
+        match get_hook_run_by_id(&self.conn, id) {
+            Err(StoreError::Sql(rusqlite::Error::QueryReturnedNoRows)) => {
+                Err(StoreError::HookRunNotFound(id))
+            }
+            result => result,
+        }
     }
 }
 

@@ -17,10 +17,11 @@ while IFS= read -r line; do
 done < notes.txt
 ```
 
-Filter and format:
+Filter and format: `--json` list output wraps records in a
+`{"records":[...]}` envelope, so iterate with `.records[]`:
 
 ```bash
-agent-store find 'kind=task and status=pending' --json | jq .
+agent-store find 'kind=task and status=pending' --json | jq -r '.records[].id'
 ```
 
 Capture command output:

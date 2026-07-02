@@ -1,5 +1,5 @@
 use crate::cli::HelpTopic;
-use agent_store::store::{Hook, Link, LinkEdge, QuickContextSummary, Record};
+use agent_store::store::{Hook, HookRun, Link, LinkEdge, QuickContextSummary, Record};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 
@@ -134,6 +134,7 @@ Commands:
   add           Add a Hook
   ls            List Hooks
   rm            Remove a Hook by ID
+  runs          List recent Hook Runs or show one run's captured output
 ";
 
 const HOOK_ADD_USAGE: &str = "\
@@ -157,6 +158,16 @@ Usage: agent-store hook rm <ID>
 Resolve a Hook ID prefix and remove that Hook.
 ";
 
+const HOOK_RUNS_USAGE: &str = "\
+Usage: agent-store hook runs [--limit <N>]
+       agent-store hook runs <RUN-ID>
+
+List recent Hook Runs newest first, one summary line per run (20 by default,
+override with --limit). Pass a run ID to print that run's full detail,
+including captured stdout and stderr. Captures are capped at 8192 bytes each;
+negative exit status means the Hook was killed by a signal or timed out.
+";
+
 pub fn help_text(topic: HelpTopic) -> &'static str {
     match topic {
         HelpTopic::Top => USAGE,
@@ -175,6 +186,7 @@ pub fn help_text(topic: HelpTopic) -> &'static str {
         HelpTopic::HookAdd => HOOK_ADD_USAGE,
         HelpTopic::HookList => HOOK_LIST_USAGE,
         HelpTopic::HookRemove => HOOK_REMOVE_USAGE,
+        HelpTopic::HookRuns => HOOK_RUNS_USAGE,
     }
 }
 
@@ -226,6 +238,52 @@ pub fn hooks_json(hooks: &[Hook]) -> Value {
     json!({
         "hooks": hooks.iter().map(hook_json).collect::<Vec<_>>(),
     })
+}
+
+pub fn hook_runs_json(runs: &[HookRun]) -> Value {
+    json!({
+        "hook_runs": runs.iter().map(hook_run_json).collect::<Vec<_>>(),
+    })
+}
+
+pub fn single_hook_run_json(run: &HookRun) -> Value {
+    json!({
+        "hook_run": hook_run_json(run),
+    })
+}
+
+fn hook_run_json(run: &HookRun) -> Value {
+    json!({
+        "id": run.id,
+        "hook_id": &run.hook_id,
+        "event": &run.event_type,
+        "record_id": &run.record_id,
+        "exit_status": run.exit_status,
+        "stdout": &run.stdout_summary,
+        "stderr": &run.stderr_summary,
+        "created_at": &run.created_at,
+    })
+}
+
+pub fn format_hook_run_summary(run: &HookRun) -> String {
+    format!(
+        "{} {} hook={} event={} record={} exit={}",
+        run.id, run.created_at, run.hook_id, run.event_type, run.record_id, run.exit_status
+    )
+}
+
+pub fn format_hook_run_detail(run: &HookRun) -> String {
+    format!(
+        "run: {}\ncreated_at: {}\nhook: {}\nevent: {}\nrecord: {}\nexit_status: {}\nstdout:\n{}\nstderr:\n{}",
+        run.id,
+        run.created_at,
+        run.hook_id,
+        run.event_type,
+        run.record_id,
+        run.exit_status,
+        run.stdout_summary,
+        run.stderr_summary
+    )
 }
 
 pub fn quick_context_json(summary: &QuickContextSummary) -> Value {

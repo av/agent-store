@@ -32,3 +32,13 @@ comparison values that contain spaces (`title='Write tests'`, single or
 double quotes; backslash escapes an embedded quote), use `field=''` to match
 empty-string fields, and run bare `agent-store find` (or `ls`) to list every
 record.
+
+Hooks run a bash command after matching mutations. The mutation commits
+before hooks run, and each hook command is killed after a 30-second timeout:
+
+```bash
+agent-store hook add create 'kind=task' -- 'echo "task created" >> tasks.log'
+agent-store hook ls
+agent-store hook runs            # recent runs; `hook runs <run-id>` for detail
+agent-store hook rm <hook-id>
+```

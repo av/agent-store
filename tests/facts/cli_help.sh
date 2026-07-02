@@ -83,6 +83,8 @@ case "$case_name" in
     assert_help "Usage: agent-store hook ls" hook ls -h
     assert_help "Usage: agent-store hook rm" hook rm --help
     assert_help "Usage: agent-store hook rm" hook rm -h
+    assert_help "Usage: agent-store hook runs" hook runs --help
+    assert_help "Usage: agent-store hook runs" hook runs -h
 
     test "$(run_agent_store find 'kind!=__agent_store_help_absent__')" = "$before_records"
     test "$(run_agent_store get "$source_id")" = "$before_source"

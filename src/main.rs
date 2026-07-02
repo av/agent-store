@@ -35,9 +35,10 @@ use agent_store::query::Query;
 use agent_store::store::{FieldChange, Hook, Link, LinkEdge, Record, Store, StoreError, STORE_DIR};
 use cli::{CliCommand, HookCliCommand};
 use output::{
-    format_hook, format_quick_context, format_record, help_text, hook_mutation_json, hooks_json,
-    init_json, link_mutation_json, mutation_json, print_json, quick_context_json,
-    record_links_json, records_json, single_record_json, USAGE,
+    format_hook, format_hook_run_detail, format_hook_run_summary, format_quick_context,
+    format_record, help_text, hook_mutation_json, hook_runs_json, hooks_json, init_json,
+    link_mutation_json, mutation_json, print_json, quick_context_json, record_links_json,
+    records_json, single_hook_run_json, single_record_json, USAGE,
 };
 use std::env;
 use std::fs::{self, OpenOptions};
@@ -121,6 +122,16 @@ comparison values that contain spaces (`title='Write tests'`, single or
 double quotes; backslash escapes an embedded quote), use `field=''` to match
 empty-string fields, and run bare `agent-store find` (or `ls`) to list every
 record.
+
+Hooks run a bash command after matching mutations. The mutation commits
+before hooks run, and each hook command is killed after a 30-second timeout:
+
+```bash
+agent-store hook add create 'kind=task' -- 'echo "task created" >> tasks.log'
+agent-store hook ls
+agent-store hook runs            # recent runs; `hook runs <run-id>` for detail
+agent-store hook rm <hook-id>
+```
 "#,
     },
     BuiltinSkill {
@@ -180,10 +191,11 @@ while IFS= read -r line; do
 done < notes.txt
 ```
 
-Filter and format:
+Filter and format: `--json` list output wraps records in a
+`{"records":[...]}` envelope, so iterate with `.records[]`:
 
 ```bash
-agent-store find 'kind=task and status=pending' --json | jq .
+agent-store find 'kind=task and status=pending' --json | jq -r '.records[].id'
 ```
 
 Capture command output:
@@ -516,6 +528,42 @@ fn main() {
                     Err(error) => {
                         eprintln!("error: failed to remove hook: {error}");
                         process::exit(1);
+                    }
+                }
+            }
+            HookCliCommand::Runs { limit, run_id } => {
+                let store = open_store_or_exit();
+                if let Some(run_id) = run_id {
+                    match store.get_hook_run(run_id) {
+                        Ok(run) => {
+                            if cli.json_output {
+                                print_json(single_hook_run_json(&run));
+                            } else {
+                                outln!("{}", format_hook_run_detail(&run));
+                            }
+                        }
+                        Err(error) => {
+                            eprintln!("error: failed to get hook run: {error}");
+                            process::exit(1);
+                        }
+                    }
+                } else {
+                    match store.list_recent_hook_runs(limit) {
+                        Ok(runs) => {
+                            if cli.json_output {
+                                print_json(hook_runs_json(&runs));
+                            } else if runs.is_empty() {
+                                outln!("No hook runs recorded yet.");
+                            } else {
+                                for run in runs {
+                                    outln!("{}", format_hook_run_summary(&run));
+                                }
+                            }
+                        }
+                        Err(error) => {
+                            eprintln!("error: failed to list hook runs: {error}");
+                            process::exit(1);
+                        }
                     }
                 }
             }

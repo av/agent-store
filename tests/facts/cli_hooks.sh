@@ -3998,8 +3998,86 @@ PY
     test "$plain_ls" = "$with_query_id create query='kind=task and status=open' -- 'echo created'"
     ;;
 
+  hook_runs_command)
+    cd "$tmp"
+    run_agent_store init >/tmp/agent-store-hook-runs-q1r-init.out
+
+    # Empty store: friendly plain message, empty JSON list, both exit 0.
+    empty_plain="$(run_agent_store hook runs)"
+    test "$empty_plain" = "No hook runs recorded yet."
+    empty_json="$(run_agent_store --json hook runs)"
+    test "$empty_json" = '{"hook_runs":[]}'
+
+    ok_hook="$(run_agent_store hook add create 'kind=task' -- 'echo hook-stdout')"
+    fail_hook="$(run_agent_store hook add set -- 'echo hook-stderr >&2; exit 3')"
+
+    record_id="$(run_agent_store create task title=demo)"
+    if run_agent_store set "$record_id" status=done 2>/tmp/agent-store-hook-runs-q1r-set.err; then
+      echo "expected set to fail via failing hook" >&2
+      exit 1
+    fi
+
+    # hook --help mentions runs.
+    run_agent_store hook --help | grep -q "runs"
+
+    # List: newest first, one summary line per run, no capture dumps.
+    listing="$(run_agent_store hook runs)"
+    test "$(printf '%s\n' "$listing" | wc -l)" -eq 2
+    first_line="$(printf '%s\n' "$listing" | sed -n 1p)"
+    second_line="$(printf '%s\n' "$listing" | sed -n 2p)"
+    printf '%s\n' "$first_line" | grep -Eq "^2 [0-9TZ:. -]+ hook=$fail_hook event=set record=$record_id exit=3$"
+    printf '%s\n' "$second_line" | grep -Eq "^1 [0-9TZ:. -]+ hook=$ok_hook event=create record=$record_id exit=0$"
+    case "$listing" in
+      *hook-stdout*|*hook-stderr*)
+        echo "list output must not include captured stdout/stderr" >&2
+        exit 1
+        ;;
+    esac
+
+    # --limit caps the list to the newest runs.
+    limited="$(run_agent_store hook runs --limit 1)"
+    test "$limited" = "$first_line"
+
+    # Detail view includes captured stdout and stderr.
+    detail="$(run_agent_store hook runs 2)"
+    printf '%s\n' "$detail" | grep -q "^run: 2$"
+    printf '%s\n' "$detail" | grep -q "^hook: $fail_hook$"
+    printf '%s\n' "$detail" | grep -q "^event: set$"
+    printf '%s\n' "$detail" | grep -q "^record: $record_id$"
+    printf '%s\n' "$detail" | grep -q "^exit_status: 3$"
+    printf '%s\n' "$detail" | grep -q "hook-stderr"
+    detail_ok="$(run_agent_store hook runs 1)"
+    printf '%s\n' "$detail_ok" | grep -q "hook-stdout"
+
+    # JSON list and detail carry structured objects with captures.
+    run_agent_store --json hook runs >runs.json
+    run_agent_store --json hook runs 1 >run1.json
+    python3 - runs.json run1.json "$ok_hook" "$fail_hook" "$record_id" <<'PY'
+import json
+import sys
+
+runs_path, run1_path, ok_hook, fail_hook, record_id = sys.argv[1:]
+runs = json.load(open(runs_path))["hook_runs"]
+assert [run["id"] for run in runs] == [2, 1], runs
+assert runs[0]["hook_id"] == fail_hook and runs[0]["event"] == "set"
+assert runs[0]["record_id"] == record_id and runs[0]["exit_status"] == 3
+assert runs[0]["stderr"].strip() == "hook-stderr", runs[0]
+assert runs[1]["hook_id"] == ok_hook and runs[1]["exit_status"] == 0
+assert runs[1]["stdout"].strip() == "hook-stdout", runs[1]
+detail = json.load(open(run1_path))["hook_run"]
+assert detail == runs[1], (detail, runs[1])
+PY
+
+    # Missing run ID exits non-zero with a not-found message.
+    if run_agent_store hook runs 99 2>missing.err; then
+      echo "expected hook runs 99 to fail" >&2
+      exit 1
+    fi
+    grep -q "hook run 99 was not found" missing.err
+    ;;
+
   *)
-    echo "usage: $0 {hook_json_output|hook_add_stores_metadata|hook_ls_deterministic|hook_rm_deletes_metadata|hooks_run_after_commit|hook_query_filters_records|hook_query_uses_mutation_snapshot|hook_stdin_receives_record_snapshot|hook_failure_reports_details|hook_failure_or_timeout_reports_committed_mutation|hook_command_launch_or_execution_failure_reports_committed_mutation|json_mutation_hook_failure_or_timeout_reports_committed_without_success_json|json_multiple_matching_hooks_stop_after_failure_or_timeout|hooks_run_sequentially_from_project_root_with_timeout|hook_env_vars_for_record_events|link_hook_query_source_and_relation_env|hook_failure_preserves_link_context_env|hook_output_capture_caps_and_help|hook_signal_termination_reports_committed_mutation|hook_timeout_terminates_process_group}" >&2
+    echo "usage: $0 {hook_json_output|hook_add_stores_metadata|hook_ls_deterministic|hook_rm_deletes_metadata|hooks_run_after_commit|hook_query_filters_records|hook_query_uses_mutation_snapshot|hook_stdin_receives_record_snapshot|hook_failure_reports_details|hook_failure_or_timeout_reports_committed_mutation|hook_command_launch_or_execution_failure_reports_committed_mutation|json_mutation_hook_failure_or_timeout_reports_committed_without_success_json|json_multiple_matching_hooks_stop_after_failure_or_timeout|hooks_run_sequentially_from_project_root_with_timeout|hook_env_vars_for_record_events|link_hook_query_source_and_relation_env|hook_failure_preserves_link_context_env|hook_output_capture_caps_and_help|hook_signal_termination_reports_committed_mutation|hook_timeout_terminates_process_group|hook_runs_command}" >&2
     exit 2
     ;;
 esac

@@ -104,6 +104,9 @@
   id: hkj
   command: bash tests/facts/cli_hooks.sh hook_json_output
   tags: [implemented]
+- label: agent-store hook runs lists persisted Hook Runs newest first (default limit 20, --limit N override) as one summary line per run with run id, timestamp, Hook ID, event, Record ID, and exit status without dumping captures; hook runs <run-id> prints one run's full detail including captured stdout and stderr; --json prints structured {"hook_runs":[...]} and {"hook_run":{...}} objects with captures; an empty store exits 0 with a friendly plain message or an empty JSON list; hook --help mentions runs
+  command: bash tests/facts/cli_hooks.sh hook_runs_command
+  tags: [implemented]
 
 ## context
 - label: agent-store ctx prints a compact deterministic Quick Context summary by default and does not print individual Record IDs or Field key-value pairs
