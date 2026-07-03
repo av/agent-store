@@ -28,6 +28,12 @@ Or build from source (needs a [Rust toolchain](https://rustup.rs) and a C compil
 cargo install --git https://github.com/av/agent-store
 ```
 
+Or, with Homebrew (macOS and Linux; installs the man page and shell completions too):
+
+```sh
+brew install av/tap/agent-store
+```
+
 Or, with Nix (flakes required):
 
 ```sh
