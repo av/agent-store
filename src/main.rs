@@ -148,11 +148,14 @@ agent-store find kind=task --count
 ends with a Recent records section listing the 10 most recently updated
 records with field values truncated, dropped oldest-first to fit the cap.
 
-Hooks run a bash command after matching mutations. The mutation commits
-before hooks run, and each hook command is killed after a 30-second timeout:
+Hooks run a bash command after matching mutations. The query is optional:
+omit it to run the hook on every mutation of that event (an empty-string
+query is rejected). The mutation commits before hooks run, and each hook
+command is killed after a 30-second timeout:
 
 ```bash
 agent-store hook add create 'kind=task' -- 'echo "task created" >> tasks.log'
+agent-store hook add set -- 'echo "record updated" >> audit.log'   # query optional
 agent-store hook ls
 agent-store hook runs            # recent runs; `hook runs <run-id>` for detail
 agent-store hook rm <hook-id>
