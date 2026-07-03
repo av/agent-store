@@ -83,7 +83,7 @@ main() {
         asset="$BIN-$tag-$target.tar.gz"
         printf 'dry run: target=%s\n' "$target"
         printf 'dry run: would download https://github.com/%s/releases/download/%s/%s\n' "$REPO" "$tag" "$asset"
-        printf 'dry run: would verify %s.sha256 and install to %s\n' "$asset" "${AGENT_STORE_INSTALL_DIR:-$HOME/.local/bin}"
+        printf 'dry run: would verify %s and install to %s\n' "$BIN-$tag-$target.sha256" "${AGENT_STORE_INSTALL_DIR:-$HOME/.local/bin}"
         exit 0
     fi
 
@@ -97,8 +97,10 @@ main() {
     printf 'Downloading %s ...\n' "$asset"
     curl -fsSL -o "$tmpdir/$asset" "$base/$asset" ||
         err "download failed: $base/$asset"
-    curl -fsSL -o "$tmpdir/$asset.sha256" "$base/$asset.sha256" ||
-        err "download failed: $base/$asset.sha256"
+    # Checksum asset replaces the archive extension: <bin>-<tag>-<target>.sha256
+    sumasset="$BIN-$tag-$target.sha256"
+    curl -fsSL -o "$tmpdir/$asset.sha256" "$base/$sumasset" ||
+        err "download failed: $base/$sumasset"
     verify_checksum "$tmpdir/$asset" "$tmpdir/$asset.sha256"
 
     tar -xzf "$tmpdir/$asset" -C "$tmpdir"
