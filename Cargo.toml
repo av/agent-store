@@ -8,7 +8,7 @@ repository = "https://github.com/av/agent-store"
 readme = "README.md"
 keywords = ["agent", "memory", "cli", "sqlite", "context"]
 categories = ["command-line-utilities", "database"]
-exclude = [".agents/", ".claude/", "AGENTS.md", ".github/", "CONTRIBUTING.md"]
+exclude = [".agents/", ".claude/", "AGENTS.md", ".github/", "CONTRIBUTING.md", "SECURITY.md"]
 
 [dependencies]
 libc = "0.2"

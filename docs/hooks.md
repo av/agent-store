@@ -80,4 +80,14 @@ stderr:
 `event`, `record_id`, `exit_status`, `stdout`, `stderr`, and `created_at`
 per run.
 
+## Security
+
+Hook commands are arbitrary `bash -c` strings stored in
+`.agent-store/store.sqlite` and executed automatically when mutations
+match — anyone who can write to that file gets code execution when hooks
+fire. `agent-store init` gitignores `.agent-store/`, but a cloned repo can
+still ship a committed store. After cloning an untrusted repo, inspect
+`agent-store hook ls` (or delete `.agent-store/`) before running mutation
+commands. See [SECURITY.md](../SECURITY.md).
+
 See also: [FAQ](faq.md) — data format, concurrency, privacy, and limits.
