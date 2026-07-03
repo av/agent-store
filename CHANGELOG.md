@@ -11,6 +11,8 @@ First public release.
 
 ### Added
 
+- Shell completions for bash, zsh, and fish (`completions/`) and a man page
+  (`man/agent-store.1`), bundled into release archives.
 - `agent-store init` creates a project-local SQLite store under `.agent-store/`
   and installs the agent-facing skills (`agent-store`, `agent-store-patterns`,
   `agent-store-pipelines`) into `.agents/skills/`, appending pointers to

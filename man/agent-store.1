@@ -1,0 +1,165 @@
+.TH AGENT-STORE 1 "July 2026" "agent-store 0.1.0" "User Commands"
+.SH NAME
+agent-store \- project-local memory and context store for AI coding agents
+.SH SYNOPSIS
+.B agent-store
+[\fIOPTIONS\fR] \fICOMMAND\fR [\fIARGS\fR]
+.SH DESCRIPTION
+.B agent-store
+is a project-local store for agent-facing records, links, hooks, and
+context, backed by a single SQLite file in the
+.I .agent-store/
+directory of the current project.
+Records are schemaless: each has a kind, an ID, and arbitrary
+key=value fields.
+Records can be connected with directional links, queried with a small
+boolean query language, and observed with hooks that run bash commands
+on store mutations.
+.SH OPTIONS
+.TP
+.BR \-h ", " \-\-help
+Print help.
+.TP
+.BR \-V ", " \-\-version
+Print version.
+.TP
+.B \-\-json
+Print structured JSON for command output.
+.SH COMMANDS
+.TP
+.B init
+Initialize the project-local store, install builtin skills, and add
+managed agent-store instructions to existing AGENTS.md and CLAUDE.md
+files.
+.TP
+\fBcreate\fR \fIkind\fR [\fIkey=value\fR...] (alias: \fBcr\fR)
+Create a record with the supplied kind and fields, then print its
+record ID.
+With
+.B \-\-stdin
+instead of positional arguments, bulk-import JSONL from stdin: one JSON
+object per line of the shape
+.BR "{\[dq]kind\[dq]: \[dq]...\[dq], \[dq]fields\[dq]: {...}}" ,
+the same record shape
+.B find \-\-json
+emits.
+Every line is validated before any record is created.
+.TP
+\fBfind\fR [\fB\-\-timestamps\fR] [\fB\-\-sort\fR \fIfield\fR] [\fB\-\-desc\fR] [\fB\-\-limit\fR \fIN\fR] [\fB\-\-count\fR] [\fIquery\fR] (alias: \fBls\fR)
+Find records by query.
+Multiple query arguments are joined with an implicit
+.BR and .
+Without a query, every record is listed in creation order.
+See
+.B QUERY LANGUAGE
+below.
+.TP
+\fBget\fR [\fB\-\-timestamps\fR] \fIID\fR
+Print one record resolved from an unambiguous record ID prefix.
+.TP
+\fBset\fR \fIID\fR \fIkey=value\fR...
+Resolve a record ID prefix and update the supplied fields atomically.
+.TP
+\fBunset\fR \fIID\fR \fIkey\fR...
+Resolve a record ID prefix and remove the supplied fields atomically.
+.TP
+\fBrm\fR \fIID\fR
+Resolve a record ID prefix and delete that record.
+.TP
+\fBlink\fR \fIfrom\fR \fIrel\fR \fIto\fR
+Create one directional link between two records.
+.TP
+\fBunlink\fR \fIfrom\fR \fIrel\fR \fIto\fR
+Remove one directional link between two records.
+.TP
+\fBlinks\fR \fIID\fR
+Print outgoing and incoming links for a record.
+.TP
+\fBctx\fR (alias: \fBcontext\fR)
+Print a compact Quick Context summary capped at 8192 bytes, ending with
+the 10 most recently updated records.
+.TP
+\fBhook add\fR \fIevent\fR [\fIquery\fR] \fB\-\-\fR \fIbash command\fR
+Store a hook for the
+.BR create ,
+.BR set ,
+.BR unset ,
+.BR rm ,
+.BR link ,
+or
+.B unlink
+event.
+When a query is provided, the hook runs only for matching records.
+Hook commands are killed after a 30-second timeout; each receives the
+affected record snapshot on stdin plus
+.B AGENT_STORE_*
+environment variables (see
+.BR "agent-store hook \-\-help" ).
+.TP
+.B hook ls
+List hooks.
+.TP
+\fBhook rm\fR \fIID\fR
+Resolve a hook ID prefix and remove that hook.
+.TP
+\fBhook runs\fR [\fB\-\-limit\fR \fIN\fR | \fIRUN-ID\fR]
+List recent hook runs newest first (20 by default), or print one run's
+full detail including captured stdout and stderr (capped at 8192 bytes
+each).
+.SH QUERY LANGUAGE
+Queries combine comparisons with
+.BR and ,
+.BR or ,
+.BR not ,
+and parentheses;
+.B and
+binds tighter than
+.BR or .
+Comparisons support
+.BR = ,
+.BR != ,
+.BR < ,
+.BR <= ,
+.BR > ,
+and
+.B >=
+over kind and field values, plus
+.B link.out
+and
+.B link.in
+predicates.
+The
+.B ~=
+operator matches a case-insensitive substring.
+The built-in
+.B created_at
+and
+.B updated_at
+timestamps compare like fields (for example
+.BR created_at>2026\-01\-01 ).
+Numbers compare numerically when both sides are numeric; otherwise
+values compare as text.
+.SH EXAMPLES
+.nf
+agent-store init
+agent-store create task title="Fix login redirect" status=pending
+agent-store find kind=task status=pending
+agent-store find 'severity=high or priority<2' --sort created_at --desc
+agent-store set 1a2b3c status=done
+agent-store link 1a2b3c blocks 4d5e6f
+agent-store hook add set kind=task -- 'echo "$AGENT_STORE_ID" >> audit.log'
+agent-store ctx
+.fi
+.SH FILES
+.TP
+.I .agent-store/
+Project-local store directory created by
+.BR "agent-store init" ,
+containing the SQLite database.
+.SH EXIT STATUS
+Returns 0 on success and non-zero on any error (parse error, missing
+store, ambiguous or unknown ID prefix, failed import).
+.SH SEE ALSO
+Full documentation and query, hooks, and JSON references at
+.UR https://github.com/av/agent-store
+.UE

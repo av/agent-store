@@ -1,0 +1,101 @@
+#compdef agent-store
+# zsh completion for agent-store
+#
+# Install: copy this file to a directory on your $fpath, e.g.
+#   /usr/share/zsh/site-functions/_agent-store
+# then restart zsh (or run: autoload -U compinit && compinit).
+
+_agent-store() {
+    local curcontext="$curcontext" state line
+    typeset -A opt_args
+
+    _arguments -C \
+        '--json[Print structured JSON for command output]' \
+        '(-h --help)'{-h,--help}'[Print help]' \
+        '(-V --version)'{-V,--version}'[Print version]' \
+        '1:command:->command' \
+        '*::arg:->args'
+
+    case $state in
+    command)
+        local -a commands
+        commands=(
+            'init:Initialize a project-local store'
+            'create:Create a record'
+            'cr:Create a record (alias)'
+            'find:Find records by query'
+            'ls:Find records by query (alias)'
+            'get:Print a record by ID'
+            'set:Update fields on a record by ID'
+            'unset:Remove fields from a record by ID'
+            'rm:Delete a record by ID'
+            'link:Create a directional link between records'
+            'unlink:Remove a directional link between records'
+            'links:Print incoming and outgoing links for a record'
+            'ctx:Print a compact Quick Context summary'
+            'context:Print a compact Quick Context summary (alias)'
+            'hook:Manage stored hooks'
+        )
+        _describe -t commands 'agent-store command' commands
+        ;;
+    args)
+        case $line[1] in
+        create | cr)
+            _arguments '--stdin[Bulk-import JSONL from stdin]' \
+                '1:kind:' '*:key=value:'
+            ;;
+        find | ls)
+            _arguments \
+                '--timestamps[Append created_at and updated_at to each line]' \
+                '--sort[Sort by a field]:field:(created_at updated_at kind id)' \
+                '--desc[Reverse the listing order]' \
+                '--limit[Output at most N records]:count:' \
+                '--count[Print only the number of matching records]' \
+                '*:query:'
+            ;;
+        get)
+            _arguments '--timestamps[Append created_at and updated_at]' '1:record id:'
+            ;;
+        hook)
+            if ((CURRENT == 2)); then
+                local -a hook_commands
+                hook_commands=(
+                    'add:Add a hook'
+                    'ls:List hooks'
+                    'rm:Remove a hook by ID'
+                    'runs:List recent hook runs'
+                )
+                _describe -t commands 'hook command' hook_commands
+            else
+                case $line[2] in
+                add)
+                    ((CURRENT == 3)) &&
+                        _values 'event' create set unset rm link unlink
+                    ;;
+                runs)
+                    _arguments '--limit[List at most N runs]:count:' '1:run id:'
+                    ;;
+                rm)
+                    _arguments '1:hook id:'
+                    ;;
+                esac
+            fi
+            ;;
+        set)
+            _arguments '1:record id:' '*:key=value:'
+            ;;
+        unset)
+            _arguments '1:record id:' '*:key:'
+            ;;
+        rm | links)
+            _arguments '1:record id:'
+            ;;
+        link | unlink)
+            _arguments '1:from id:' '2:relation:' '3:to id:'
+            ;;
+        esac
+        ;;
+    esac
+}
+
+_agent-store "$@"

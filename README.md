@@ -24,6 +24,26 @@ cargo install --git https://github.com/av/agent-store
 
 Or download a prebuilt binary for Linux (x86_64 gnu/musl), macOS (x86_64/arm64), or Windows (x86_64) from [GitHub Releases](https://github.com/av/agent-store/releases) — each archive comes with a SHA-256 checksum.
 
+### Shell completions and man page
+
+Completion scripts for bash, zsh, and fish live in [`completions/`](completions/):
+
+```sh
+# bash
+cp completions/agent-store.bash ~/.local/share/bash-completion/completions/agent-store
+# zsh (any directory on your $fpath)
+cp completions/_agent-store /usr/share/zsh/site-functions/
+# fish
+cp completions/agent-store.fish ~/.config/fish/completions/
+```
+
+A man page ships in [`man/agent-store.1`](man/agent-store.1):
+
+```sh
+mkdir -p ~/.local/share/man/man1 && cp man/agent-store.1 ~/.local/share/man/man1/
+man agent-store
+```
+
 ## Quickstart
 
 ```sh
