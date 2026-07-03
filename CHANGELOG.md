@@ -29,6 +29,12 @@ First public release.
   hint. Unknown `--flags` on `find`/`ls`, `get`, `rm`, and `links` are
   rejected with an "unknown flag" error pointing at `--help` (exit 2) instead
   of falling through to positional parsing.
+- Default record output is always one line per record: field values containing
+  newlines or other control characters are rendered with bash ANSI-C quoting
+  (`multi=$'line1\nline2'`), so line-by-line piping of `find`/`ls` output stays
+  safe and values still round-trip through shell `eval`. Applies to `find`,
+  `get`, `ctx` recent records, and the record snapshot piped to hook stdin;
+  `--json` output is unchanged.
 - Records: `create`, `get`, `set`, `unset`, `rm` with kind and field-name
   validation, generated IDs, unique-prefix ID resolution, and created/updated
   timestamps.

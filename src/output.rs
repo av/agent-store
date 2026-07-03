@@ -638,12 +638,40 @@ fn shell_quote_value(value: &str) -> String {
         return value.to_owned();
     }
 
+    if value.chars().any(char::is_control) {
+        return ansi_c_quote_value(value);
+    }
+
     let mut quoted = String::from("'");
     for ch in value.chars() {
         if ch == '\'' {
             quoted.push_str("'\"'\"'");
         } else {
             quoted.push(ch);
+        }
+    }
+    quoted.push('\'');
+    quoted
+}
+
+/// Quote a value containing control characters as bash ANSI-C `$'...'` so
+/// record lines stay one line each (`\n`, `\r`, `\t`, and other control
+/// characters are escaped) while remaining shell-eval round-trippable.
+fn ansi_c_quote_value(value: &str) -> String {
+    let mut quoted = String::from("$'");
+    for ch in value.chars() {
+        match ch {
+            '\n' => quoted.push_str("\\n"),
+            '\r' => quoted.push_str("\\r"),
+            '\t' => quoted.push_str("\\t"),
+            '\\' => quoted.push_str("\\\\"),
+            '\'' => quoted.push_str("\\'"),
+            ch if ch.is_control() => {
+                for byte in ch.to_string().as_bytes() {
+                    quoted.push_str(&format!("\\x{byte:02x}"));
+                }
+            }
+            ch => quoted.push(ch),
         }
     }
     quoted.push('\'');
@@ -686,6 +714,32 @@ mod tests {
     #[test]
     fn shell_quote_escapes_single_quotes() {
         assert_eq!(shell_quote_value("can't"), "'can'\"'\"'t'");
+    }
+
+    #[test]
+    fn multiline_values_stay_on_one_record_line() {
+        let record = Record {
+            id: "abc123".to_owned(),
+            kind: "note".to_owned(),
+            created_at: "2026-07-01T10:00:00.000Z".to_owned(),
+            updated_at: "2026-07-02T11:00:00.000Z".to_owned(),
+            fields: BTreeMap::from([("multi".to_owned(), "line1\nline2".to_owned())]),
+        };
+
+        let line = format_record(&record);
+        assert_eq!(line, "abc123 note multi=$'line1\\nline2'");
+        assert!(!line.contains('\n'));
+    }
+
+    #[test]
+    fn control_characters_are_ansi_c_quoted() {
+        assert_eq!(shell_quote_value("a\tb"), "$'a\\tb'");
+        assert_eq!(shell_quote_value("a\rb"), "$'a\\rb'");
+        assert_eq!(shell_quote_value("it's\na"), "$'it\\'s\\na'");
+        assert_eq!(shell_quote_value("back\\slash\n"), "$'back\\\\slash\\n'");
+        assert_eq!(shell_quote_value("bell\x07"), "$'bell\\x07'");
+        // Values without control characters keep plain single-quoting.
+        assert_eq!(shell_quote_value("hello world"), "'hello world'");
     }
 
     #[test]
