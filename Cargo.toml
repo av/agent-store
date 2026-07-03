@@ -5,8 +5,10 @@ edition = "2021"
 description = "A local-first memory and context store for AI coding agents, backed by SQLite"
 license = "MIT"
 repository = "https://github.com/av/agent-store"
+homepage = "https://github.com/av/agent-store"
+documentation = "https://github.com/av/agent-store#readme"
 readme = "README.md"
-keywords = ["agent", "memory", "cli", "sqlite", "context"]
+keywords = ["llm", "agent", "memory", "context", "sqlite"]
 categories = ["command-line-utilities", "database"]
 exclude = [".agents/", ".claude/", "AGENTS.md", ".github/", "CONTRIBUTING.md", "SECURITY.md", "flake.nix", "flake.lock"]
 
