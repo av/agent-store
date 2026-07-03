@@ -43,3 +43,66 @@ jobs:
           include: LICENSE,THIRD-PARTY-LICENSES.md,README.md,completions,man
           checksum: sha256
           token: ${{ secrets.GITHUB_TOKEN }}
+
+  # Publish to crates.io. Skips gracefully when CARGO_REGISTRY_TOKEN is not
+  # configured (the crate name is currently unresolved on crates.io), so
+  # tagging a release never fails on this job.
+  publish-crate:
+    name: Publish to crates.io
+    needs: build
+    runs-on: ubuntu-latest
+    env:
+      CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check for registry token
+        id: token
+        run: |
+          if [ -n "$CARGO_REGISTRY_TOKEN" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "CARGO_REGISTRY_TOKEN not set; skipping crates.io publish." >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: cargo publish
+        if: steps.token.outputs.present == 'true'
+        run: cargo publish --locked
+
+  # Bump the Homebrew formula in av/homebrew-tap with the new version and
+  # sha256 checksums of the release artifacts. Skips gracefully when
+  # HOMEBREW_TAP_TOKEN is not configured.
+  bump-homebrew-formula:
+    name: Bump Homebrew formula
+    needs: build
+    runs-on: ubuntu-latest
+    env:
+      HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+    steps:
+      - name: Check for tap token
+        id: token
+        run: |
+          if [ -n "$HOMEBREW_TAP_TOKEN" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "HOMEBREW_TAP_TOKEN not set; skipping Homebrew tap bump." >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Checkout tap
+        if: steps.token.outputs.present == 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: av/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+      - name: Update formula and push
+        if: steps.token.outputs.present == 'true'
+        run: |
+          ./scripts/update-formula.sh "${GITHUB_REF_NAME}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/agent-store.rb
+          if git diff --cached --quiet; then
+            echo "Formula already up to date." >> "$GITHUB_STEP_SUMMARY"
+          else
+            git commit -m "agent-store ${GITHUB_REF_NAME#v}"
+            git push
+          fi
