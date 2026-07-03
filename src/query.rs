@@ -722,7 +722,10 @@ mod tests {
             "priority=2026-01-02",
         ] {
             let parsed = Query::parse(query).expect("query should parse");
-            assert!(!parsed.matches(&record()), "query should not match: {query}");
+            assert!(
+                !parsed.matches(&record()),
+                "query should not match: {query}"
+            );
         }
     }
 
@@ -849,7 +852,9 @@ mod tests {
         let query = Query::parse("status='and'").expect("query should parse");
 
         let mut keywordy = record();
-        keywordy.fields.insert("status".to_owned(), "and".to_owned());
+        keywordy
+            .fields
+            .insert("status".to_owned(), "and".to_owned());
         assert!(query.matches(&keywordy));
         assert!(!query.matches(&record()));
     }
@@ -875,7 +880,10 @@ mod tests {
             "created_at>2020-01-01 and kind=note",
         ] {
             let parsed = Query::parse(query).expect("query should parse");
-            assert!(!parsed.matches(&record()), "query should not match: {query}");
+            assert!(
+                !parsed.matches(&record()),
+                "query should not match: {query}"
+            );
         }
     }
 

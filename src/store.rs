@@ -1632,13 +1632,24 @@ mod tests {
         let created = store
             .create_record("task", BTreeMap::from([("title".into(), "write".into())]))
             .unwrap();
-        assert!(is_utc_rfc3339(&created.created_at), "{}", created.created_at);
-        assert!(is_utc_rfc3339(&created.updated_at), "{}", created.updated_at);
+        assert!(
+            is_utc_rfc3339(&created.created_at),
+            "{}",
+            created.created_at
+        );
+        assert!(
+            is_utc_rfc3339(&created.updated_at),
+            "{}",
+            created.updated_at
+        );
         assert_eq!(created.created_at, created.updated_at);
 
         thread::sleep(Duration::from_millis(5));
         let updated = store
-            .set_record(&created.id, BTreeMap::from([("status".into(), "open".into())]))
+            .set_record(
+                &created.id,
+                BTreeMap::from([("status".into(), "open".into())]),
+            )
             .unwrap();
         assert_eq!(updated.created_at, created.created_at);
         assert!(updated.updated_at > created.updated_at);
@@ -1656,10 +1667,13 @@ mod tests {
     fn is_utc_rfc3339(value: &str) -> bool {
         let bytes = value.as_bytes();
         bytes.len() > 20
-            && bytes[..10].iter().enumerate().all(|(index, byte)| match index {
-                4 | 7 => *byte == b'-',
-                _ => byte.is_ascii_digit(),
-            })
+            && bytes[..10]
+                .iter()
+                .enumerate()
+                .all(|(index, byte)| match index {
+                    4 | 7 => *byte == b'-',
+                    _ => byte.is_ascii_digit(),
+                })
             && bytes[10] == b'T'
             && value.ends_with('Z')
     }

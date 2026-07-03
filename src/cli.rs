@@ -392,9 +392,7 @@ fn parse_hook_command(args: Vec<String>) -> Result<CliCommand, CliParseError> {
 
 const DEFAULT_HOOK_RUNS_LIMIT: usize = 20;
 
-fn parse_hook_runs_args(
-    args: impl Iterator<Item = String>,
-) -> Result<CliCommand, CliParseError> {
+fn parse_hook_runs_args(args: impl Iterator<Item = String>) -> Result<CliCommand, CliParseError> {
     let mut args = args.peekable();
     let mut limit = DEFAULT_HOOK_RUNS_LIMIT;
     let mut run_id = None;
@@ -487,9 +485,7 @@ fn take_value_flag(args: &mut Vec<String>, flag: &str) -> Result<Option<String>,
     let value = args.remove(position + 1);
     args.remove(position);
     if args.iter().any(|arg| arg == flag) {
-        return Err(CliParseError::new(format!(
-            "{flag} may only be given once"
-        )));
+        return Err(CliParseError::new(format!("{flag} may only be given once")));
     }
     Ok(Some(value))
 }
@@ -738,8 +734,8 @@ mod tests {
             );
         }
 
-        let parsed = parse_args(["find".to_owned(), "kind=task".to_owned()])
-            .expect("args should parse");
+        let parsed =
+            parse_args(["find".to_owned(), "kind=task".to_owned()]).expect("args should parse");
         assert_eq!(
             parsed.command,
             CliCommand::Find {
@@ -755,8 +751,12 @@ mod tests {
 
     #[test]
     fn get_and_find_accept_timestamps_flag_in_any_position() {
-        let parsed = parse_args(["get".to_owned(), "--timestamps".to_owned(), "abc123".to_owned()])
-            .expect("args should parse");
+        let parsed = parse_args([
+            "get".to_owned(),
+            "--timestamps".to_owned(),
+            "abc123".to_owned(),
+        ])
+        .expect("args should parse");
         assert_eq!(
             parsed.command,
             CliCommand::Get {
@@ -783,8 +783,8 @@ mod tests {
             }
         );
 
-        let parsed = parse_args(["ls".to_owned(), "--timestamps".to_owned()])
-            .expect("args should parse");
+        let parsed =
+            parse_args(["ls".to_owned(), "--timestamps".to_owned()]).expect("args should parse");
         assert_eq!(
             parsed.command,
             CliCommand::Find {

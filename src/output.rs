@@ -738,10 +738,7 @@ mod tests {
         };
 
         let line = format_recent_record(&record);
-        assert_eq!(
-            line,
-            format!("abc123 note body={}...", "x".repeat(100))
-        );
+        assert_eq!(line, format!("abc123 note body={}...", "x".repeat(100)));
 
         let value = recent_record_json(&record);
         assert_eq!(

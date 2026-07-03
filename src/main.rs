@@ -37,9 +37,9 @@ use agent_store::value::FieldValue;
 use cli::{CliCommand, HookCliCommand};
 use output::{
     count_json, format_hook, format_hook_run_detail, format_hook_run_summary, format_quick_context,
-    format_record, format_record_with_timestamps, help_text, hook_mutation_json, hook_runs_json, hooks_json, init_json,
-    link_mutation_json, mutation_json, print_json, quick_context_json, record_links_json,
-    records_json, single_hook_run_json, single_record_json, USAGE,
+    format_record, format_record_with_timestamps, help_text, hook_mutation_json, hook_runs_json,
+    hooks_json, init_json, link_mutation_json, mutation_json, print_json, quick_context_json,
+    record_links_json, records_json, single_hook_run_json, single_record_json, USAGE,
 };
 use std::cmp::Ordering;
 use std::env;
