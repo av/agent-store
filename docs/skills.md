@@ -59,4 +59,6 @@ The skills use these by convention (kinds are free-form — anything goes):
 Re-running `agent-store init` is safe: it refreshes the installed skills and
 the managed instruction blocks without touching your records.
 
-See also: [FAQ](faq.md) — data format, concurrency, privacy, and limits.
+See also: [Using agent-store with Claude Code](claude-code.md) — a full
+walkthrough of what these skills enable; [FAQ](faq.md) — data format,
+concurrency, privacy, and limits.

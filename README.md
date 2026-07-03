@@ -152,6 +152,7 @@ Run `agent-store <command> --help` for full details on any of them.
 
 ## Documentation
 
+- [Using agent-store with Claude Code](docs/claude-code.md) — setup, CLAUDE.md conventions, session-start context injection, a worked two-session example
 - [Query language](docs/queries.md) — operators, value types, combinators, quoting, timestamps, links, sorting
 - [Hooks](docs/hooks.md) — events, environment variables, limits, inspecting runs
 - [JSON output and import](docs/json.md) — `--json` shapes, `create --stdin`, pipeline recipes

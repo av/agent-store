@@ -100,4 +100,6 @@ still ship a committed store. After cloning an untrusted repo, inspect
 `agent-store hook ls` (or delete `.agent-store/`) before running mutation
 commands. See [SECURITY.md](../SECURITY.md).
 
-See also: [FAQ](faq.md) — data format, concurrency, privacy, and limits.
+See also: [Using agent-store with Claude Code](claude-code.md) — how
+store hooks compose with Claude Code's own hook system; [FAQ](faq.md) —
+data format, concurrency, privacy, and limits.
