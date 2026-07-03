@@ -22,7 +22,7 @@ curl -fsSL https://raw.githubusercontent.com/av/agent-store/master/install.sh | 
 
 The installer detects your OS/arch, downloads the latest release binary, verifies its SHA-256 checksum, and installs to `~/.local/bin` (set `AGENT_STORE_INSTALL_DIR` to override, `AGENT_STORE_VERSION` to pin a tag).
 
-Or build from source:
+Or build from source (needs a [Rust toolchain](https://rustup.rs) and a C compiler — the bundled SQLite is compiled from source, so on a fresh machine install `gcc` or `clang` first, e.g. `apt install gcc`):
 
 ```sh
 cargo install --git https://github.com/av/agent-store
