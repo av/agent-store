@@ -45,7 +45,7 @@ The Nix package includes the man page and bash/zsh/fish completions; `nix develo
 
 Or download a prebuilt binary for Linux (x86_64 gnu/musl), macOS (x86_64/arm64), or Windows (x86_64) from [GitHub Releases](https://github.com/av/agent-store/releases) — each archive comes with a SHA-256 checksum. Linux/macOS assets are `.tar.gz`; the Windows asset is a `.zip`. [cargo-binstall](https://github.com/cargo-bins/cargo-binstall) users can fetch the prebuilt binary without compiling: `cargo binstall --git https://github.com/av/agent-store agent-store`.
 
-**Windows:** the install script is unix-only — download `agent-store-<tag>-x86_64-pc-windows-msvc.zip` from Releases, unzip, and put `agent-store.exe` on your `PATH` (or use `cargo install` above). The core CLI works natively; [hooks](docs/hooks.md) run their commands via `bash -c`, so hooks require a `bash` on `PATH` (Git Bash or WSL) — everything else works without one. The bundled shell completions and man page below are for unix shells.
+**Windows:** the install script is unix-only — download `agent-store-<tag>-x86_64-pc-windows-msvc.zip` from Releases, unzip, and put `agent-store.exe` on your `PATH` (or use `cargo install` / `cargo binstall` above). The core CLI works natively; [hooks](docs/hooks.md) run their commands via `bash -c`, so hooks require a `bash` on `PATH` (Git Bash or WSL) — everything else works without one. The bundled shell completions and man page below are for unix shells.
 
 ### Verifying release downloads
 
@@ -88,6 +88,26 @@ A man page ships in [`man/agent-store.1`](man/agent-store.1):
 mkdir -p ~/.local/share/man/man1 && cp man/agent-store.1 ~/.local/share/man/man1/
 man agent-store
 ```
+
+### Upgrading and uninstalling
+
+Upgrade with whatever installed it:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/av/agent-store/master/install.sh | sh   # installer: re-run, replaces the binary
+brew upgrade av/tap/agent-store                                                      # Homebrew
+nix profile upgrade agent-store                                                      # Nix
+cargo install --force --git https://github.com/av/agent-store                        # cargo (source or binstall)
+```
+
+`agent-store --version` tells you what you're on. On Windows, replace `agent-store.exe` with the new release zip's copy.
+
+What lives where, for a clean uninstall:
+
+- **Binary** — the installer puts it at `~/.local/bin/agent-store` (or `$AGENT_STORE_INSTALL_DIR`); `rm` it. Otherwise `brew uninstall av/tap/agent-store`, `nix profile remove agent-store`, or `cargo uninstall agent-store`.
+- **Man page and completions** — only present if you copied them per the section above (or via Homebrew/Nix, which remove them with the package). Delete the copied files from `~/.local/share/man/man1/` and your completion directories.
+- **Your data** — stores are per-project in each project's `.agent-store/` directory (gitignored by `init`); there is no global state, config, or cache. Removing the binary loses no data, and deleting a project's `.agent-store/` deletes that project's records — export first with `agent-store find --json | jq -c '.records[]'` if you want a backup (see [docs/json.md](docs/json.md)).
+- **`init` artifacts** — in projects where you ran `init`: skill files under `.agents/skills/` and `.claude/skills/`, and a managed block in `AGENTS.md`/`CLAUDE.md` between `<!-- agent-store:start -->` and `<!-- agent-store:end -->` markers. Delete the skill directories and the marked block to fully remove them.
 
 ## Quickstart
 

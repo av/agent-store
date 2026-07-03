@@ -12,6 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Docs: "Using agent-store with Claude Code" tutorial (`docs/claude-code.md`)
   — setup, CLAUDE.md conventions, session-start context injection via a
   Claude Code `SessionStart` hook, and a worked two-session example.
+- README "Upgrading and uninstalling" section: per-channel upgrade commands
+  and a map of everything an install or `init` puts on disk.
 - Docs: Concepts page (`docs/concepts.md`) — the mental model behind stores,
   records, links, queries, hooks, and the `ctx` budget.
 - README "Verifying release downloads" section: `sha256sum -c` /
