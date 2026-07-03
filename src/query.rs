@@ -97,6 +97,15 @@ impl Query {
             let token = parser
                 .peek()
                 .expect("unfinished parser should have a token");
+            if let Token::Word(word) = token {
+                let lower = word.to_ascii_lowercase();
+                if matches!(lower.as_str(), "and" | "or" | "not") && lower != *word {
+                    return Err(QueryError::new(format!(
+                        "unexpected token '{word}' \
+                         (query keywords are lowercase: and, or, not)"
+                    )));
+                }
+            }
             return Err(QueryError::new(format!(
                 "unexpected token {}",
                 describe_token(token)

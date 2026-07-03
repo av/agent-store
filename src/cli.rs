@@ -551,7 +551,10 @@ fn has_unsupported_identifier_chars(value: &str) -> bool {
 
 fn validate_kind(kind: &str) -> Result<(), CliParseError> {
     if has_unsupported_identifier_chars(kind) {
-        return Err(CliParseError::new("kind contains unsupported characters"));
+        return Err(CliParseError::new(format!(
+            "kind contains unsupported characters \
+             (whitespace, control characters, quotes, and '=' are not allowed): {kind:?}"
+        )));
     }
     if kind == "not" {
         return Err(CliParseError::new("'not' is a reserved kind"));
@@ -569,9 +572,10 @@ fn validate_field_key(key: &str) -> Result<(), CliParseError> {
         )));
     }
     if has_unsupported_identifier_chars(key) {
-        return Err(CliParseError::new(
-            "field name contains unsupported characters",
-        ));
+        return Err(CliParseError::new(format!(
+            "field name contains unsupported characters \
+             (whitespace, control characters, quotes, and '=' are not allowed): {key:?}"
+        )));
     }
     Ok(())
 }

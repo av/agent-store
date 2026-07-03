@@ -32,6 +32,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Crate-level rustdoc in `src/lib.rs` and fuller Cargo.toml metadata
   (homepage, documentation, keywords) for registry listings.
 
+### Changed
+
+- Clearer CLI errors: kind and field-name validation errors now list the
+  disallowed characters and echo the offending name, and queries using
+  uppercase `AND`/`OR`/`NOT` get a hint that query keywords are lowercase.
+
 ### Fixed
 
 - `install.sh` downloads the checksum file under its actual release asset
