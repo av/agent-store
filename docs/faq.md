@@ -160,6 +160,8 @@ is the entire build process.
 
 ## See also
 
+- [Using agent-store with Claude Code](claude-code.md)
+- [Concepts](concepts.md)
 - [Query language](queries.md)
 - [Hooks](hooks.md)
 - [JSON output and import](json.md)

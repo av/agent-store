@@ -8,7 +8,7 @@
 
 ## Reporting a vulnerability
 
-Report privately via [GitHub security advisories](../../security/advisories/new)
+Report privately via [GitHub security advisories](https://github.com/av/agent-store/security/advisories/new)
 (preferred), or email av@av.codes. Please do not open a public issue for
 security reports.
 

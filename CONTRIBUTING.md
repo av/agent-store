@@ -32,7 +32,7 @@ src/store.rs   SQLite-backed store: records, links, hooks, ctx
 src/value.rs   typed field values and comparison semantics
 src/output.rs  text and --json rendering
 tests/         integration tests plus fact-check scripts in tests/facts/
-docs/          user-facing deep dives (queries, hooks, json, skills)
+docs/          user-facing docs (tutorial, concepts, queries, hooks, json, skills, faq)
 ```
 
 ## Spec workflow
