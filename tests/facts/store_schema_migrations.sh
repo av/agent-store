@@ -2205,7 +2205,9 @@ expected_hook_runs = int(expected_hook_runs_s)
 record_line = re.compile(r"^[a-z0-9]{6,8} [a-z][a-z0-9_-]*( [a-zA-Z0-9_.:-]+=([^ ']+|'[^']*'))*$")
 stable_source_line = f"{stable_source} task phase=stable status=open title=StableSource"
 stable_target_line = f"{stable_target} task phase=stable status=open title=StableTarget"
-expected_find = sorted([stable_source_line, stable_target_line])
+# find orders by creation time (ORDER BY created_at, rowid), so the two
+# stable records always come back in creation order regardless of random IDs.
+expected_find = [stable_source_line, stable_target_line]
 expected_get = stable_source_line
 expected_links = f"out blocks {stable_target}"
 

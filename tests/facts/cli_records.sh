@@ -619,7 +619,18 @@ import json
 import sys
 
 data = json.loads(sys.argv[1])
-assert data == {"status": "initialized", "store_dir": ".agent-store"}, data
+assert set(data) == {"status", "store_dir", "skills_installed", "instructions"}, data
+assert data["status"] == "initialized", data
+assert data["store_dir"] == ".agent-store", data
+skills = data["skills_installed"]
+assert isinstance(skills, list) and skills, data
+assert all(path.endswith("/SKILL.md") for path in skills), skills
+instructions = data["instructions"]
+assert isinstance(instructions, list), data
+for entry in instructions:
+    assert set(entry) == {"path", "status"}, entry
+    assert entry["path"] in ("AGENTS.md", "CLAUDE.md"), entry
+    assert entry["status"] in ("added", "present", "missing"), entry
 PY
 
     create_json="$(run_agent_store create task title=Write status=open empty= --json)"
