@@ -111,4 +111,5 @@ agent-store find kind=task status=pending --count
 
 Sorting is type-aware too: `--sort priority` orders `1, 2, 10` numerically.
 
-See also: [FAQ](faq.md) — data format, concurrency, privacy, and limits.
+See also: [Concepts](concepts.md) — where queries fit in the overall
+model; [FAQ](faq.md) — data format, concurrency, privacy, and limits.
