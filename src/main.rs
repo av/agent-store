@@ -818,6 +818,7 @@ struct InitSummary {
 }
 
 fn init_store() -> io::Result<InitSummary> {
+    check_store_dir_conflict(Path::new(STORE_DIR))?;
     let already_initialized = Path::new(STORE_DIR).is_dir();
     fs::create_dir_all(STORE_DIR)?;
     ensure_gitignore_rule(Path::new(GITIGNORE_PATH), GITIGNORE_RULE)?;
@@ -835,11 +836,23 @@ fn init_store() -> io::Result<InitSummary> {
     })
 }
 
+/// Rejects an `init` when the store path exists but is not a directory, so
+/// the user gets an actionable message instead of a raw `File exists` errno.
+fn check_store_dir_conflict(store_dir: &Path) -> io::Result<()> {
+    if !store_dir.is_dir() && store_dir.symlink_metadata().is_ok() {
+        return Err(io::Error::other(format!(
+            "{} exists but is not a directory; remove or rename it, then re-run 'agent-store init'",
+            store_dir.display()
+        )));
+    }
+    Ok(())
+}
+
 fn open_store_or_exit() -> Store {
     match Store::open_project() {
         Ok(store) => store,
-        Err(StoreError::NotInitialized) => {
-            eprintln!("error: {}", StoreError::NotInitialized);
+        Err(error @ (StoreError::NotInitialized | StoreError::StoreDirConflict(_))) => {
+            eprintln!("error: {error}");
             process::exit(1);
         }
         Err(error) => {
@@ -1324,6 +1337,29 @@ mod tests {
         let path = env::temp_dir().join(format!("agent-store-{name}-{}-{unique}", process::id()));
         fs::create_dir_all(&path).expect("test temp dir should be created");
         path
+    }
+
+    #[test]
+    fn init_rejects_store_path_that_is_a_file() {
+        let root = temp_dir("store-conflict");
+        let store_path = root.join(STORE_DIR);
+        fs::write(&store_path, "not a directory").expect("conflict file should be written");
+
+        let error =
+            check_store_dir_conflict(&store_path).expect_err("file at store path should fail");
+        let message = error.to_string();
+        assert!(
+            message.contains("exists but is not a directory"),
+            "{message}"
+        );
+        assert!(message.contains("agent-store init"), "{message}");
+
+        fs::remove_file(&store_path).expect("conflict file should be removed");
+        check_store_dir_conflict(&store_path).expect("absent store path is not a conflict");
+        fs::create_dir(&store_path).expect("store dir should be created");
+        check_store_dir_conflict(&store_path).expect("existing store dir is not a conflict");
+
+        fs::remove_dir_all(root).expect("test temp dir should be removed");
     }
 
     #[test]

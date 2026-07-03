@@ -284,6 +284,7 @@ pub enum StoreError {
     InvalidHookEvent(String),
     EmptyHookCommand,
     NotInitialized,
+    StoreDirConflict(PathBuf),
     NotFound(String),
     LinkNotFound {
         from: String,
@@ -343,6 +344,11 @@ impl fmt::Display for StoreError {
             Self::NotInitialized => {
                 write!(f, "no agent-store found; run 'agent-store init' first")
             }
+            Self::StoreDirConflict(path) => write!(
+                f,
+                "{} exists but is not a directory; remove or rename it, then run 'agent-store init'",
+                path.display()
+            ),
             Self::NotFound(id) => write!(f, "record '{id}' was not found"),
             Self::LinkNotFound { from, rel, to } => {
                 write!(f, "no such link {from} {rel} {to}")
@@ -406,10 +412,28 @@ fn find_project_root(start: &Path) -> Option<PathBuf> {
         .map(Path::to_path_buf)
 }
 
+/// Finds a `.agent-store` path on the walk up from `start` that exists but is
+/// not a directory (e.g. a stray file), so commands can explain the conflict
+/// instead of pointing users at `agent-store init` in a loop.
+fn find_store_dir_conflict(start: &Path) -> Option<PathBuf> {
+    start
+        .ancestors()
+        .map(|candidate| candidate.join(STORE_DIR))
+        .find(|path| !path.is_dir() && path.symlink_metadata().is_ok())
+}
+
 impl Store {
     pub fn open_project() -> StoreResult<Self> {
         let current_dir = std::env::current_dir()?;
-        let project_root = find_project_root(&current_dir).ok_or(StoreError::NotInitialized)?;
+        let project_root = match find_project_root(&current_dir) {
+            Some(root) => root,
+            None => {
+                if let Some(conflict) = find_store_dir_conflict(&current_dir) {
+                    return Err(StoreError::StoreDirConflict(conflict));
+                }
+                return Err(StoreError::NotInitialized);
+            }
+        };
         Self::open_project_root(project_root)
     }
 
@@ -1544,6 +1568,36 @@ impl Hasher for Fnv1a64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn store_dir_conflict_is_detected_on_the_walk_up() {
+        let root = std::env::temp_dir().join(format!("agent-store-test-{}", generate_id()));
+        let nested = root.join("a/b");
+        fs::create_dir_all(&nested).unwrap();
+        let conflict_path = root.join(STORE_DIR);
+        fs::write(&conflict_path, "not a directory").unwrap();
+
+        // A stray .agent-store file on an ancestor is reported as a conflict
+        // instead of being treated as "not initialized".
+        assert_eq!(
+            find_store_dir_conflict(&nested),
+            Some(conflict_path.clone())
+        );
+        assert_eq!(find_project_root(&nested), None);
+        let message = StoreError::StoreDirConflict(conflict_path.clone()).to_string();
+        assert!(
+            message.contains("exists but is not a directory"),
+            "{message}"
+        );
+
+        // A real store directory is not a conflict.
+        fs::remove_file(&conflict_path).unwrap();
+        fs::create_dir(&conflict_path).unwrap();
+        assert_eq!(find_store_dir_conflict(&nested), None);
+        assert_eq!(find_project_root(&nested), Some(root.clone()));
+
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn record_id_generation_uses_lowercase_base36() {

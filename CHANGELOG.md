@@ -23,6 +23,12 @@ First public release.
   skill paths, instruction blocks added/present per file, and a hint to
   create `AGENTS.md`/`CLAUDE.md` and re-run when neither exists — in both
   text and `--json` modes.
+- Clear diagnostics for a stray `.agent-store` file: `init` and store-opening
+  commands explain that the path exists but is not a directory instead of
+  surfacing a raw OS error or an inaccurate "run 'agent-store init' first"
+  hint. Unknown `--flags` on `find`/`ls`, `get`, `rm`, and `links` are
+  rejected with an "unknown flag" error pointing at `--help` (exit 2) instead
+  of falling through to positional parsing.
 - Records: `create`, `get`, `set`, `unset`, `rm` with kind and field-name
   validation, generated IDs, unique-prefix ID resolution, and created/updated
   timestamps.

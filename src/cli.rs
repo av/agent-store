@@ -198,6 +198,7 @@ fn parse_command(
             }
             let mut args = args;
             let timestamps = take_timestamps_flag(&mut args);
+            reject_unknown_flags("get", &args)?;
             let mut args = args.into_iter();
             let id = args
                 .next()
@@ -233,6 +234,7 @@ fn parse_command(
                 })?),
                 None => None,
             };
+            reject_unknown_flags(&command, &args)?;
             let query = join_query_args(&args);
             Ok(CliCommand::Find {
                 query,
@@ -277,6 +279,7 @@ fn parse_command(
             if command_help_requested(&args) {
                 return Ok(help_command(HelpTopic::Rm));
             }
+            reject_unknown_flags("rm", &args)?;
             let mut args = args.into_iter();
             let id = args
                 .next()
@@ -306,6 +309,7 @@ fn parse_command(
             if command_help_requested(&args) {
                 return Ok(help_command(HelpTopic::Links));
             }
+            reject_unknown_flags("links", &args)?;
             let mut args = args.into_iter();
             let id = args
                 .next()
@@ -447,6 +451,18 @@ fn hook_add_help_requested(args: &[String]) -> bool {
     }
 
     false
+}
+
+/// Rejects leftover `--flag` arguments after a command's known flags have
+/// been consumed, so an unknown flag reports itself instead of falling
+/// through to positional parsing (e.g. the find query parser).
+fn reject_unknown_flags(command: &str, args: &[String]) -> Result<(), CliParseError> {
+    if let Some(flag) = args.iter().find(|arg| arg.starts_with("--")) {
+        return Err(CliParseError::new(format!(
+            "unknown flag '{flag}' for {command}; see 'agent-store {command} --help'"
+        )));
+    }
+    Ok(())
 }
 
 fn take_timestamps_flag(args: &mut Vec<String>) -> bool {
@@ -910,6 +926,32 @@ mod tests {
         ])
         .expect_err("repeated sort should fail");
         assert_eq!(error.to_string(), "--sort may only be given once");
+    }
+
+    #[test]
+    fn unknown_flags_report_the_flag_instead_of_falling_through() {
+        let error = parse_args(["find".to_owned(), "--unknown-flag".to_owned()])
+            .expect_err("unknown find flag should fail");
+        assert_eq!(
+            error.to_string(),
+            "unknown flag '--unknown-flag' for find; see 'agent-store find --help'"
+        );
+
+        let error = parse_args(["ls".to_owned(), "kind=task".to_owned(), "--nope".to_owned()])
+            .expect_err("unknown ls flag should fail");
+        assert_eq!(
+            error.to_string(),
+            "unknown flag '--nope' for ls; see 'agent-store ls --help'"
+        );
+
+        for command in ["get", "rm", "links"] {
+            let error = parse_args([command.to_owned(), "--bogus".to_owned(), "abc".to_owned()])
+                .expect_err("unknown flag should fail");
+            assert_eq!(
+                error.to_string(),
+                format!("unknown flag '--bogus' for {command}; see 'agent-store {command} --help'")
+            );
+        }
     }
 
     #[test]
