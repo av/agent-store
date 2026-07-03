@@ -1,5 +1,11 @@
 <h1 align="center"><img src="assets/logo.svg" alt="agent-store" width="470"></h1>
 
+<p align="center">
+  <a href="https://github.com/av/agent-store/actions/workflows/ci.yml"><img src="https://github.com/av/agent-store/actions/workflows/ci.yml/badge.svg?branch=master" alt="CI"></a>
+  <a href="https://github.com/av/agent-store/releases/latest"><img src="https://img.shields.io/github/v/release/av/agent-store" alt="Latest release"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
+</p>
+
 ![agent-store demo: init, create records, query with the find language, ctx summary](assets/demo.gif)
 
 A project-local memory and context store for AI coding agents — records, links, hooks, and compact context via one CLI.
