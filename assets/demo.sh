@@ -2,13 +2,14 @@
 # Source script for the README demo GIF.
 #
 # Render with:
-#   asciinema rec --overwrite -c "bash assets/demo.sh" demo.cast
+#   asciinema rec --overwrite --cols 96 --rows 32 -c "bash assets/demo.sh" demo.cast
 #   agg --font-size 17 --theme monokai --last-frame-duration 4 demo.cast assets/demo.gif
 #
 # Requires `agent-store` on PATH. Runs in a temp directory.
 set -euo pipefail
 
 cd "$(mktemp -d)"
+touch AGENTS.md # so init demonstrates the instructions block install
 
 PROMPT=$'\033[1;32m$\033[0m '
 
