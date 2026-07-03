@@ -335,7 +335,8 @@ fn parse_command(
         }
         "hook" => parse_hook_command(args),
         _ => Err(CliParseError::with_usage(format!(
-            "unrecognized command '{command}'"
+            "unrecognized command '{command}'{}",
+            did_you_mean(&command, COMMANDS)
         ))),
     }
 }
@@ -388,7 +389,8 @@ fn parse_hook_command(args: Vec<String>) -> Result<CliCommand, CliParseError> {
             parse_hook_runs_args(args.into_iter().skip(1))
         }
         Some(command) => Err(CliParseError::new(format!(
-            "unrecognized hook command '{command}'"
+            "unrecognized hook command '{command}'{}",
+            did_you_mean(command, HOOK_COMMANDS)
         ))),
         None => Err(CliParseError::new("hook requires add, ls, rm, or runs")),
     }
@@ -426,6 +428,49 @@ fn parse_hook_runs_args(args: impl Iterator<Item = String>) -> Result<CliCommand
     }
 
     Ok(CliCommand::Hook(HookCliCommand::Runs { limit, run_id }))
+}
+
+/// Top-level command names and aliases, used for typo suggestions.
+const COMMANDS: &[&str] = &[
+    "init", "create", "cr", "get", "find", "ls", "set", "unset", "rm", "link", "unlink", "links",
+    "ctx", "context", "hook",
+];
+
+/// Hook subcommand names, used for typo suggestions.
+const HOOK_COMMANDS: &[&str] = &["add", "ls", "rm", "runs"];
+
+/// Returns a " (did you mean '<command>'?)" suffix when `input` is within
+/// edit distance 2 of a known command, and an empty string otherwise. The
+/// distance is also required to be smaller than the input length so that
+/// short garbage (e.g. "x") does not suggest unrelated short commands.
+fn did_you_mean(input: &str, candidates: &[&str]) -> String {
+    let input = input.to_ascii_lowercase();
+    candidates
+        .iter()
+        .map(|candidate| (levenshtein(&input, candidate), candidate))
+        .filter(|(distance, _)| *distance <= 2 && *distance < input.chars().count())
+        .min_by_key(|(distance, _)| *distance)
+        .map(|(_, candidate)| format!(" (did you mean '{candidate}'?)"))
+        .unwrap_or_default()
+}
+
+fn levenshtein(a: &str, b: &str) -> usize {
+    let a: Vec<char> = a.chars().collect();
+    let b: Vec<char> = b.chars().collect();
+    let mut previous: Vec<usize> = (0..=b.len()).collect();
+
+    for (row, a_char) in a.iter().enumerate() {
+        let mut current = vec![row + 1];
+        for (column, b_char) in b.iter().enumerate() {
+            let substitution = previous[column] + usize::from(a_char != b_char);
+            let insertion = current[column] + 1;
+            let deletion = previous[column + 1] + 1;
+            current.push(substitution.min(insertion).min(deletion));
+        }
+        previous = current;
+    }
+
+    previous[b.len()]
 }
 
 fn help_command(topic: HelpTopic) -> CliCommand {
@@ -1102,5 +1147,48 @@ mod tests {
 
         assert_eq!(error.to_string(), "unrecognized command 'missing'");
         assert!(error.include_usage());
+    }
+
+    #[test]
+    fn typoed_commands_suggest_the_nearest_command() {
+        for (typo, suggestion) in [
+            ("creat", "create"),
+            ("finde", "find"),
+            ("lnk", "link"),
+            ("contxt", "context"),
+            ("hok", "hook"),
+            ("CREATE", "create"),
+        ] {
+            let error =
+                parse_args([typo.to_owned()]).expect_err("unrecognized command should fail");
+            assert_eq!(
+                error.to_string(),
+                format!("unrecognized command '{typo}' (did you mean '{suggestion}'?)")
+            );
+            assert!(error.include_usage());
+        }
+    }
+
+    #[test]
+    fn distant_or_short_typos_get_no_suggestion() {
+        for typo in ["missing", "x", "c"] {
+            let error =
+                parse_args([typo.to_owned()]).expect_err("unrecognized command should fail");
+            assert_eq!(error.to_string(), format!("unrecognized command '{typo}'"));
+        }
+    }
+
+    #[test]
+    fn typoed_hook_commands_suggest_the_nearest_hook_command() {
+        let error = parse_args(["hook".to_owned(), "runz".to_owned()])
+            .expect_err("unrecognized hook command should fail");
+        assert_eq!(
+            error.to_string(),
+            "unrecognized hook command 'runz' (did you mean 'runs'?)"
+        );
+
+        let error = parse_args(["hook".to_owned(), "nothing".to_owned()])
+            .expect_err("unrecognized hook command should fail");
+        assert_eq!(error.to_string(), "unrecognized hook command 'nothing'");
     }
 }

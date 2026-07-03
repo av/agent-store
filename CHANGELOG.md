@@ -37,6 +37,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Clearer CLI errors: kind and field-name validation errors now list the
   disallowed characters and echo the offending name, and queries using
   uppercase `AND`/`OR`/`NOT` get a hint that query keywords are lowercase.
+- Typo'd commands now get a "did you mean" suggestion
+  (`agent-store creat` suggests `create`, `hook runz` suggests `runs`).
+- The lowercase-keyword hint now also covers uppercase `AND`/`OR`/`NOT`
+  in the middle of a query expression, not just trailing keywords.
 
 ### Fixed
 

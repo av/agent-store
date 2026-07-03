@@ -97,18 +97,10 @@ impl Query {
             let token = parser
                 .peek()
                 .expect("unfinished parser should have a token");
-            if let Token::Word(word) = token {
-                let lower = word.to_ascii_lowercase();
-                if matches!(lower.as_str(), "and" | "or" | "not") && lower != *word {
-                    return Err(QueryError::new(format!(
-                        "unexpected token '{word}' \
-                         (query keywords are lowercase: and, or, not)"
-                    )));
-                }
-            }
             return Err(QueryError::new(format!(
-                "unexpected token {}",
-                describe_token(token)
+                "unexpected token {}{}",
+                describe_token(token),
+                token_case_hint(token)
             )));
         }
 
@@ -273,11 +265,13 @@ impl ComparisonOp {
             Some(Token::GreaterOrEqual) => Ok(Self::GreaterOrEqual),
             Some(Token::Contains) => Ok(Self::Contains),
             Some(token) => Err(QueryError::new(format!(
-                "expected comparison operator after '{field}', found {}",
-                describe_token(&token)
+                "expected comparison operator after '{field}', found {}{}",
+                describe_token(&token),
+                lowercase_keyword_hint(field)
             ))),
             None => Err(QueryError::new(format!(
-                "expected comparison operator after '{field}'"
+                "expected comparison operator after '{field}'{}",
+                lowercase_keyword_hint(field)
             ))),
         }
     }
@@ -428,9 +422,10 @@ impl Parser {
         match self.next() {
             Some(token) if token == expected => Ok(()),
             Some(token) => Err(QueryError::new(format!(
-                "expected {}, found {}",
+                "expected {}, found {}{}",
                 describe_token(&expected),
-                describe_token(&token)
+                describe_token(&token),
+                token_case_hint(&token)
             ))),
             None => Err(QueryError::new(format!(
                 "expected {}",
@@ -581,6 +576,24 @@ fn trailing_continuation_bytes(bytes: &[u8], from: usize) -> usize {
         .iter()
         .take_while(|byte| (0x80..0xC0).contains(*byte))
         .count()
+}
+
+/// Returns a hint suffix when `word` is an uppercase (or mixed-case)
+/// spelling of a boolean keyword, and an empty string otherwise.
+fn lowercase_keyword_hint(word: &str) -> &'static str {
+    let lower = word.to_ascii_lowercase();
+    if matches!(lower.as_str(), "and" | "or" | "not") && lower != word {
+        " (query keywords are lowercase: and, or, not)"
+    } else {
+        ""
+    }
+}
+
+fn token_case_hint(token: &Token) -> &'static str {
+    match token {
+        Token::Word(word) => lowercase_keyword_hint(word),
+        _ => "",
+    }
 }
 
 fn describe_token(token: &Token) -> String {
@@ -930,6 +943,41 @@ mod tests {
             Query::parse("link.out=blocks and not link.in=blocks").expect("query should parse");
 
         assert!(query.matches_with_links(&record(), &links()));
+    }
+
+    #[test]
+    fn uppercase_keywords_hint_at_lowercase_spelling() {
+        for query in [
+            // trailing keyword after a complete expression
+            "kind=task OR x=1",
+            "kind=task AND x=1",
+            // keyword parsed as a field name mid-expression
+            "kind=task and OR x=1",
+            "kind=task and NOT status=done",
+            // keyword at the end of input, after the operator position
+            "kind=task and OR",
+            // keyword where a closing parenthesis is expected
+            "(kind=task OR x=1",
+        ] {
+            let error = Query::parse(query).expect_err("query should not parse");
+            assert!(
+                error
+                    .to_string()
+                    .contains("query keywords are lowercase: and, or, not"),
+                "query should hint lowercase keywords: {query} -> {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn non_keyword_parse_errors_do_not_hint_at_keywords() {
+        for query in ["kind=task extra=", "kind=task and STATUS done"] {
+            let error = Query::parse(query).expect_err("query should not parse");
+            assert!(
+                !error.to_string().contains("query keywords are lowercase"),
+                "query should not hint keywords: {query} -> {error}"
+            );
+        }
     }
 
     #[test]
