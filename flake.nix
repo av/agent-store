@@ -12,7 +12,7 @@
         pkgs = import nixpkgs { inherit system; };
         agent-store = pkgs.rustPlatform.buildRustPackage {
           pname = "agent-store";
-          version = "0.1.0";
+          version = "0.1.1";
 
           src = self;
 

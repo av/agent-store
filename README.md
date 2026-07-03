@@ -52,7 +52,7 @@ Or download a prebuilt binary for Linux (x86_64 gnu/musl), macOS (x86_64/arm64),
 Each release asset has a matching `.sha256` file. Download both into the same directory and check:
 
 ```sh
-tag=v0.1.0
+tag=v0.1.1
 asset=agent-store-$tag-x86_64-unknown-linux-gnu.tar.gz
 curl -fsSLO "https://github.com/av/agent-store/releases/download/$tag/$asset"
 curl -fsSLO "https://github.com/av/agent-store/releases/download/$tag/$asset.sha256"
