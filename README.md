@@ -12,7 +12,7 @@ It is built for agents (Claude Code, Codex, and anything else that can run a CLI
 cargo install --git https://github.com/av/agent-store
 ```
 
-Prebuilt binaries are coming with the first tagged release.
+Or download a prebuilt binary for Linux (x86_64 gnu/musl), macOS (x86_64/arm64), or Windows (x86_64) from [GitHub Releases](https://github.com/av/agent-store/releases) — each archive comes with a SHA-256 checksum.
 
 ## Quickstart
 
