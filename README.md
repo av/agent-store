@@ -76,6 +76,7 @@ Run `agent-store <command> --help` for full details on any of them.
 - [Hooks](docs/hooks.md) — events, environment variables, limits, inspecting runs
 - [JSON output and import](docs/json.md) — `--json` shapes, `create --stdin`, pipeline recipes
 - [Skills and agent integration](docs/skills.md) — what `init` installs and the conventions agents pick up
+- [Examples](examples/README.md) — runnable scripts: task tracker, decision log, session handoff, JSONL pipelines, audit hooks
 
 ## Query language
 
