@@ -43,9 +43,29 @@ nix profile install github:av/agent-store
 
 The Nix package includes the man page and bash/zsh/fish completions; `nix develop` gives a dev shell with the Rust toolchain, clippy, and rustfmt.
 
-Or download a prebuilt binary for Linux (x86_64 gnu/musl), macOS (x86_64/arm64), or Windows (x86_64) from [GitHub Releases](https://github.com/av/agent-store/releases) — each archive comes with a SHA-256 checksum. Linux/macOS assets are `.tar.gz`; the Windows asset is a `.zip`.
+Or download a prebuilt binary for Linux (x86_64 gnu/musl), macOS (x86_64/arm64), or Windows (x86_64) from [GitHub Releases](https://github.com/av/agent-store/releases) — each archive comes with a SHA-256 checksum. Linux/macOS assets are `.tar.gz`; the Windows asset is a `.zip`. [cargo-binstall](https://github.com/cargo-bins/cargo-binstall) users can fetch the prebuilt binary without compiling: `cargo binstall --git https://github.com/av/agent-store agent-store`.
 
 **Windows:** the install script is unix-only — download `agent-store-<tag>-x86_64-pc-windows-msvc.zip` from Releases, unzip, and put `agent-store.exe` on your `PATH` (or use `cargo install` above). The core CLI works natively; [hooks](docs/hooks.md) run their commands via `bash -c`, so hooks require a `bash` on `PATH` (Git Bash or WSL) — everything else works without one. The bundled shell completions and man page below are for unix shells.
+
+### Verifying release downloads
+
+Each release asset has a matching `.sha256` file. Download both into the same directory and check:
+
+```sh
+tag=v0.1.0
+asset=agent-store-$tag-x86_64-unknown-linux-gnu.tar.gz
+curl -fsSLO "https://github.com/av/agent-store/releases/download/$tag/$asset"
+curl -fsSLO "https://github.com/av/agent-store/releases/download/$tag/$asset.sha256"
+sha256sum -c "$asset.sha256"   # macOS: shasum -a 256 -c "$asset.sha256"
+```
+
+Releases after v0.1.0 also carry signed [build provenance attestations](https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations) proving each archive was built by this repository's release workflow. Verify with the [GitHub CLI](https://cli.github.com):
+
+```sh
+gh attestation verify "$asset" --repo av/agent-store
+```
+
+The `curl | sh` installer above performs the checksum verification automatically.
 
 ### Shell completions and man page
 
