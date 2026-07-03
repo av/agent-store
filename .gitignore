@@ -1,1 +1,13 @@
 /target/
+
+# Local agent-store data
+.agent-store/
+
+# Agent harness internals (not part of the product)
+.claude/
+
+# Internal workflow skills — only the agent-store* skills ship with the product
+.agents/skills/*
+!.agents/skills/agent-store/
+!.agents/skills/agent-store-patterns/
+!.agents/skills/agent-store-pipelines/
