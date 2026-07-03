@@ -1,5 +1,5 @@
 use agent_store::query::Query;
-use agent_store::store::Store;
+use agent_store::store::{Store, StoreError};
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
@@ -92,6 +92,37 @@ fn persistence_interface_allows_behavior_tests_without_sqlite_layout() {
     assert_eq!(summary.records_by_kind.get("note"), Some(&1));
     assert_eq!(summary.link_count, 1);
     assert_eq!(summary.links_by_relation.get("mentions"), Some(&1));
+}
+
+#[test]
+fn self_links_are_rejected() {
+    let project = TestProject::new("self-links");
+    let mut store = Store::open_project_root(&project.root).expect("open store at project root");
+
+    let task = store
+        .create_record("task", fields(&[("title", "Solo")]))
+        .expect("create task through Store API");
+
+    // Linking a record to itself is rejected, even via a short prefix that
+    // resolves to the same record.
+    let error = store
+        .link_records(&task.id, "blocks", &task.id[..4])
+        .expect_err("self-link must be rejected");
+    assert!(matches!(&error, StoreError::SelfLink(id) if *id == task.id));
+    assert_eq!(
+        error.to_string(),
+        format!("cannot link a record to itself ({})", task.id)
+    );
+
+    // Nothing was persisted: no links, no store events for the failed link.
+    let links = store
+        .links_for_record(&task.id)
+        .expect("load links through Store API");
+    assert!(links.links.is_empty());
+    let summary = store
+        .quick_context_summary()
+        .expect("summarize store through Store API");
+    assert_eq!(summary.link_count, 0);
 }
 
 #[test]

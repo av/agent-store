@@ -170,6 +170,9 @@
   id: l7a
   command: bash tests/facts/cli_links.sh find_filters_links
   tags: [implemented]
+- label: agent-store link <from> <rel> <to> rejects linking a Record to itself, including via distinct short prefixes resolving to the same Record: it exits non-zero with error cannot link a record to itself (<id>) on stderr (plain and --json envelope), prints nothing on stdout, creates no Link, fires no Hooks, and records no Store Event
+  command: bash tests/facts/cli_links.sh self_link_rejected
+  tags: [implemented]
 
 ## help
 - label: agent-store documented subcommands, aliases, and hook subcommands treat -h and --help as read-only help: each exits 0, prints command-specific usage, and does not create, update, delete, link, unlink, or run Hooks

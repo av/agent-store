@@ -44,6 +44,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`agent-store creat` suggests `create`, `hook runz` suggests `runs`).
 - The lowercase-keyword hint now also covers uppercase `AND`/`OR`/`NOT`
   in the middle of a query expression, not just trailing keywords.
+- `link` now rejects linking a record to itself
+  (`error: cannot link a record to itself (<id>)`) instead of silently
+  creating a self-edge that counted as both an incoming and an outgoing
+  link. Nothing is written on rejection; `unlink` can still remove
+  self-links created by earlier versions.
 
 ### Fixed
 

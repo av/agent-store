@@ -291,6 +291,7 @@ pub enum StoreError {
         rel: String,
         to: String,
     },
+    SelfLink(String),
     AmbiguousId(String),
     HookNotFound(String),
     HookRunNotFound(i64),
@@ -352,6 +353,9 @@ impl fmt::Display for StoreError {
             Self::NotFound(id) => write!(f, "record '{id}' was not found"),
             Self::LinkNotFound { from, rel, to } => {
                 write!(f, "no such link {from} {rel} {to}")
+            }
+            Self::SelfLink(id) => {
+                write!(f, "cannot link a record to itself ({id})")
             }
             Self::AmbiguousId(id) => write!(f, "record ID prefix '{id}' matches multiple records"),
             Self::HookNotFound(id) => write!(f, "hook '{id}' was not found"),
@@ -888,6 +892,9 @@ impl Store {
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         let from_id = resolve_id(&tx, from_prefix)?;
         let to_id = resolve_id(&tx, to_prefix)?;
+        if from_id == to_id {
+            return Err(StoreError::SelfLink(from_id));
+        }
         tx.execute(
             r#"
             INSERT OR IGNORE INTO record_links (from_record_id, rel, to_record_id)

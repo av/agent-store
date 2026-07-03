@@ -194,8 +194,58 @@ $target_line"
     test -z "$got"
     ;;
 
+  self_link_rejected)
+    cd "$tmp"
+    run_agent_store init >/tmp/agent-store-self-link-init.out
+    id="$(run_agent_store create task title=solo status=open)"
+    prefix="$(printf "%s" "$id" | cut -c1-4)"
+    hook_id="$(run_agent_store hook add link 'kind=task' -- 'true')"
+
+    expect_self_link_rejected() {
+      local json_flag="$1"
+      shift
+      set +e
+      if [ "$json_flag" = "json" ]; then
+        run_agent_store --json link "$@" >"$tmp/self.out" 2>"$tmp/self.err"
+      else
+        run_agent_store link "$@" >"$tmp/self.out" 2>"$tmp/self.err"
+      fi
+      local code="$?"
+      set -e
+      test "$code" != "0"
+      test ! -s "$tmp/self.out"
+      if [ "$json_flag" = "json" ]; then
+        grep -Fq "{\"error\":\"cannot link a record to itself ($id)\"}" "$tmp/self.err"
+      else
+        grep -Fq "error: cannot link a record to itself ($id)" "$tmp/self.err"
+      fi
+    }
+
+    # Full ID, short prefix (resolving to the same record), and --json all fail.
+    expect_self_link_rejected plain "$id" blocks "$id"
+    expect_self_link_rejected plain "$prefix" blocks "$id"
+    expect_self_link_rejected json "$id" duplicate_of "$prefix"
+
+    # No link exists, no hook fired, no link store event was recorded.
+    links="$(run_agent_store links "$id")"
+    test -z "$links"
+    runs="$(run_agent_store hook runs)"
+    test "$runs" = "No hook runs recorded yet."
+    python3 - .agent-store/store.sqlite <<'PY'
+import sqlite3
+import sys
+
+con = sqlite3.connect(sys.argv[1])
+assert con.execute("select count(*) from record_links").fetchone()[0] == 0
+link_events = con.execute(
+    "select count(*) from store_events where event_type = 'link'"
+).fetchone()[0]
+assert link_events == 0, link_events
+PY
+    ;;
+
   *)
-    echo "usage: $0 {link_adds_idempotently|unlink_removes_and_missing_fails|links_lists_deterministically|find_filters_links}" >&2
+    echo "usage: $0 {link_adds_idempotently|unlink_removes_and_missing_fails|links_lists_deterministically|find_filters_links|self_link_rejected}" >&2
     exit 2
     ;;
 esac

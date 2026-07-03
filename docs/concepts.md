@@ -98,6 +98,11 @@ $ agent-store find 'link.in=implements'
 q2n3rt decision area=http choice=reqwest reason='rustls default, no openssl build dep'
 ```
 
+A record cannot link to itself — `link` rejects it with
+`error: cannot link a record to itself (<id>)`. A self-edge would count
+as both an incoming and an outgoing link of the same record and almost
+always indicates a typo'd ID.
+
 ## Queries
 
 `find` retrieves records with a small query language: comparisons over

@@ -606,6 +606,9 @@ fn main() {
                         );
                     }
                 }
+                Err(error @ StoreError::SelfLink(_)) => {
+                    fail(cli.json_output, 1, format!("{error}"));
+                }
                 Err(error) => {
                     fail(
                         cli.json_output,
