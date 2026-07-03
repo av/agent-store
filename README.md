@@ -30,10 +30,12 @@ Completion scripts for bash, zsh, and fish live in [`completions/`](completions/
 
 ```sh
 # bash
+mkdir -p ~/.local/share/bash-completion/completions
 cp completions/agent-store.bash ~/.local/share/bash-completion/completions/agent-store
-# zsh (any directory on your $fpath)
-cp completions/_agent-store /usr/share/zsh/site-functions/
+# zsh (any directory on your $fpath works; this one usually needs sudo)
+sudo cp completions/_agent-store /usr/share/zsh/site-functions/
 # fish
+mkdir -p ~/.config/fish/completions
 cp completions/agent-store.fish ~/.config/fish/completions/
 ```
 

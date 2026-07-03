@@ -30,6 +30,11 @@ jobs:
             os: windows-latest
     steps:
       - uses: actions/checkout@v4
+      # Cross toolchain for targets that differ from the host (linux musl).
+      - uses: taiki-e/setup-cross-toolchain-action@v1
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        with:
+          target: ${{ matrix.target }}
       - uses: taiki-e/upload-rust-binary-action@v1
         with:
           bin: agent-store
