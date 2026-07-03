@@ -123,4 +123,4 @@ They land in `.agents/skills/` and `.claude/skills/`, and are the deepest docume
 
 ## License
 
-TBD (coming with the first release).
+[MIT](LICENSE)

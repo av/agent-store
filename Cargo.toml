@@ -2,6 +2,13 @@
 name = "agent-store"
 version = "0.1.0"
 edition = "2021"
+description = "A local-first memory and context store for AI coding agents, backed by SQLite"
+license = "MIT"
+repository = "https://github.com/av/agent-store"
+readme = "README.md"
+keywords = ["agent", "memory", "cli", "sqlite", "context"]
+categories = ["command-line-utilities", "database"]
+exclude = [".agents/", ".claude/", "AGENTS.md"]
 
 [dependencies]
 libc = "0.2"
