@@ -91,3 +91,5 @@ shell-side `sort`, `head`, or `wc -l`:
 agent-store find kind=log --sort updated_at --desc --limit 10
 agent-store find kind=note --count
 ```
+
+See also: [FAQ](faq.md) — data format, concurrency, privacy, and limits.

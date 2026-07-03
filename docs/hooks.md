@@ -79,3 +79,5 @@ stderr:
 `--json hook runs` emits a `{"hook_runs":[...]}` array with `id`, `hook_id`,
 `event`, `record_id`, `exit_status`, `stdout`, `stderr`, and `created_at`
 per run.
+
+See also: [FAQ](faq.md) — data format, concurrency, privacy, and limits.
