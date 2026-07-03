@@ -14,3 +14,7 @@
 
 # Nix build output
 /result
+
+# Docs site build (mkdocs, see .github/workflows/docs.yml)
+/.docs-build/
+/site/

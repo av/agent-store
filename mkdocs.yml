@@ -1,0 +1,70 @@
+# Documentation site config (GitHub Pages) — built by .github/workflows/docs.yml.
+#
+# The existing README.md and docs/*.md are the single source of truth: the
+# workflow stages them (repo layout preserved, so relative links work
+# unchanged) into .docs-build/, which is this config's docs_dir. README.md
+# becomes the site index. To build locally:
+#
+#   pip install mkdocs-material
+#   .github/workflows/docs.yml has the staging commands (the "Stage docs" step)
+#   mkdocs build   # or: mkdocs serve
+site_name: agent-store
+site_description: Persistent memory and a project-local context store for AI coding agents — records, links, hooks, and compact context via one CLI.
+site_url: https://av.github.io/agent-store/
+repo_url: https://github.com/av/agent-store
+repo_name: av/agent-store
+edit_uri: edit/master/
+
+docs_dir: .docs-build
+
+nav:
+  - Overview: README.md
+  - Using with Claude Code: docs/claude-code.md
+  - Concepts: docs/concepts.md
+  - Query language: docs/queries.md
+  - Hooks: docs/hooks.md
+  - JSON output and import: docs/json.md
+  - Skills and agent integration: docs/skills.md
+  - Examples: examples/README.md
+  - FAQ: docs/faq.md
+  - Contributing: CONTRIBUTING.md
+  - Security: SECURITY.md
+  - Changelog: CHANGELOG.md
+
+theme:
+  name: material
+  icon:
+    repo: fontawesome/brands/github
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: green
+      accent: green
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: green
+      accent: green
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.footer
+    - navigation.sections
+    - content.code.copy
+    - search.suggest
+
+markdown_extensions:
+  - admonition
+  - pymdownx.superfences
+  - pymdownx.highlight
+  - pymdownx.inlinehilite
+  - toc:
+      permalink: true
+
+validation:
+  links:
+    absolute_links: warn
+    unrecognized_links: warn

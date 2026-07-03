@@ -27,7 +27,7 @@ their own — no per-session prompting.
 Each is a single `SKILL.md` with YAML frontmatter (`name`, `description`),
 the format Claude Code and other skill-aware harnesses load automatically.
 The tracked sources live in this repo under
-[`.agents/skills/`](../.agents/skills/).
+[`.agents/skills/`](https://github.com/av/agent-store/tree/master/.agents/skills).
 
 ## Conventions the skills teach agents
 

@@ -69,7 +69,7 @@ The `curl | sh` installer above performs the checksum verification automatically
 
 ### Shell completions and man page
 
-Completion scripts for bash, zsh, and fish live in [`completions/`](completions/):
+Completion scripts for bash, zsh, and fish live in [`completions/`](https://github.com/av/agent-store/tree/master/completions):
 
 ```sh
 # bash
