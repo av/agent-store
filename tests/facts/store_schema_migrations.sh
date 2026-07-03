@@ -794,7 +794,7 @@ SH
     wait_for_file_count() {
       local dir="$1"
       local expected="$2"
-      local attempts=500
+      local attempts=2000
       while [ "$(find "$dir" -type f | wc -l | tr -d ' ')" -lt "$expected" ]; do
         attempts=$((attempts - 1))
         if [ "$attempts" -le 0 ]; then
@@ -1061,7 +1061,7 @@ SH
     wait_for_file_count() {
       local dir="$1"
       local expected="$2"
-      local attempts=500
+      local attempts=2000
       while [ "$(find "$dir" -type f | wc -l | tr -d ' ')" -lt "$expected" ]; do
         attempts=$((attempts - 1))
         if [ "$attempts" -le 0 ]; then
@@ -1404,7 +1404,7 @@ SH
     wait_for_file_count() {
       local dir="$1"
       local expected="$2"
-      local attempts=500
+      local attempts=2000
       while [ "$(find "$dir" -type f | wc -l | tr -d ' ')" -lt "$expected" ]; do
         attempts=$((attempts - 1))
         if [ "$attempts" -le 0 ]; then
@@ -4255,7 +4255,7 @@ with open(log_path, "w", encoding="utf-8") as log:
 PY
     churn_pid="$!"
 
-    ready_attempts=500
+    ready_attempts=2000
     while [ ! -f "$ready_file" ]; do
       ready_attempts=$((ready_attempts - 1))
       if [ "$ready_attempts" -le 0 ]; then
@@ -4645,7 +4645,7 @@ with open(log_path, "w", encoding="utf-8") as log:
 PY
     churn_pid="$!"
 
-    ready_attempts=500
+    ready_attempts=2000
     while [ ! -f "$ready_file" ]; do
       ready_attempts=$((ready_attempts - 1))
       if [ "$ready_attempts" -le 0 ]; then

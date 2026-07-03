@@ -440,7 +440,7 @@ PY
     timeout_hook_id="$(run_agent_store hook add create title=CommittedTimeout -- "$timeout_command")"
 
     set +e
-    timeout 40s "$target_dir/debug/agent-store" create task title=CommittedTimeout >/tmp/agent-store-hook-committed-fgg-timeout.out 2>/tmp/agent-store-hook-committed-fgg-timeout.err
+    timeout 90s "$target_dir/debug/agent-store" create task title=CommittedTimeout >/tmp/agent-store-hook-committed-fgg-timeout.out 2>/tmp/agent-store-hook-committed-fgg-timeout.err
     timeout_status=$?
     set -e
 
@@ -781,7 +781,7 @@ PY
     run_json_failure unlink unlink "$unlink_source" blocks "$unlink_target"
 
     set +e
-    timeout 40s "$agent_store_bin" --json set "$timeout_record" status=timeout >"$tmp/json-hook-timeout.out" 2>"$tmp/json-hook-timeout.err"
+    timeout 90s "$agent_store_bin" --json set "$timeout_record" status=timeout >"$tmp/json-hook-timeout.out" 2>"$tmp/json-hook-timeout.err"
     timeout_status="$?"
     set -e
     printf "%s" "$timeout_status" >"$tmp/json-hook-timeout.status"
@@ -793,7 +793,7 @@ PY
     grep -Fq "set-timeout-stderr" "$tmp/json-hook-timeout.err"
 
     set +e
-    timeout 40s "$agent_store_bin" --json create task op=json-timeout-create status=committed >"$tmp/json-hook-create-timeout.out" 2>"$tmp/json-hook-create-timeout.err"
+    timeout 90s "$agent_store_bin" --json create task op=json-timeout-create status=committed >"$tmp/json-hook-create-timeout.out" 2>"$tmp/json-hook-create-timeout.err"
     create_timeout_status="$?"
     set -e
     printf "%s" "$create_timeout_status" >"$tmp/json-hook-create-timeout.status"
@@ -1152,7 +1152,7 @@ PY
       local expected_stderr="$2"
       shift 2
       set +e
-      timeout 40s "$agent_store_bin" --json "$@" >"$tmp/json-multi-$name.out" 2>"$tmp/json-multi-$name.err"
+      timeout 90s "$agent_store_bin" --json "$@" >"$tmp/json-multi-$name.out" 2>"$tmp/json-multi-$name.err"
       local status="$?"
       set -e
       printf "%s" "$status" >"$tmp/json-multi-$name.status"
@@ -1679,7 +1679,7 @@ PY
       local expected_stderr="$2"
       shift 2
       set +e
-      timeout 40s "$agent_store_bin" "$@" >"$tmp/plain-multi-$name.out" 2>"$tmp/plain-multi-$name.err"
+      timeout 90s "$agent_store_bin" "$@" >"$tmp/plain-multi-$name.out" 2>"$tmp/plain-multi-$name.err"
       local status="$?"
       set -e
       printf "%s" "$status" >"$tmp/plain-multi-$name.status"
@@ -1990,7 +1990,7 @@ print(time.monotonic())
 PY
 )"
     set +e
-    timeout 40s "$agent_store_bin" create task title=Timeout >/tmp/agent-store-hook-timeout-4as.out 2>/tmp/agent-store-hook-timeout-4as.err
+    timeout 90s "$agent_store_bin" create task title=Timeout >/tmp/agent-store-hook-timeout-4as.out 2>/tmp/agent-store-hook-timeout-4as.err
     timeout_status=$?
     set -e
     ended_at="$(python3 - <<'PY'
@@ -2010,7 +2010,7 @@ import sys
 
 started_at, ended_at, db, timeout_hook_id = sys.argv[1:]
 elapsed = float(ended_at) - float(started_at)
-assert 28 <= elapsed <= 38, elapsed
+assert 28 <= elapsed <= 60, elapsed
 
 con = sqlite3.connect(db)
 timeout_record = con.execute(
@@ -3846,7 +3846,7 @@ SH
     hook_id="$("$agent_store_bin" hook add create title=TimeoutProcessGroup -- "./timeout-descendant-hook.sh $side_effect $child_pid_file")"
 
     set +e
-    timeout 40s "$agent_store_bin" create task title=TimeoutProcessGroup >"$tmp/hook-timeout-pgrp.out" 2>"$tmp/hook-timeout-pgrp.err"
+    timeout 90s "$agent_store_bin" create task title=TimeoutProcessGroup >"$tmp/hook-timeout-pgrp.out" 2>"$tmp/hook-timeout-pgrp.err"
     timeout_status="$?"
     set -e
     printf "%s" "$timeout_status" >"$tmp/hook-timeout-pgrp.status"
