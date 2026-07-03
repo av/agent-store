@@ -33,6 +33,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   config for auto-generated release notes (`.github/release.yml`).
 - Crate-level rustdoc in `src/lib.rs` and fuller Cargo.toml metadata
   (homepage, documentation, keywords) for registry listings.
+- Documentation website: MkDocs site built from the README and `docs/`,
+  deployed to GitHub Pages by a new `docs.yml` workflow.
+- `examples/memory-graph.sh`: linked memory graph across sessions —
+  `link.in`/`link.out`/`link.out.<rel>=<id>` traversal, `ctx` relation
+  counts, self-link rejection, and the `--json` error envelope.
 
 ### Changed
 
@@ -56,6 +61,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `install.sh` downloads the checksum file under its actual release asset
   name, so checksum verification runs instead of being skipped.
+- Example scripts resolve a relative `AGENT_STORE` path to an absolute one
+  before changing into their temp directory, so the documented
+  `AGENT_STORE=target/release/agent-store ./examples/<script>.sh`
+  invocation works.
 
 ## [0.1.0] - 2026-07-03
 

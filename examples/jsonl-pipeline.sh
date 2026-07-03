@@ -12,6 +12,11 @@
 set -euo pipefail
 
 AGENT_STORE="${AGENT_STORE:-agent-store}"
+# Resolve a relative binary path (e.g. target/release/agent-store) to an
+# absolute one before we cd into the temp directory.
+case "$AGENT_STORE" in
+  */*) AGENT_STORE="$(cd "$(dirname "$AGENT_STORE")" && pwd)/${AGENT_STORE##*/}" ;;
+esac
 src="$(mktemp -d)"
 dst="$(mktemp -d)"
 trap 'rm -rf "$src" "$dst"' EXIT
