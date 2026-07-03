@@ -4,6 +4,16 @@ Hooks run a bash command after matching store mutations — notifications,
 mirroring state into files, nudging an agent. The mutation commits before
 its hooks run, so a hook always sees the store post-change.
 
+Hook commands are always executed as `bash -c '<command>'`. On Linux and
+macOS this just works. On Windows there is no builtin bash: hooks require
+a `bash` on `PATH`, such as the one shipped with Git for Windows (Git
+Bash) or WSL. Without one, the store mutation itself still commits, but
+the hook fails to start and the command exits with an error. Two further
+Windows caveats: on timeout only the `bash` process itself is killed
+(child processes it spawned may survive; on unix the whole process group
+is terminated), and hook runs report a plain exit code rather than unix
+signal names.
+
 ## Managing hooks
 
 ```sh
