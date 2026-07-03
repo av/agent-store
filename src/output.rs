@@ -275,6 +275,12 @@ pub fn init_json(
     })
 }
 
+/// Envelope for runtime errors in `--json` mode: `{"error":"<message>"}`.
+/// Printed to stderr so stdout stays data-only in both output modes.
+pub fn error_json(message: &str) -> Value {
+    json!({ "error": message })
+}
+
 pub fn count_json(count: usize) -> Value {
     json!({ "count": count })
 }
@@ -685,6 +691,18 @@ fn is_shell_safe_byte(byte: u8) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn error_json_wraps_message_and_escapes_quotes() {
+        assert_eq!(
+            error_json("failed to get record: no such record").to_string(),
+            r#"{"error":"failed to get record: no such record"}"#
+        );
+        assert_eq!(
+            error_json(r#"bad "value" here"#).to_string(),
+            r#"{"error":"bad \"value\" here"}"#
+        );
+    }
 
     #[test]
     fn record_output_is_stable_and_shell_quoted() {

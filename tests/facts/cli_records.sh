@@ -722,9 +722,61 @@ assert rm_data == {"status": "removed", "record": expected_unset}, rm_data
 PY
     ;;
 
+  json_error_envelope)
+    cd "$tmp"
+
+    # Before init: runtime error is a JSON object on stderr, exit 1.
+    set +e
+    run_agent_store --json get abcdef >/tmp/agent-store-jerr-out 2>/tmp/agent-store-jerr-err
+    status=$?
+    set -e
+    test "$status" -eq 1
+    test ! -s /tmp/agent-store-jerr-out
+    python3 - /tmp/agent-store-jerr-err <<'PY'
+import json, sys
+data = json.loads(open(sys.argv[1]).read())
+assert set(data) == {"error"}, data
+assert "no agent-store found" in data["error"], data
+PY
+
+    run_agent_store init >/tmp/agent-store-jerr-init.out
+
+    # Unknown record ID: envelope message matches plain mode minus the prefix.
+    set +e
+    run_agent_store --json get zzzzzz >/tmp/agent-store-jerr-out 2>/tmp/agent-store-jerr-err
+    json_status=$?
+    run_agent_store get zzzzzz >/tmp/agent-store-jerr-plain-out 2>/tmp/agent-store-jerr-plain-err
+    plain_status=$?
+    set -e
+    test "$json_status" -eq 1
+    test "$plain_status" -eq 1
+    test ! -s /tmp/agent-store-jerr-out
+    plain_msg="$(sed "s/^error: //" /tmp/agent-store-jerr-plain-err)"
+    json_msg="$(python3 -c "import json,sys; print(json.load(open(\"/tmp/agent-store-jerr-err\"))[\"error\"])")"
+    test "$json_msg" = "$plain_msg"
+
+    # Invalid query keeps exit code 2 with the envelope.
+    set +e
+    run_agent_store --json find "kind=" >/tmp/agent-store-jerr-out 2>/tmp/agent-store-jerr-err
+    status=$?
+    set -e
+    test "$status" -eq 2
+    test ! -s /tmp/agent-store-jerr-out
+    grep -Fq "{\"error\":\"invalid query:" /tmp/agent-store-jerr-err
+
+    # Usage/parse errors stay plain text even with --json.
+    set +e
+    run_agent_store --json definitely-not-a-command >/tmp/agent-store-jerr-out 2>/tmp/agent-store-jerr-err
+    status=$?
+    set -e
+    test "$status" -eq 2
+    grep -q "^error: " /tmp/agent-store-jerr-err
+    ;;
+
   uninitialized_store_errors)
     cd "$tmp"
     expected_err="error: no agent-store found; run 'agent-store init' first"
+    expected_json_err="{\"error\":\"no agent-store found; run 'agent-store init' first\"}"
     baseline="$(find . | sort)"
     for cmd in \
       "create task title=Write" \
@@ -750,7 +802,14 @@ PY
       set -e
       test "$status" -eq 1
       test ! -s /tmp/agent-store-noinit-8fz.out
-      grep -Fxq "$expected_err" /tmp/agent-store-noinit-8fz.err
+      case "$cmd" in
+        --json*)
+          grep -Fxq "$expected_json_err" /tmp/agent-store-noinit-8fz.err
+          ;;
+        *)
+          grep -Fxq "$expected_err" /tmp/agent-store-noinit-8fz.err
+          ;;
+      esac
     done
     test "$(find . | sort)" = "$baseline"
     test ! -e .agent-store
@@ -952,7 +1011,7 @@ PY
     ;;
 
   *)
-    echo "usage: $0 {create_alias_matches_create|find_alias_matches_find|set_updates_fields|unset_removes_fields|find_filters_records|arbitrary_field_queries|query_boolean_syntax|query_contains_operator|query_argument_parity|query_typed_values|field_empty_null_unset_semantics|record_id_generation_contract|record_id_resolution_errors|json_output|uninitialized_store_errors|broken_pipe_exits_quietly|identifier_validation_rejects_unsafe_names|create_stdin_imports_jsonl|init_output_summary}" >&2
+    echo "usage: $0 {create_alias_matches_create|find_alias_matches_find|set_updates_fields|unset_removes_fields|find_filters_records|arbitrary_field_queries|query_boolean_syntax|query_contains_operator|query_argument_parity|query_typed_values|field_empty_null_unset_semantics|record_id_generation_contract|record_id_resolution_errors|json_output|json_error_envelope|uninitialized_store_errors|broken_pipe_exits_quietly|identifier_validation_rejects_unsafe_names|create_stdin_imports_jsonl|init_output_summary}" >&2
     exit 2
     ;;
 esac

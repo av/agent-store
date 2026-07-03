@@ -72,6 +72,9 @@
   id: jjy
   command: bash tests/facts/cli_records.sh json_output
   tags: [implemented]
+- label: under --json, runtime errors print a one-line {"error":"<message>"} object on stderr with the same message text and exit codes as plain mode (1 runtime, 2 invalid query) and nothing on stdout, while usage errors from argument parsing stay plain text
+  command: bash tests/facts/cli_records.sh json_error_envelope
+  tags: [implemented]
 - label: agent-store exits quietly with code 141 and no panic or stderr output when stdout's reader closes early during find or --json get output
   command: bash tests/facts/cli_records.sh broken_pipe_exits_quietly
   tags: [implemented]

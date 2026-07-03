@@ -29,6 +29,27 @@ object (`fields_by_kind`, `recent_records`, counts, `latest_activity_at`).
 
 Records always include `created_at` and `updated_at`.
 
+## Errors
+
+When `--json` is active, runtime errors (missing store, unknown record ID,
+invalid query, failed mutation, hook failures) print a one-line
+`{"error":"<message>"}` object on **stderr** and exit non-zero — the same
+exit codes as plain mode (1 for runtime failures, 2 for invalid queries).
+Errors stay on stderr so stdout is always either a success envelope or
+empty; pipe stdout to `jq` without worrying about error objects mixed in,
+and parse stderr when the exit code is non-zero:
+
+```sh
+$ agent-store --json get zzzzzz; echo "exit=$?"
+{"error":"failed to get record: record 'zzzzzz' was not found"}
+exit=1
+```
+
+The message text matches plain mode's `error: <message>` without the
+prefix. One boundary: usage errors from argument parsing (unknown command,
+missing arguments — exit 2 with usage text) are always plain text on
+stderr, because they can occur before `--json` is parsed.
+
 ## Importing with `create --stdin`
 
 `create --stdin` bulk-imports JSONL: one object per line of the shape

@@ -70,7 +70,11 @@ PY
       set -e
       test "$code" != "0"
       test ! -s "$tmp/missing.out"
-      grep -Fq "error: no such link" "$tmp/missing.err"
+      if [ "$json_flag" = "json" ]; then
+        grep -Fq "{\"error\":\"no such link" "$tmp/missing.err"
+      else
+        grep -Fq "error: no such link" "$tmp/missing.err"
+      fi
     }
 
     # Unlink with a relation that never existed fails.

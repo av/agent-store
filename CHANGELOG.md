@@ -34,6 +34,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `--json` mode now reports runtime errors as a structured
+  `{"error":"<message>"}` object on stderr with exit codes unchanged;
+  usage errors from argument parsing stay plain text.
 - Clearer CLI errors: kind and field-name validation errors now list the
   disallowed characters and echo the offending name, and queries using
   uppercase `AND`/`OR`/`NOT` get a hint that query keywords are lowercase.

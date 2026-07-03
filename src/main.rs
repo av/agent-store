@@ -36,10 +36,11 @@ use agent_store::store::{FieldChange, Hook, Link, LinkEdge, Record, Store, Store
 use agent_store::value::FieldValue;
 use cli::{CliCommand, HookCliCommand};
 use output::{
-    count_json, format_hook, format_hook_run_detail, format_hook_run_summary, format_quick_context,
-    format_record, format_record_with_timestamps, help_text, hook_mutation_json, hook_runs_json,
-    hooks_json, init_json, link_mutation_json, mutation_json, print_json, quick_context_json,
-    record_links_json, records_json, single_hook_run_json, single_record_json, USAGE,
+    count_json, error_json, format_hook, format_hook_run_detail, format_hook_run_summary,
+    format_quick_context, format_record, format_record_with_timestamps, help_text,
+    hook_mutation_json, hook_runs_json, hooks_json, init_json, link_mutation_json, mutation_json,
+    print_json, quick_context_json, record_links_json, records_json, single_hook_run_json,
+    single_record_json, USAGE,
 };
 use std::cmp::Ordering;
 use std::env;
@@ -296,8 +297,11 @@ fn main() {
             let summary = match init_store() {
                 Ok(summary) => summary,
                 Err(error) => {
-                    eprintln!("error: failed to initialize store: {error}");
-                    process::exit(1);
+                    fail(
+                        cli.json_output,
+                        1,
+                        format!("failed to initialize store: {error}"),
+                    );
                 }
             };
 
@@ -350,10 +354,17 @@ fn main() {
             }
         }
         CliCommand::Create { kind, fields } => {
-            let mut store = open_store_or_exit();
+            let mut store = open_store_or_exit(cli.json_output);
             match store.create_record(&kind, fields) {
                 Ok(record) => {
-                    run_hooks_or_exit(&mut store, "create", &record, Some(&[]), &[]);
+                    run_hooks_or_exit(
+                        cli.json_output,
+                        &mut store,
+                        "create",
+                        &record,
+                        Some(&[]),
+                        &[],
+                    );
                     if cli.json_output {
                         print_json(mutation_json("created", &record));
                     } else {
@@ -361,16 +372,18 @@ fn main() {
                     }
                 }
                 Err(error) => {
-                    eprintln!("error: failed to create record: {error}");
-                    process::exit(1);
+                    fail(
+                        cli.json_output,
+                        1,
+                        format!("failed to create record: {error}"),
+                    );
                 }
             }
         }
         CliCommand::CreateStdin => {
             let mut input = String::new();
             if let Err(error) = io::stdin().read_to_string(&mut input) {
-                eprintln!("error: failed to read stdin: {error}");
-                process::exit(1);
+                fail(cli.json_output, 1, format!("failed to read stdin: {error}"));
             }
 
             // Validate every line before creating anything so an invalid
@@ -383,26 +396,32 @@ fn main() {
                 match cli::parse_jsonl_record(line) {
                     Ok(parsed) => parsed_lines.push(parsed),
                     Err(error) => {
-                        eprintln!("error: stdin line {}: {error}", index + 1);
-                        process::exit(1);
+                        fail(
+                            cli.json_output,
+                            1,
+                            format!("stdin line {}: {error}", index + 1),
+                        );
                     }
                 }
             }
 
-            let mut store = open_store_or_exit();
+            let mut store = open_store_or_exit(cli.json_output);
             let mut created = Vec::with_capacity(parsed_lines.len());
             for (kind, fields) in parsed_lines {
                 match store.create_record(&kind, fields) {
                     Ok(record) => {
-                        run_hooks_or_exit(&mut store, "create", &record, Some(&[]), &[]);
+                        run_hooks_or_exit(
+                            cli.json_output,
+                            &mut store,
+                            "create",
+                            &record,
+                            Some(&[]),
+                            &[],
+                        );
                         created.push(record);
                     }
                     Err(error) => {
-                        eprintln!(
-                            "error: failed to create record after {} records were already created: {error}",
-                            created.len()
-                        );
-                        process::exit(1);
+                        fail(cli.json_output, 1, format!("failed to create record after {} records were already created: {error}", created.len()));
                     }
                 }
             }
@@ -416,7 +435,7 @@ fn main() {
             }
         }
         CliCommand::Get { id, timestamps } => {
-            let store = open_store_or_exit();
+            let store = open_store_or_exit(cli.json_output);
             match store.get_record(&id) {
                 Ok(record) => {
                     if cli.json_output {
@@ -428,8 +447,7 @@ fn main() {
                     }
                 }
                 Err(error) => {
-                    eprintln!("error: failed to get record: {error}");
-                    process::exit(1);
+                    fail(cli.json_output, 1, format!("failed to get record: {error}"));
                 }
             }
         }
@@ -445,13 +463,12 @@ fn main() {
                 Some(raw) => match Query::parse(&raw) {
                     Ok(query) => Some(query),
                     Err(error) => {
-                        eprintln!("error: invalid query: {error}");
-                        process::exit(2);
+                        fail(cli.json_output, 2, format!("invalid query: {error}"));
                     }
                 },
                 None => None,
             };
-            let store = open_store_or_exit();
+            let store = open_store_or_exit(cli.json_output);
             match store.find_records(query.as_ref()) {
                 Ok(mut records) => {
                     if let Some(field) = &sort {
@@ -481,16 +498,20 @@ fn main() {
                     }
                 }
                 Err(error) => {
-                    eprintln!("error: failed to find records: {error}");
-                    process::exit(1);
+                    fail(
+                        cli.json_output,
+                        1,
+                        format!("failed to find records: {error}"),
+                    );
                 }
             }
         }
         CliCommand::Set { id, fields } => {
-            let mut store = open_store_or_exit();
+            let mut store = open_store_or_exit(cli.json_output);
             match store.set_record_with_snapshot(&id, fields) {
                 Ok(mutation) => {
                     run_hooks_or_exit(
+                        cli.json_output,
                         &mut store,
                         "set",
                         &mutation.record,
@@ -504,16 +525,16 @@ fn main() {
                     }
                 }
                 Err(error) => {
-                    eprintln!("error: failed to set record: {error}");
-                    process::exit(1);
+                    fail(cli.json_output, 1, format!("failed to set record: {error}"));
                 }
             }
         }
         CliCommand::Unset { id, keys } => {
-            let mut store = open_store_or_exit();
+            let mut store = open_store_or_exit(cli.json_output);
             match store.unset_record_with_snapshot(&id, keys) {
                 Ok(mutation) => {
                     run_hooks_or_exit(
+                        cli.json_output,
                         &mut store,
                         "unset",
                         &mutation.record,
@@ -527,16 +548,20 @@ fn main() {
                     }
                 }
                 Err(error) => {
-                    eprintln!("error: failed to unset record: {error}");
-                    process::exit(1);
+                    fail(
+                        cli.json_output,
+                        1,
+                        format!("failed to unset record: {error}"),
+                    );
                 }
             }
         }
         CliCommand::Rm { id } => {
-            let mut store = open_store_or_exit();
+            let mut store = open_store_or_exit(cli.json_output);
             match store.delete_record_with_snapshot(&id) {
                 Ok(mutation) => {
                     run_hooks_or_exit(
+                        cli.json_output,
                         &mut store,
                         "rm",
                         &mutation.record,
@@ -550,16 +575,20 @@ fn main() {
                     }
                 }
                 Err(error) => {
-                    eprintln!("error: failed to remove record: {error}");
-                    process::exit(1);
+                    fail(
+                        cli.json_output,
+                        1,
+                        format!("failed to remove record: {error}"),
+                    );
                 }
             }
         }
         CliCommand::Link { from, rel, to } => {
-            let mut store = open_store_or_exit();
+            let mut store = open_store_or_exit(cli.json_output);
             match store.link_records_with_snapshot(&from, &rel, &to) {
                 Ok(mutation) => {
                     run_link_hooks_or_exit(
+                        cli.json_output,
                         &mut store,
                         "link",
                         &mutation.source,
@@ -578,16 +607,20 @@ fn main() {
                     }
                 }
                 Err(error) => {
-                    eprintln!("error: failed to link records: {error}");
-                    process::exit(1);
+                    fail(
+                        cli.json_output,
+                        1,
+                        format!("failed to link records: {error}"),
+                    );
                 }
             }
         }
         CliCommand::Unlink { from, rel, to } => {
-            let mut store = open_store_or_exit();
+            let mut store = open_store_or_exit(cli.json_output);
             match store.unlink_records_with_snapshot(&from, &rel, &to) {
                 Ok(mutation) => {
                     run_link_hooks_or_exit(
+                        cli.json_output,
                         &mut store,
                         "unlink",
                         &mutation.source,
@@ -606,17 +639,19 @@ fn main() {
                     }
                 }
                 Err(error @ StoreError::LinkNotFound { .. }) => {
-                    eprintln!("error: {error}");
-                    process::exit(1);
+                    fail(cli.json_output, 1, format!("{error}"));
                 }
                 Err(error) => {
-                    eprintln!("error: failed to unlink records: {error}");
-                    process::exit(1);
+                    fail(
+                        cli.json_output,
+                        1,
+                        format!("failed to unlink records: {error}"),
+                    );
                 }
             }
         }
         CliCommand::Links { id } => {
-            let store = open_store_or_exit();
+            let store = open_store_or_exit(cli.json_output);
             match store.links_for_record(&id) {
                 Ok(record_links) => {
                     if cli.json_output {
@@ -636,13 +671,12 @@ fn main() {
                     }
                 }
                 Err(error) => {
-                    eprintln!("error: failed to list links: {error}");
-                    process::exit(1);
+                    fail(cli.json_output, 1, format!("failed to list links: {error}"));
                 }
             }
         }
         CliCommand::Context => {
-            let store = open_store_or_exit();
+            let store = open_store_or_exit(cli.json_output);
             match store.quick_context_summary() {
                 Ok(summary) => {
                     if cli.json_output {
@@ -652,8 +686,11 @@ fn main() {
                     }
                 }
                 Err(error) => {
-                    eprintln!("error: failed to build Quick Context: {error}");
-                    process::exit(1);
+                    fail(
+                        cli.json_output,
+                        1,
+                        format!("failed to build Quick Context: {error}"),
+                    );
                 }
             }
         }
@@ -663,7 +700,7 @@ fn main() {
                 query,
                 command,
             } => {
-                let mut store = open_store_or_exit();
+                let mut store = open_store_or_exit(cli.json_output);
                 match store.add_hook(&event, query, &command) {
                     Ok(hook) => {
                         if cli.json_output {
@@ -673,13 +710,12 @@ fn main() {
                         }
                     }
                     Err(error) => {
-                        eprintln!("error: failed to add hook: {error}");
-                        process::exit(1);
+                        fail(cli.json_output, 1, format!("failed to add hook: {error}"));
                     }
                 }
             }
             HookCliCommand::List => {
-                let store = open_store_or_exit();
+                let store = open_store_or_exit(cli.json_output);
                 match store.list_hooks() {
                     Ok(hooks) => {
                         if cli.json_output {
@@ -691,13 +727,12 @@ fn main() {
                         }
                     }
                     Err(error) => {
-                        eprintln!("error: failed to list hooks: {error}");
-                        process::exit(1);
+                        fail(cli.json_output, 1, format!("failed to list hooks: {error}"));
                     }
                 }
             }
             HookCliCommand::Remove { id } => {
-                let mut store = open_store_or_exit();
+                let mut store = open_store_or_exit(cli.json_output);
                 match store.delete_hook(&id) {
                     Ok(hook) => {
                         if cli.json_output {
@@ -707,13 +742,16 @@ fn main() {
                         }
                     }
                     Err(error) => {
-                        eprintln!("error: failed to remove hook: {error}");
-                        process::exit(1);
+                        fail(
+                            cli.json_output,
+                            1,
+                            format!("failed to remove hook: {error}"),
+                        );
                     }
                 }
             }
             HookCliCommand::Runs { limit, run_id } => {
-                let store = open_store_or_exit();
+                let store = open_store_or_exit(cli.json_output);
                 if let Some(run_id) = run_id {
                     match store.get_hook_run(run_id) {
                         Ok(run) => {
@@ -724,8 +762,11 @@ fn main() {
                             }
                         }
                         Err(error) => {
-                            eprintln!("error: failed to get hook run: {error}");
-                            process::exit(1);
+                            fail(
+                                cli.json_output,
+                                1,
+                                format!("failed to get hook run: {error}"),
+                            );
                         }
                     }
                 } else {
@@ -742,8 +783,11 @@ fn main() {
                             }
                         }
                         Err(error) => {
-                            eprintln!("error: failed to list hook runs: {error}");
-                            process::exit(1);
+                            fail(
+                                cli.json_output,
+                                1,
+                                format!("failed to list hook runs: {error}"),
+                            );
                         }
                     }
                 }
@@ -848,21 +892,34 @@ fn check_store_dir_conflict(store_dir: &Path) -> io::Result<()> {
     Ok(())
 }
 
-fn open_store_or_exit() -> Store {
+/// Reports a runtime error and exits with `exit_code`. In `--json` mode the
+/// message is wrapped in a `{"error":"..."}` envelope; either way it goes to
+/// stderr, so stdout stays data-only in both output modes. Usage/parse errors
+/// (exit 2 from argument parsing) stay plain-text because they can occur
+/// before `--json` is known.
+fn fail(json_output: bool, exit_code: i32, message: String) -> ! {
+    if json_output {
+        eprintln!("{}", error_json(&message));
+    } else {
+        eprintln!("error: {message}");
+    }
+    process::exit(exit_code);
+}
+
+fn open_store_or_exit(json_output: bool) -> Store {
     match Store::open_project() {
         Ok(store) => store,
         Err(error @ (StoreError::NotInitialized | StoreError::StoreDirConflict(_))) => {
-            eprintln!("error: {error}");
-            process::exit(1);
+            fail(json_output, 1, format!("{error}"));
         }
         Err(error) => {
-            eprintln!("error: failed to open store: {error}");
-            process::exit(1);
+            fail(json_output, 1, format!("failed to open store: {error}"));
         }
     }
 }
 
 fn run_hooks_or_exit(
+    json_output: bool,
     store: &mut Store,
     event_type: &str,
     record: &Record,
@@ -877,15 +934,12 @@ fn run_hooks_or_exit(
         link_context,
         field_changes,
     ) {
-        eprintln!(
-            "error: failed to run hooks after Store mutation already committed for {event_type} {}: {error}",
-            record.id
-        );
-        process::exit(1);
+        fail(json_output, 1, format!("failed to run hooks after Store mutation already committed for {event_type} {}: {error}", record.id));
     }
 }
 
 fn run_link_hooks_or_exit(
+    json_output: bool,
     store: &mut Store,
     event_type: &str,
     record: &Record,
@@ -900,11 +954,7 @@ fn run_link_hooks_or_exit(
         Some(link_context),
         &[],
     ) {
-        eprintln!(
-            "error: failed to run hooks after Store mutation already committed for {event_type} {}: {error}",
-            record.id
-        );
-        process::exit(1);
+        fail(json_output, 1, format!("failed to run hooks after Store mutation already committed for {event_type} {}: {error}", record.id));
     }
 }
 
