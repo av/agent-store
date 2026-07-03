@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="470" height="96" viewBox="0 0 470 96" role="img" aria-label="agent-store logo">
+  <style>
+    .stroke { stroke: #57606a; }
+    .accent { stroke: #2da44e; }
+    .accent-fill { fill: #2da44e; }
+    .word { fill: #24292f; }
+    @media (prefers-color-scheme: dark) {
+      .stroke { stroke: #8b949e; }
+      .accent { stroke: #3fb950; }
+      .accent-fill { fill: #3fb950; }
+      .word { fill: #e6edf3; }
+    }
+  </style>
+  <!-- box / store mark -->
+  <g fill="none" stroke-width="5" stroke-linecap="round" stroke-linejoin="round">
+    <!-- open box outline -->
+    <path class="stroke" d="M16 34 L48 18 L80 34 L80 70 L48 86 L16 70 Z"/>
+    <!-- box lid seams -->
+    <path class="stroke" d="M16 34 L48 50 L80 34"/>
+    <path class="stroke" d="M48 50 L48 86"/>
+    <!-- memory records: stacked lines on the front face -->
+    <path class="accent" d="M26 52 L40 59"/>
+    <path class="accent" d="M26 62 L40 69"/>
+    <path class="accent" d="M26 72 L34 76"/>
+  </g>
+  <!-- wordmark -->
+  <text class="word" x="104" y="63" font-family="'SFMono-Regular','JetBrains Mono','Fira Code',Menlo,Consolas,'Liberation Mono',monospace" font-size="36" font-weight="600" letter-spacing="0.5">agent-store<tspan class="accent-fill">_</tspan></text>
+</svg>

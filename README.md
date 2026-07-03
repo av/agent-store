@@ -1,4 +1,4 @@
-# agent-store
+<h1 align="center"><img src="assets/logo.svg" alt="agent-store" width="470"></h1>
 
 ![agent-store demo: init, create records, query with the find language, ctx summary](assets/demo.gif)
 
