@@ -40,6 +40,6 @@ jobs:
           bin: agent-store
           target: ${{ matrix.target }}
           archive: agent-store-$tag-$target
-          include: LICENSE,README.md,completions,man
+          include: LICENSE,THIRD-PARTY-LICENSES.md,README.md,completions,man
           checksum: sha256
           token: ${{ secrets.GITHUB_TOKEN }}

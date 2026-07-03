@@ -192,4 +192,4 @@ Issues and PRs welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for dev setup 
 
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE). Third-party components bundled into release binaries (including SQLite) are listed in [THIRD-PARTY-LICENSES.md](THIRD-PARTY-LICENSES.md).
