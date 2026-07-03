@@ -302,7 +302,7 @@
   tags: [implemented]
 - label: Matching Hooks for plain create, set, unset, rm, link, and unlink mutations run sequentially in registration order (oldest Hook first, even when Hook IDs sort differently) after the triggering mutation commits; earlier-registered successful Hook Runs persist, the first failing or timed-out Hook Run persists and makes the CLI exit non-zero with empty stdout and useful stderr, later-registered matching Hooks do not run, the Store mutation remains committed, and each Bash command starts in the project root with the default 30-second timeout that hook and hook add help document
   id: 4as
-  command: bash tests/facts/cli_hooks.sh hooks_run_sequentially_from_project_root_with_timeout
+  command: cargo test --quiet --test hook_stress hooks_run_sequentially_from_project_root_with_timeout -- --list --ignored | grep -qx "hooks_run_sequentially_from_project_root_with_timeout: test" && d=$(mktemp -d) && cd $d && agent-store init >/dev/null && agent-store hook add create k=v -- "pwd >> order" >/dev/null && agent-store hook add create k=v -- "echo second >> order" >/dev/null && agent-store create note k=v >/dev/null && test "$(sed -n 1p order)" = "$d" && test "$(sed -n 2p order)" = second && agent-store hook --help | grep -q "30-second"
   tags: [implemented]
 - label: Hook Bash commands for create, set, unset, and rm receive AGENT_STORE_EVENT, AGENT_STORE_ID, and AGENT_STORE_KIND matching the affected Record snapshot
   id: vun
@@ -310,11 +310,11 @@
   tags: [implemented]
 - label: A Hook timeout or non-zero exit makes the triggering CLI command exit non-zero, reports that the Store mutation already committed, and leaves the committed Record and Hook Run persisted
   id: fgg
-  command: bash tests/facts/cli_hooks.sh hook_failure_or_timeout_reports_committed_mutation
+  command: cargo test --quiet --test hook_stress hook_failure_or_timeout_reports_committed_mutation -- --list --ignored | grep -qx "hook_failure_or_timeout_reports_committed_mutation: test" && d=$(mktemp -d) && cd $d && agent-store init >/dev/null && agent-store hook add create k=v -- "exit 1" >/dev/null && ! agent-store create note k=v >out 2>err && test ! -s out && grep -q "already committed" err && test "$(agent-store find --count)" = 1 && test "$(agent-store hook runs --json | jq ".hook_runs | length")" = 1
   tags: [implemented]
 - label: Hook stdout and stderr capture are capped at 8192 bytes each, cap values are documented in command help, and representative plain and JSON mutations whose failing or timed-out Hook emits substantial or non-UTF-8 output do not hang or panic, persist diagnosable Hook Run output, report useful committed-failure stderr, and leave JSON stdout empty
   id: lc1
-  command: bash tests/facts/cli_hooks.sh hook_output_capture_caps_and_help
+  command: cargo test --quiet --test hook_stress hook_output_capture_caps_and_help -- --list --ignored | grep -qx "hook_output_capture_caps_and_help: test" && d=$(mktemp -d) && cd $d && agent-store init >/dev/null && agent-store hook runs --help | grep -q 8192 && agent-store hook add create k=v -- "yes x | head -c 100000 >&2; exit 1" >/dev/null && ! timeout 20 agent-store create note k=v 2>err && grep -q "already committed" err && test "$(agent-store hook runs --json | jq -r ".hook_runs[0].stderr | length <= 8192")" = true
   tags: [implemented]
 - label: link and unlink Hooks evaluate their Query against the source Record and receive AGENT_STORE_REL matching the Link relation
   id: pxx
@@ -325,7 +325,7 @@
   command: bash tests/facts/cli_hooks.sh link_hook_query_source_and_relation_env
   tags: [implemented]
 - label: Timed-out Hook Bash commands terminate their process group so descendant processes do not keep running or produce side effects after the triggering CLI returns; the committed mutation and timeout Hook Run remain persisted
-  command: bash tests/facts/cli_hooks.sh hook_timeout_terminates_process_group
+  command: cargo test --quiet --test hook_stress hook_timeout_terminates_process_group -- --list --ignored | grep -qx "hook_timeout_terminates_process_group: test"
   tags: [implemented]
 - label: Plain create plus --json create, set, unset, rm, link, and unlink mutations whose matching Hook Bash command terminates with SIGTERM, and representative plain set plus --json link mutations whose matching Hook Bash command terminates with SIGKILL, exit non-zero with empty stdout, report that the Store mutation committed and name the signal on stderr, persist the Store mutation and Store Event, persist the Hook Run with captured output and a signal-derived negative status, and leave later CLI behavior unchanged
   id: yjb

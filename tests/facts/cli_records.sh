@@ -758,17 +758,17 @@ PY
     ;;
 
   broken_pipe_exits_quietly)
-    cd "$tmp"
-    run_agent_store init >/tmp/agent-store-pipe-9pe-init.out
-    for i in $(seq 1 200); do
-      run_agent_store create task title="Task $i" status=open >/dev/null
-    done
-    run_agent_store find kind=task >"$tmp/all-records.out"
-    id_line="$(head -n 1 "$tmp/all-records.out")"
-    id="${id_line%% *}"
-
+    CARGO_TARGET_DIR="$target_dir" cargo build --quiet --manifest-path "$repo/Cargo.toml"
     binary="$target_dir/debug/agent-store"
     test -x "$binary"
+    cd "$tmp"
+    "$binary" init >/tmp/agent-store-pipe-9pe-init.out
+    for i in $(seq 1 200); do
+      "$binary" create task title="Task $i" status=open >/dev/null
+    done
+    "$binary" find kind=task >"$tmp/all-records.out"
+    id_line="$(head -n 1 "$tmp/all-records.out")"
+    id="${id_line%% *}"
 
     set +e
     "$binary" find kind=task 2>/tmp/agent-store-pipe-9pe-find.err | head -c 1 >/dev/null
