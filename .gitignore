@@ -11,3 +11,6 @@
 !.agents/skills/agent-store/
 !.agents/skills/agent-store-patterns/
 !.agents/skills/agent-store-pipelines/
+
+# Nix build output
+/result
