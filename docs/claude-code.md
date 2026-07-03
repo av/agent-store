@@ -138,6 +138,8 @@ Record kinds:
   task: 1
     fields: status, title
     status: pending=1
+Links: 1
+  implements: 1
 Hooks: 0
 Latest activity: 2026-07-03T22:03:44.379Z
 Recent records:
