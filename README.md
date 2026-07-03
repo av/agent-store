@@ -8,11 +8,11 @@
 
 ![agent-store demo: init, create records, query with the find language, ctx summary](assets/demo.gif)
 
-A project-local memory and context store for AI coding agents — records, links, hooks, and compact context via one CLI.
+Persistent memory and a project-local context store for AI coding agents — records, links, hooks, and compact context via one CLI.
 
-Coding agents lose state between sessions and burn context re-discovering the same facts. `agent-store` gives them a durable, queryable scratchpad that lives inside the repo: a SQLite-backed store of typed records, with directional links between them, shell hooks on mutations, and a byte-capped context summary designed to be pasted into a prompt. One static binary, no daemon, no configuration.
+AI coding agents lose state between sessions and burn context re-discovering the same facts. `agent-store` gives them persistent memory that lives inside the repo: a SQLite-backed store of typed records, with directional links between them, shell hooks on mutations, and a byte-capped context summary designed to be pasted into a prompt. One static binary, no daemon, no configuration.
 
-It is built for agents (Claude Code, Codex, and anything else that can run a CLI), but it's just as usable by humans as a terse project notebook: task tracker, decision log, handoff memory.
+It is built for AI agents (Claude Code, Codex, and anything else that can run a CLI), but it's just as usable by humans as a terse project notebook: task tracker, decision log, handoff memory.
 
 ## Install
 
