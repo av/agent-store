@@ -159,6 +159,10 @@ Exports round-trip: `create --stdin` accepts JSONL of the same record shape `fin
 
 They land in `.agents/skills/` and `.claude/skills/`, and are the deepest documentation in the repo — worth a read even for human use.
 
+## Contributing
+
+Issues and PRs welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for dev setup and workflow.
+
 ## License
 
 [MIT](LICENSE)

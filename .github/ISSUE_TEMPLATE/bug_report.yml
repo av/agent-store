@@ -1,0 +1,44 @@
+name: Bug report
+description: Something behaves incorrectly
+labels: [bug]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Output of `agent-store --version`
+      placeholder: agent-store 0.1.0
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: OS / platform
+      placeholder: Fedora 43, macOS 15 (arm64), Windows 11
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction
+      description: Exact commands to reproduce, ideally from a fresh `agent-store init` in an empty directory.
+      render: sh
+      placeholder: |
+        agent-store init
+        agent-store create task title="x"
+        agent-store find kind=task
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What happened instead — include full output and exit code if relevant.
+    validations:
+      required: true
