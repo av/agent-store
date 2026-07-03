@@ -7,6 +7,12 @@
 3. Appends a managed agent-store instructions block to `AGENTS.md` and
    `CLAUDE.md` when those files already exist.
 
+The output enumerates each step: every installed skill path, whether the
+instructions block was added or was already present per file, and — when
+neither `AGENTS.md` nor `CLAUDE.md` exists — a hint to create one and re-run
+`agent-store init` (which then adds the block). `--json` reports the same
+summary as `skills_installed` and `instructions` arrays.
+
 The result: coding agents working in the project discover the store on
 their own — no per-session prompting.
 

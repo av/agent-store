@@ -16,7 +16,10 @@ First public release.
 - `agent-store init` creates a project-local SQLite store under `.agent-store/`
   and installs the agent-facing skills (`agent-store`, `agent-store-patterns`,
   `agent-store-pipelines`) into `.agents/skills/`, appending pointers to
-  `AGENTS.md`/`CLAUDE.md`.
+  `AGENTS.md`/`CLAUDE.md`. Its output enumerates what happened — installed
+  skill paths, instruction blocks added/present per file, and a hint to
+  create `AGENTS.md`/`CLAUDE.md` and re-run when neither exists — in both
+  text and `--json` modes.
 - Records: `create`, `get`, `set`, `unset`, `rm` with kind and field-name
   validation, generated IDs, unique-prefix ID resolution, and created/updated
   timestamps.

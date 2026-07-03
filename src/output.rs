@@ -259,10 +259,19 @@ pub fn print_json(value: Value) {
     outln!("{value}");
 }
 
-pub fn init_json(already_initialized: bool) -> Value {
+pub fn init_json(
+    already_initialized: bool,
+    skills_installed: &[String],
+    instructions: &[(&str, &str)],
+) -> Value {
     json!({
         "status": if already_initialized { "already-initialized" } else { "initialized" },
         "store_dir": agent_store::store::STORE_DIR,
+        "skills_installed": skills_installed,
+        "instructions": instructions
+            .iter()
+            .map(|(path, status)| json!({ "path": path, "status": status }))
+            .collect::<Vec<_>>(),
     })
 }
 

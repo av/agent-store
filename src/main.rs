@@ -293,8 +293,8 @@ fn main() {
             outln!("agent-store {}", env!("CARGO_PKG_VERSION"));
         }
         CliCommand::Init => {
-            let already_initialized = match init_store() {
-                Ok(already_initialized) => already_initialized,
+            let summary = match init_store() {
+                Ok(summary) => summary,
                 Err(error) => {
                     eprintln!("error: failed to initialize store: {error}");
                     process::exit(1);
@@ -302,11 +302,51 @@ fn main() {
             };
 
             if cli.json_output {
-                print_json(init_json(already_initialized));
-            } else if already_initialized {
-                outln!("Already initialized {STORE_DIR}/");
+                print_json(init_json(
+                    summary.already_initialized,
+                    &summary.skills_installed,
+                    &summary
+                        .instructions
+                        .iter()
+                        .map(|(path, status)| (*path, status.as_str()))
+                        .collect::<Vec<_>>(),
+                ));
             } else {
-                outln!("Initialized {STORE_DIR}/");
+                if summary.already_initialized {
+                    outln!("Already initialized {STORE_DIR}/");
+                } else {
+                    outln!("Initialized {STORE_DIR}/");
+                }
+                if summary.skills_installed.is_empty() {
+                    outln!(
+                        "Skills already installed in {AGENT_SKILLS_DIR}/ and {CLAUDE_SKILLS_DIR}/"
+                    );
+                } else {
+                    for path in &summary.skills_installed {
+                        outln!("Installed {path}");
+                    }
+                }
+                let all_missing = summary
+                    .instructions
+                    .iter()
+                    .all(|(_, status)| *status == InstructionStatus::Missing);
+                if all_missing {
+                    outln!(
+                        "No AGENTS.md or CLAUDE.md found; create one and re-run `agent-store init` to add the instructions block"
+                    );
+                } else {
+                    for (path, status) in &summary.instructions {
+                        match status {
+                            InstructionStatus::Added => {
+                                outln!("Added instructions block to {path}")
+                            }
+                            InstructionStatus::Present => {
+                                outln!("Instructions block already present in {path}")
+                            }
+                            InstructionStatus::Missing => {}
+                        }
+                    }
+                }
             }
         }
         CliCommand::Create { kind, fields } => {
@@ -754,16 +794,45 @@ fn sort_type_rank(value: &FieldValue) -> u8 {
     }
 }
 
-fn init_store() -> io::Result<bool> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum InstructionStatus {
+    Added,
+    Present,
+    Missing,
+}
+
+impl InstructionStatus {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Added => "added",
+            Self::Present => "present",
+            Self::Missing => "missing",
+        }
+    }
+}
+
+struct InitSummary {
+    already_initialized: bool,
+    skills_installed: Vec<String>,
+    instructions: Vec<(&'static str, InstructionStatus)>,
+}
+
+fn init_store() -> io::Result<InitSummary> {
     let already_initialized = Path::new(STORE_DIR).is_dir();
     fs::create_dir_all(STORE_DIR)?;
     ensure_gitignore_rule(Path::new(GITIGNORE_PATH), GITIGNORE_RULE)?;
-    install_builtin_skills(Path::new(AGENT_SKILLS_DIR))?;
-    install_builtin_skills(Path::new(CLAUDE_SKILLS_DIR))?;
+    let mut skills_installed = install_builtin_skills(Path::new(AGENT_SKILLS_DIR))?;
+    skills_installed.extend(install_builtin_skills(Path::new(CLAUDE_SKILLS_DIR))?);
+    let mut instructions = Vec::new();
     for instruction_file in INSTRUCTION_FILES {
-        ensure_instruction_block(Path::new(instruction_file))?;
+        let status = ensure_instruction_block(Path::new(instruction_file))?;
+        instructions.push((*instruction_file, status));
     }
-    Ok(already_initialized)
+    Ok(InitSummary {
+        already_initialized,
+        skills_installed,
+        instructions,
+    })
 }
 
 fn open_store_or_exit() -> Store {
@@ -1196,32 +1265,38 @@ fn ensure_gitignore_rule(path: &Path, rule: &str) -> io::Result<()> {
     Ok(())
 }
 
-fn install_builtin_skills(root: &Path) -> io::Result<()> {
+fn install_builtin_skills(root: &Path) -> io::Result<Vec<String>> {
+    let mut installed = Vec::new();
     for skill in BUILTIN_SKILLS {
         let skill_dir = root.join(skill.name);
         fs::create_dir_all(&skill_dir)?;
-        write_file_if_absent(&skill_dir.join("SKILL.md"), skill.content)?;
+        let skill_path = skill_dir.join("SKILL.md");
+        if write_file_if_absent(&skill_path, skill.content)? {
+            installed.push(skill_path.display().to_string());
+        }
     }
-    Ok(())
+    Ok(installed)
 }
 
-fn write_file_if_absent(path: &Path, contents: &str) -> io::Result<()> {
+fn write_file_if_absent(path: &Path, contents: &str) -> io::Result<bool> {
     match OpenOptions::new().write(true).create_new(true).open(path) {
-        Ok(mut file) => file.write_all(contents.as_bytes()),
-        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => Ok(()),
+        Ok(mut file) => file.write_all(contents.as_bytes()).map(|()| true),
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => Ok(false),
         Err(error) => Err(error),
     }
 }
 
-fn ensure_instruction_block(path: &Path) -> io::Result<()> {
+fn ensure_instruction_block(path: &Path) -> io::Result<InstructionStatus> {
     let existing = match fs::read_to_string(path) {
         Ok(contents) => contents,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            return Ok(InstructionStatus::Missing)
+        }
         Err(error) => return Err(error),
     };
 
     if existing.contains(INSTRUCTIONS_START) {
-        return Ok(());
+        return Ok(InstructionStatus::Present);
     }
 
     let mut file = OpenOptions::new().append(true).open(path)?;
@@ -1232,7 +1307,7 @@ fn ensure_instruction_block(path: &Path) -> io::Result<()> {
         writeln!(file)?;
     }
     write!(file, "{INSTRUCTIONS_BLOCK}")?;
-    Ok(())
+    Ok(InstructionStatus::Added)
 }
 
 #[cfg(test)]
@@ -1260,8 +1335,13 @@ mod tests {
             .expect("custom skill dir should be created");
         fs::write(&custom_skill, "custom skill\n").expect("custom skill should be written");
 
-        install_builtin_skills(&skills_root).expect("skills should install");
+        let installed = install_builtin_skills(&skills_root).expect("skills should install");
 
+        // The pre-existing skill file is preserved and not reported as installed.
+        assert_eq!(installed.len(), BUILTIN_SKILLS.len() - 1);
+        assert!(!installed
+            .iter()
+            .any(|path| path.ends_with("agent-store/SKILL.md")));
         assert_eq!(
             fs::read_to_string(&custom_skill).expect("custom skill should remain readable"),
             "custom skill\n"
@@ -1278,8 +1358,11 @@ mod tests {
         let agents = root.join("AGENTS.md");
         fs::write(&agents, "user-authored line").expect("instructions file should be written");
 
-        ensure_instruction_block(&agents).expect("instruction block should append");
-        ensure_instruction_block(&agents).expect("instruction block should not duplicate");
+        let first = ensure_instruction_block(&agents).expect("instruction block should append");
+        let second =
+            ensure_instruction_block(&agents).expect("instruction block should not duplicate");
+        assert_eq!(first, InstructionStatus::Added);
+        assert_eq!(second, InstructionStatus::Present);
 
         let contents = fs::read_to_string(&agents).expect("instructions should be readable");
         assert!(contents.contains("user-authored line"));
@@ -1294,8 +1377,9 @@ mod tests {
         let root = temp_dir("missing-instructions");
         let missing = root.join("CLAUDE.md");
 
-        ensure_instruction_block(&missing).expect("missing instructions should be ignored");
+        let status = ensure_instruction_block(&missing).expect("missing instructions are skipped");
 
+        assert_eq!(status, InstructionStatus::Missing);
         assert!(!missing.exists());
 
         fs::remove_dir_all(root).expect("test temp dir should be removed");

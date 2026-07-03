@@ -53,6 +53,13 @@ man agent-store
 ```sh
 $ agent-store init
 Initialized .agent-store/
+Installed .agents/skills/agent-store/SKILL.md
+Installed .agents/skills/agent-store-patterns/SKILL.md
+Installed .agents/skills/agent-store-pipelines/SKILL.md
+Installed .claude/skills/agent-store/SKILL.md
+Installed .claude/skills/agent-store-patterns/SKILL.md
+Installed .claude/skills/agent-store-pipelines/SKILL.md
+No AGENTS.md or CLAUDE.md found; create one and re-run `agent-store init` to add the instructions block
 
 $ agent-store create task title="ship v0.1" status=pending
 7f0owa

@@ -905,8 +905,43 @@ PY
     grep -Fq "does not accept positional argument" /tmp/agent-store-stdin-2p1-conflict.err
     ;;
 
+  init_output_summary)
+    cd "$tmp"
+
+    # Fresh init with no AGENTS.md/CLAUDE.md: enumerates installed skills and
+    # hints at the missing instructions file.
+    run_agent_store init >/tmp/agent-store-init-sum-1.out
+    grep -Fxq "Initialized .agent-store/" /tmp/agent-store-init-sum-1.out
+    for root in .agents/skills .claude/skills; do
+      for skill in agent-store agent-store-patterns agent-store-pipelines; do
+        grep -Fxq "Installed $root/$skill/SKILL.md" /tmp/agent-store-init-sum-1.out
+      done
+    done
+    grep -Fq "No AGENTS.md or CLAUDE.md found; create one and re-run \`agent-store init\`" /tmp/agent-store-init-sum-1.out
+
+    # Re-init after AGENTS.md appears: block is added and reported.
+    printf "# project\n" > AGENTS.md
+    run_agent_store init >/tmp/agent-store-init-sum-2.out
+    grep -Fxq "Already initialized .agent-store/" /tmp/agent-store-init-sum-2.out
+    grep -Fxq "Skills already installed in .agents/skills/ and .claude/skills/" /tmp/agent-store-init-sum-2.out
+    grep -Fxq "Added instructions block to AGENTS.md" /tmp/agent-store-init-sum-2.out
+    ! grep -Fq "No AGENTS.md or CLAUDE.md found" /tmp/agent-store-init-sum-2.out
+
+    # Third run is idempotent and reports the block as already present.
+    run_agent_store init >/tmp/agent-store-init-sum-3.out
+    grep -Fxq "Instructions block already present in AGENTS.md" /tmp/agent-store-init-sum-3.out
+    test "$(grep -Fc "<!-- agent-store:start -->" AGENTS.md)" -eq 1
+
+    # JSON envelope reports the same facts.
+    run_agent_store --json init >/tmp/agent-store-init-sum-4.out
+    grep -Fq "\"status\":\"already-initialized\"" /tmp/agent-store-init-sum-4.out
+    grep -Fq "\"skills_installed\":[]" /tmp/agent-store-init-sum-4.out
+    grep -Fq "{\"path\":\"AGENTS.md\",\"status\":\"present\"}" /tmp/agent-store-init-sum-4.out
+    grep -Fq "{\"path\":\"CLAUDE.md\",\"status\":\"missing\"}" /tmp/agent-store-init-sum-4.out
+    ;;
+
   *)
-    echo "usage: $0 {create_alias_matches_create|find_alias_matches_find|set_updates_fields|unset_removes_fields|find_filters_records|arbitrary_field_queries|query_boolean_syntax|query_contains_operator|query_argument_parity|query_typed_values|field_empty_null_unset_semantics|record_id_generation_contract|record_id_resolution_errors|json_output|uninitialized_store_errors|broken_pipe_exits_quietly|identifier_validation_rejects_unsafe_names|create_stdin_imports_jsonl}" >&2
+    echo "usage: $0 {create_alias_matches_create|find_alias_matches_find|set_updates_fields|unset_removes_fields|find_filters_records|arbitrary_field_queries|query_boolean_syntax|query_contains_operator|query_argument_parity|query_typed_values|field_empty_null_unset_semantics|record_id_generation_contract|record_id_resolution_errors|json_output|uninitialized_store_errors|broken_pipe_exits_quietly|identifier_validation_rejects_unsafe_names|create_stdin_imports_jsonl|init_output_summary}" >&2
     exit 2
     ;;
 esac
