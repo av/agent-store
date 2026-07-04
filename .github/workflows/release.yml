@@ -4,8 +4,9 @@ on:
   push:
     tags: ["v*"]
 
+# Default to read-only; each job grants only what it needs.
 permissions:
-  contents: write
+  contents: read
 
 env:
   CARGO_TERM_COLOR: always
@@ -34,6 +35,8 @@ jobs:
             os: windows-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       # Cross toolchain for targets that differ from the host (linux musl).
       - uses: taiki-e/setup-cross-toolchain-action@v1
         if: matrix.target == 'x86_64-unknown-linux-musl'
@@ -62,10 +65,14 @@ jobs:
     name: Publish to crates.io
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     env:
       CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: Check for registry token
         id: token
         run: |
@@ -86,6 +93,9 @@ jobs:
     name: Bump Homebrew formula
     needs: build
     runs-on: ubuntu-latest
+    # Writes go to av/homebrew-tap via HOMEBREW_TAP_TOKEN, not GITHUB_TOKEN.
+    permissions:
+      contents: read
     env:
       HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
     steps:
