@@ -157,8 +157,28 @@ Project-local store directory created by
 .BR "agent-store init" ,
 containing the SQLite database.
 .SH EXIT STATUS
-Returns 0 on success and non-zero on any error (parse error, missing
-store, ambiguous or unknown ID prefix, failed import).
+.TP
+.B 0
+Success.
+.TP
+.B 1
+Runtime error: missing store, ambiguous or unknown ID prefix, failed
+import, or a failed hook.
+.TP
+.B 2
+Usage error: unrecognized command, invalid arguments, or an invalid
+query.
+.PP
+Errors are printed to stderr; stdout stays data-only.
+With
+.B \-\-json
+the error message is wrapped in a single-line
+.B {\[dq]error\[dq]: \[dq]...\[dq]}
+envelope on stderr, except for argument-parse errors, which stay plain
+text because they can occur before
+.B \-\-json
+is known.
+A write to a closed stdout pipe exits quietly with status 141.
 .SH SEE ALSO
 Full documentation and query, hooks, and JSON references at
 .UR https://github.com/av/agent-store
