@@ -59,7 +59,7 @@ curl -fsSLO "https://github.com/av/agent-store/releases/download/$tag/$asset.sha
 sha256sum -c "$asset.sha256"   # macOS: shasum -a 256 -c "$asset.sha256"
 ```
 
-Releases after v0.1.0 also carry signed [build provenance attestations](https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations) proving each archive was built by this repository's release workflow. Verify with the [GitHub CLI](https://cli.github.com):
+Releases after v0.1.0 also carry signed [build provenance attestations](https://docs.github.com/en/actions/how-tos/secure-your-work/use-artifact-attestations) proving each archive was built by this repository's release workflow. Verify with the [GitHub CLI](https://cli.github.com):
 
 ```sh
 gh attestation verify "$asset" --repo av/agent-store
