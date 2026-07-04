@@ -1,5 +1,5 @@
 [package]
-name = "agent-store"
+name = "agent-store-cli"
 version = "0.1.1"
 edition = "2021"
 description = "A local-first memory and context store for AI coding agents, backed by SQLite"
@@ -21,6 +21,17 @@ pkg-fmt = "tgz"
 
 [package.metadata.binstall.overrides.x86_64-pc-windows-msvc]
 pkg-fmt = "zip"
+
+# The crate is published as agent-store-cli (the bare name is taken on
+# crates.io by an unrelated project), but the binary and library keep the
+# agent-store name.
+[lib]
+name = "agent_store"
+path = "src/lib.rs"
+
+[[bin]]
+name = "agent-store"
+path = "src/main.rs"
 
 [dependencies]
 libc = "0.2"

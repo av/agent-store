@@ -41,6 +41,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The crate is published on crates.io as `agent-store-cli` (the bare
+  `agent-store` name is taken by an unrelated crate); the binary and
+  library keep the `agent-store` name.
 - `--json` mode now reports runtime errors as a structured
   `{"error":"<message>"}` object on stderr with exit codes unchanged;
   usage errors from argument parsing stay plain text.
