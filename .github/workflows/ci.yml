@@ -27,3 +27,33 @@ jobs:
         run: cargo build --verbose
       - name: Test
         run: cargo test --verbose
+
+  facts:
+    name: Fact suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          # Fact commands build into many per-case target/facts-* dirs;
+          # caching all of them would blow past cache limits, so cache
+          # only the registry/git and let target dirs rebuild.
+          cache-targets: false
+      - name: Install facts CLI (pinned release, checksum-verified)
+        run: |
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/facts.tar.gz" \
+            https://github.com/av/facts/releases/download/v0.7.1/facts-linux-amd64.tar.gz
+          echo "fdfe555206aaa7c8ce02571f010e599d2cd185308b766c864f88d83d6e1f4cc7  $RUNNER_TEMP/facts.tar.gz" | sha256sum -c -
+          mkdir -p "$HOME/.local/bin"
+          tar -xzf "$RUNNER_TEMP/facts.tar.gz" -C "$HOME/.local/bin"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Lint fact sheets
+        run: facts lint && facts fmt --check
+      - name: Pre-build pinned fact binary
+        run: CARGO_TARGET_DIR=target/facts-bin cargo build --quiet
+      - name: Run fact suite
+        # --timeout is a per-command hang guard; cold per-case builds on a
+        # 4-core runner can take a few minutes each, so keep it generous.
+        run: facts check --no-agent --timeout 600

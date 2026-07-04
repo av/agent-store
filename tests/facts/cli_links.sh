@@ -14,7 +14,7 @@ run_agent_store() {
 case "$case_name" in
   link_adds_idempotently)
     cd "$tmp"
-    run_agent_store init >/tmp/agent-store-link-q59-init.out
+    run_agent_store init >"$tmp"/agent-store-link-q59-init.out
     from_id="$(run_agent_store create task title=source)"
     to_id="$(run_agent_store create task title=target)"
     from_prefix="$(printf "%s" "$from_id" | cut -c1-4)"
@@ -46,15 +46,15 @@ PY
 
   unlink_removes_and_missing_fails)
     cd "$tmp"
-    run_agent_store init >/tmp/agent-store-unlink-80k-init.out
+    run_agent_store init >"$tmp"/agent-store-unlink-80k-init.out
     from_id="$(run_agent_store create task title=source status=open)"
     to_id="$(run_agent_store create task title=target)"
     other_id="$(run_agent_store create note title=other)"
     from_prefix="$(printf "%s" "$from_id" | cut -c1-4)"
     to_prefix="$(printf "%s" "$to_id" | cut -c1-4)"
 
-    run_agent_store link "$from_id" blocks "$to_id" >/tmp/agent-store-unlink-80k-link.out
-    run_agent_store link "$from_id" mentions "$other_id" >/tmp/agent-store-unlink-80k-other.out
+    run_agent_store link "$from_id" blocks "$to_id" >"$tmp"/agent-store-unlink-80k-link.out
+    run_agent_store link "$from_id" mentions "$other_id" >"$tmp"/agent-store-unlink-80k-other.out
     hook_id="$(run_agent_store hook add unlink 'kind=task and status=open' -- 'true')"
 
     expect_unlink_missing() {
@@ -127,7 +127,7 @@ PY
 
   links_lists_deterministically)
     cd "$tmp"
-    run_agent_store init >/tmp/agent-store-links-cav-init.out
+    run_agent_store init >"$tmp"/agent-store-links-cav-init.out
     source_id="$(run_agent_store create task title=source)"
     target_a="$(run_agent_store create note title=target-a)"
     target_b="$(run_agent_store create note title=target-b)"
@@ -135,10 +135,10 @@ PY
     incoming_b="$(run_agent_store create decision title=incoming-b)"
     source_prefix="$(printf "%s" "$source_id" | cut -c1-4)"
 
-    run_agent_store link "$source_id" depends_on "$target_b" >/tmp/agent-store-links-cav-out-2.out
-    run_agent_store link "$source_id" blocks "$target_a" >/tmp/agent-store-links-cav-out-1.out
-    run_agent_store link "$incoming_b" blocks "$source_id" >/tmp/agent-store-links-cav-in-1.out
-    run_agent_store link "$incoming_a" relates "$source_id" >/tmp/agent-store-links-cav-in-2.out
+    run_agent_store link "$source_id" depends_on "$target_b" >"$tmp"/agent-store-links-cav-out-2.out
+    run_agent_store link "$source_id" blocks "$target_a" >"$tmp"/agent-store-links-cav-out-1.out
+    run_agent_store link "$incoming_b" blocks "$source_id" >"$tmp"/agent-store-links-cav-in-1.out
+    run_agent_store link "$incoming_a" relates "$source_id" >"$tmp"/agent-store-links-cav-in-2.out
 
     expected="out blocks $target_a
 out depends_on $target_b
@@ -150,16 +150,16 @@ in relates $incoming_a"
 
   find_filters_links)
     cd "$tmp"
-    run_agent_store init >/tmp/agent-store-find-links-l7a-init.out
+    run_agent_store init >"$tmp"/agent-store-find-links-l7a-init.out
     source_id="$(run_agent_store create task title=source status=open)"
     target_id="$(run_agent_store create note title=target status=open)"
     other_id="$(run_agent_store create note title=other status=open)"
     incoming_id="$(run_agent_store create decision title=incoming status=open)"
     unrelated_id="$(run_agent_store create task title=unrelated status=open)"
 
-    run_agent_store link "$source_id" blocks "$target_id" >/tmp/agent-store-find-links-l7a-blocks.out
-    run_agent_store link "$source_id" mentions "$other_id" >/tmp/agent-store-find-links-l7a-mentions.out
-    run_agent_store link "$incoming_id" blocks "$source_id" >/tmp/agent-store-find-links-l7a-incoming.out
+    run_agent_store link "$source_id" blocks "$target_id" >"$tmp"/agent-store-find-links-l7a-blocks.out
+    run_agent_store link "$source_id" mentions "$other_id" >"$tmp"/agent-store-find-links-l7a-mentions.out
+    run_agent_store link "$incoming_id" blocks "$source_id" >"$tmp"/agent-store-find-links-l7a-incoming.out
 
     source_line="$source_id task status=open title=source"
     target_line="$target_id note status=open title=target"
@@ -196,7 +196,7 @@ $target_line"
 
   self_link_rejected)
     cd "$tmp"
-    run_agent_store init >/tmp/agent-store-self-link-init.out
+    run_agent_store init >"$tmp"/agent-store-self-link-init.out
     id="$(run_agent_store create task title=solo status=open)"
     prefix="$(printf "%s" "$id" | cut -c1-4)"
     hook_id="$(run_agent_store hook add link 'kind=task' -- 'true')"

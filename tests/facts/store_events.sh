@@ -14,15 +14,15 @@ run_agent_store() {
 case "$case_name" in
   mutation_events)
     cd "$tmp"
-    run_agent_store init >/tmp/agent-store-events-rc5-init.out
+    run_agent_store init >"$tmp"/agent-store-events-rc5-init.out
 
     source_id="$(run_agent_store create task title=source status=open note=keep)"
     target_id="$(run_agent_store create note title=target)"
-    run_agent_store set "$source_id" status=active >/tmp/agent-store-events-rc5-set.out
-    run_agent_store unset "$source_id" note >/tmp/agent-store-events-rc5-unset.out
-    run_agent_store link "$source_id" blocks "$target_id" >/tmp/agent-store-events-rc5-link.out
-    run_agent_store unlink "$source_id" blocks "$target_id" >/tmp/agent-store-events-rc5-unlink.out
-    run_agent_store rm "$target_id" >/tmp/agent-store-events-rc5-rm.out
+    run_agent_store set "$source_id" status=active >"$tmp"/agent-store-events-rc5-set.out
+    run_agent_store unset "$source_id" note >"$tmp"/agent-store-events-rc5-unset.out
+    run_agent_store link "$source_id" blocks "$target_id" >"$tmp"/agent-store-events-rc5-link.out
+    run_agent_store unlink "$source_id" blocks "$target_id" >"$tmp"/agent-store-events-rc5-unlink.out
+    run_agent_store rm "$target_id" >"$tmp"/agent-store-events-rc5-rm.out
 
     python3 - .agent-store/store.sqlite "$source_id" "$target_id" <<'PY'
 import json

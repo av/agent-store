@@ -35,10 +35,10 @@ assert_help() {
 case "$case_name" in
   subcommand_help_is_read_only)
     cd "$tmp"
-    run_agent_store init >/tmp/agent-store-help-x3h-init.out
+    run_agent_store init >"$tmp"/agent-store-help-x3h-init.out
     source_id="$(run_agent_store create task title=Seed status=open)"
     target_id="$(run_agent_store create note title=Peer status=open)"
-    run_agent_store link "$source_id" relates "$target_id" >/tmp/agent-store-help-x3h-link.out
+    run_agent_store link "$source_id" relates "$target_id" >"$tmp"/agent-store-help-x3h-link.out
     hook_id="$(run_agent_store hook add create -- 'printf hook-ran >> hook-ran.txt')"
 
     before_records="$(run_agent_store find 'kind!=__agent_store_help_absent__')"

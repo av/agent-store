@@ -27,11 +27,11 @@ PY
 case "$case_name" in
   ctx_summary_default)
     cd "$tmp"
-    run_agent_store init >/tmp/agent-store-ctx-wpx-init.out
+    run_agent_store init >"$tmp"/agent-store-ctx-wpx-init.out
     task_one="$(run_agent_store create task title=Write status=open)"
     task_two="$(run_agent_store create task title=Ship status=done)"
     note="$(run_agent_store create note title=Plan status=open)"
-    run_agent_store hook add create kind=task -- true >/tmp/agent-store-ctx-wpx-hook.out
+    run_agent_store hook add create kind=task -- true >"$tmp"/agent-store-ctx-wpx-hook.out
 
     latest="$(latest_activity)"
     expected="Quick Context
@@ -55,11 +55,11 @@ Recent records:
 
   ctx_summary_counts)
     cd "$tmp"
-    run_agent_store init >/tmp/agent-store-ctx-raf-init.out
+    run_agent_store init >"$tmp"/agent-store-ctx-raf-init.out
     task_one="$(run_agent_store create task title=Write)"
     task_two="$(run_agent_store create task title=Ship)"
     bug="$(run_agent_store create bug title=Fix)"
-    run_agent_store hook add rm -- true >/tmp/agent-store-ctx-raf-hook.out
+    run_agent_store hook add rm -- true >"$tmp"/agent-store-ctx-raf-hook.out
 
     latest="$(latest_activity)"
     expected="Quick Context
@@ -120,23 +120,23 @@ Recent records:
 
   context_alias_matches_ctx)
     cd "$tmp"
-    run_agent_store init >/tmp/agent-store-context-i3l-init.out
-    run_agent_store create task title=Write status=open >/tmp/agent-store-context-i3l-task.out
-    run_agent_store hook add create -- true >/tmp/agent-store-context-i3l-hook.out
+    run_agent_store init >"$tmp"/agent-store-context-i3l-init.out
+    run_agent_store create task title=Write status=open >"$tmp"/agent-store-context-i3l-task.out
+    run_agent_store hook add create -- true >"$tmp"/agent-store-context-i3l-hook.out
 
     ctx_out="$(run_agent_store ctx)"
     context_out="$(run_agent_store context)"
     test "$context_out" = "$ctx_out"
 
-    if run_agent_store context extra >/tmp/agent-store-context-i3l-extra.out 2>/tmp/agent-store-context-i3l-extra.err; then
+    if run_agent_store context extra >"$tmp"/agent-store-context-i3l-extra.out 2>"$tmp"/agent-store-context-i3l-extra.err; then
       exit 1
     fi
-    grep -Fq "context does not accept argument 'extra'" /tmp/agent-store-context-i3l-extra.err
+    grep -Fq "context does not accept argument 'extra'" "$tmp"/agent-store-context-i3l-extra.err
     ;;
 
   ctx_empty_store)
     cd "$tmp"
-    run_agent_store init >/tmp/agent-store-ctx-k7a-init.out
+    run_agent_store init >"$tmp"/agent-store-ctx-k7a-init.out
     expected="Quick Context
 Records: 0
 Record kinds: none
@@ -148,7 +148,7 @@ Latest activity: none"
 
   ctx_fields_by_kind)
     cd "$tmp"
-    run_agent_store init >/tmp/agent-store-ctx-261-init.out
+    run_agent_store init >"$tmp"/agent-store-ctx-261-init.out
     task_one="$(run_agent_store create task title=Write phase=open deadline=2026-06-30 task_only=yes)"
     task_two="$(run_agent_store create task title=Ship priority=high)"
     note="$(run_agent_store create note title=Plan topic=agents note_only=yes)"
@@ -178,7 +178,7 @@ Recent records:
 
   ctx_status_date_summaries)
     cd "$tmp"
-    run_agent_store init >/tmp/agent-store-ctx-iln-init.out
+    run_agent_store init >"$tmp"/agent-store-ctx-iln-init.out
     task_one="$(run_agent_store create task title=Plan status=open due=2026-07-15 start=2026-06-01)"
     task_two="$(run_agent_store create task title=Build status=open due=2026-06-28 start=2026-06-03T09:30:00Z)"
     task_three="$(run_agent_store create task title=Ship status=done due=2026-07-01)"
@@ -212,7 +212,7 @@ Recent records:
 
   ctx_link_summaries)
     cd "$tmp"
-    run_agent_store init >/tmp/agent-store-ctx-pev-init.out
+    run_agent_store init >"$tmp"/agent-store-ctx-pev-init.out
     task_one="$(run_agent_store create task title=Write)"
     task_two="$(run_agent_store create task title=Ship)"
     bug="$(run_agent_store create bug title=Fix)"
@@ -222,10 +222,10 @@ Recent records:
     bug_id="${bug%% *}"
     milestone_id="${milestone%% *}"
 
-    run_agent_store link "$task_one_id" blocks "$task_two_id" >/tmp/agent-store-ctx-pev-link-1.out
-    run_agent_store link "$task_one_id" blocks "$bug_id" >/tmp/agent-store-ctx-pev-link-2.out
-    run_agent_store link "$task_two_id" relates_to "$bug_id" >/tmp/agent-store-ctx-pev-link-3.out
-    run_agent_store link "$bug_id" tracks "$milestone_id" >/tmp/agent-store-ctx-pev-link-4.out
+    run_agent_store link "$task_one_id" blocks "$task_two_id" >"$tmp"/agent-store-ctx-pev-link-1.out
+    run_agent_store link "$task_one_id" blocks "$bug_id" >"$tmp"/agent-store-ctx-pev-link-2.out
+    run_agent_store link "$task_two_id" relates_to "$bug_id" >"$tmp"/agent-store-ctx-pev-link-3.out
+    run_agent_store link "$bug_id" tracks "$milestone_id" >"$tmp"/agent-store-ctx-pev-link-4.out
 
     latest="$(latest_activity)"
     expected="Quick Context
@@ -256,12 +256,12 @@ Recent records:
     cd "$tmp"
     run_agent_store --help | grep -Fq "Quick Context output is capped at 8192 bytes."
 
-    run_agent_store init >/tmp/agent-store-ctx-uha-init.out
+    run_agent_store init >"$tmp"/agent-store-ctx-uha-init.out
     fields=()
     for index in $(seq -w 1 1600); do
       fields+=("field_$index=value")
     done
-    run_agent_store create massive "${fields[@]}" >/tmp/agent-store-ctx-uha-record.out
+    run_agent_store create massive "${fields[@]}" >"$tmp"/agent-store-ctx-uha-record.out
 
     run_agent_store ctx >ctx.out
     byte_count="$(wc -c <ctx.out | tr -d ' ')"
@@ -274,12 +274,12 @@ Recent records:
 
   ctx_json_summary)
     cd "$tmp"
-    run_agent_store init >/tmp/agent-store-ctx-cxj-init.out
+    run_agent_store init >"$tmp"/agent-store-ctx-cxj-init.out
     task_one="$(run_agent_store create task title=Write status=open due=2026-06-26)"
     task_two="$(run_agent_store create task title=Ship status=done due=2026-06-30)"
     note="$(run_agent_store create note title=Plan)"
-    run_agent_store link "$task_one" blocks "$task_two" >/tmp/agent-store-ctx-cxj-link.out
-    run_agent_store hook add create kind=task -- true >/tmp/agent-store-ctx-cxj-hook.out
+    run_agent_store link "$task_one" blocks "$task_two" >"$tmp"/agent-store-ctx-cxj-link.out
+    run_agent_store hook add create kind=task -- true >"$tmp"/agent-store-ctx-cxj-hook.out
 
     latest="$(latest_activity)"
     run_agent_store --json ctx >ctx.json
@@ -325,7 +325,7 @@ PY
 
   ctx_recent_value_truncation)
     cd "$tmp"
-    run_agent_store init >/tmp/agent-store-ctx-trunc-init.out
+    run_agent_store init >"$tmp"/agent-store-ctx-trunc-init.out
     long_value="$(printf 'a%.0s' $(seq 1 300))"
     record="$(run_agent_store create note body="$long_value")"
 
@@ -345,10 +345,10 @@ PY
 
   ctx_recent_cap_large_field)
     cd "$tmp"
-    run_agent_store init >/tmp/agent-store-ctx-cap-init.out
-    run_agent_store create handoff summary='Refactor auth module next' >/tmp/agent-store-ctx-cap-handoff.out
+    run_agent_store init >"$tmp"/agent-store-ctx-cap-init.out
+    run_agent_store create handoff summary='Refactor auth module next' >"$tmp"/agent-store-ctx-cap-handoff.out
     big="$(head -c 20000 /dev/zero | tr '\0' 'x')"
-    run_agent_store create blob data="$big" >/tmp/agent-store-ctx-cap-blob.out
+    run_agent_store create blob data="$big" >"$tmp"/agent-store-ctx-cap-blob.out
 
     run_agent_store ctx >ctx.out
     grep -Fq "Recent records:" ctx.out
@@ -374,11 +374,11 @@ PY
 
   ctx_recent_ordering)
     cd "$tmp"
-    run_agent_store init >/tmp/agent-store-ctx-order-init.out
+    run_agent_store init >"$tmp"/agent-store-ctx-order-init.out
     first="$(run_agent_store create task title=First)"
     second="$(run_agent_store create task title=Second)"
     third="$(run_agent_store create task title=Third)"
-    run_agent_store set "$first" status=open >/tmp/agent-store-ctx-order-set.out
+    run_agent_store set "$first" status=open >"$tmp"/agent-store-ctx-order-set.out
 
     expected_recent="Recent records:
   $first task status=open title=First

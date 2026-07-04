@@ -34,7 +34,7 @@ unique_prefix_for() {
 case "$case_name" in
   hook_add_stores_metadata)
     cd "$tmp"
-    run_agent_store init >/tmp/agent-store-hook-add-1me-init.out
+    run_agent_store init >"$tmp"/agent-store-hook-add-1me-init.out
 
     id="$(run_agent_store hook add create 'kind=task and status=open' -- echo created)"
     no_query_id="$(run_agent_store hook add rm -- echo removed)"
@@ -68,20 +68,20 @@ assert rows[no_query_id][:3] == ("rm", None, "echo removed"), rows[no_query_id]
 assert rows[no_query_id][3], rows[no_query_id]
 PY
 
-    if run_agent_store hook add update -- echo nope >/tmp/agent-store-hook-add-1me-bad-event.out 2>/tmp/agent-store-hook-add-1me-bad-event.err; then
+    if run_agent_store hook add update -- echo nope >"$tmp"/agent-store-hook-add-1me-bad-event.out 2>"$tmp"/agent-store-hook-add-1me-bad-event.err; then
       exit 1
     fi
-    grep -Fq "not supported" /tmp/agent-store-hook-add-1me-bad-event.err
+    grep -Fq "not supported" "$tmp"/agent-store-hook-add-1me-bad-event.err
 
-    if run_agent_store hook add create 'kind=task and' -- echo bad >/tmp/agent-store-hook-add-1me-bad-query.out 2>/tmp/agent-store-hook-add-1me-bad-query.err; then
+    if run_agent_store hook add create 'kind=task and' -- echo bad >"$tmp"/agent-store-hook-add-1me-bad-query.out 2>"$tmp"/agent-store-hook-add-1me-bad-query.err; then
       exit 1
     fi
-    grep -Fq "invalid hook query" /tmp/agent-store-hook-add-1me-bad-query.err
+    grep -Fq "invalid hook query" "$tmp"/agent-store-hook-add-1me-bad-query.err
     ;;
 
   hook_ls_deterministic)
     cd "$tmp"
-    run_agent_store init >/tmp/agent-store-hook-ls-pn0-init.out
+    run_agent_store init >"$tmp"/agent-store-hook-ls-pn0-init.out
 
     # Register two hooks whose IDs sort lexicographically AGAINST their
     # registration order, so an ID-sorted listing would disagree with it.
@@ -110,7 +110,7 @@ PY
 
   hook_rm_deletes_metadata)
     cd "$tmp"
-    run_agent_store init >/tmp/agent-store-hook-rm-nih-init.out
+    run_agent_store init >"$tmp"/agent-store-hook-rm-nih-init.out
 
     removed_id="$(run_agent_store hook add create kind=task -- echo created)"
     kept_id="$(run_agent_store hook add rm -- echo removed)"
@@ -134,15 +134,15 @@ assert ids == [kept_id], ids
 assert removed_id not in ids
 PY
 
-    if run_agent_store hook rm "$removed_id" >/tmp/agent-store-hook-rm-nih-again.out 2>/tmp/agent-store-hook-rm-nih-again.err; then
+    if run_agent_store hook rm "$removed_id" >"$tmp"/agent-store-hook-rm-nih-again.out 2>"$tmp"/agent-store-hook-rm-nih-again.err; then
       exit 1
     fi
-    grep -Fq "was not found" /tmp/agent-store-hook-rm-nih-again.err
+    grep -Fq "was not found" "$tmp"/agent-store-hook-rm-nih-again.err
     ;;
 
   hooks_run_after_commit)
     cd "$tmp"
-    run_agent_store init >/tmp/agent-store-hook-runtime-w5s-init.out
+    run_agent_store init >"$tmp"/agent-store-hook-runtime-w5s-init.out
 
     cat > agent-store <<SH
 #!/usr/bin/env bash
@@ -158,10 +158,10 @@ SH
     visible="$(cat hook-visible.txt)"
     test "$visible" = "$id task status=open title=Committed"
 
-    if run_agent_store set missing status=done >/tmp/agent-store-hook-runtime-w5s-failed-set.out 2>/tmp/agent-store-hook-runtime-w5s-failed-set.err; then
+    if run_agent_store set missing status=done >"$tmp"/agent-store-hook-runtime-w5s-failed-set.out 2>"$tmp"/agent-store-hook-runtime-w5s-failed-set.err; then
       exit 1
     fi
-    grep -Fq "was not found" /tmp/agent-store-hook-runtime-w5s-failed-set.err
+    grep -Fq "was not found" "$tmp"/agent-store-hook-runtime-w5s-failed-set.err
     test ! -e failed-set-hook-ran
 
     python3 - .agent-store/store.sqlite "$create_hook_id" "$set_hook_id" "$id" <<'PY'
@@ -186,7 +186,7 @@ PY
 
   hook_query_filters_records)
     cd "$tmp"
-    run_agent_store init >/tmp/agent-store-hook-query-mlq-init.out
+    run_agent_store init >"$tmp"/agent-store-hook-query-mlq-init.out
 
     source_id="$(run_agent_store create task title=Source status=open score=11)"
     target_id="$(run_agent_store create note title=Target status=open)"
@@ -197,8 +197,8 @@ PY
     skipped_link_hook_id="$(run_agent_store hook add link 'kind=note' -- 'printf "link-skip\n" >> hook-log.txt; printf link-skip')"
 
     matched_id="$(run_agent_store create task title=Matched status=open score=12)"
-    run_agent_store create task title=Closed status=done score=2 >/tmp/agent-store-hook-query-mlq-closed.out
-    run_agent_store link "$source_id" blocks "$target_id" >/tmp/agent-store-hook-query-mlq-link.out
+    run_agent_store create task title=Closed status=done score=2 >"$tmp"/agent-store-hook-query-mlq-closed.out
+    run_agent_store link "$source_id" blocks "$target_id" >"$tmp"/agent-store-hook-query-mlq-link.out
 
     expected_log="$(printf "create-match\nlink-match\n")"
     test "$(cat hook-log.txt)" = "$expected_log"
@@ -241,7 +241,7 @@ PY
 
   hook_query_uses_mutation_snapshot)
     cd "$tmp"
-    run_agent_store init >/tmp/agent-store-hook-query-887-init.out
+    run_agent_store init >"$tmp"/agent-store-hook-query-887-init.out
 
     cat > hook-log.sh <<'SH'
 #!/usr/bin/env bash
@@ -257,15 +257,15 @@ SH
 
     set_after_id="$(run_agent_store hook add set 'status=done' -- './hook-log.sh set-after')"
     set_before_id="$(run_agent_store hook add set 'status=new' -- './hook-log.sh set-before')"
-    run_agent_store set "$record_id" status=done >/tmp/agent-store-hook-query-887-set.out
+    run_agent_store set "$record_id" status=done >"$tmp"/agent-store-hook-query-887-set.out
 
     unset_after_id="$(run_agent_store hook add unset 'not flag=keep' -- './hook-log.sh unset-after')"
     unset_before_id="$(run_agent_store hook add unset 'flag=keep' -- './hook-log.sh unset-before')"
-    run_agent_store unset "$record_id" flag >/tmp/agent-store-hook-query-887-unset.out
+    run_agent_store unset "$record_id" flag >"$tmp"/agent-store-hook-query-887-unset.out
 
     rm_pre_id="$(run_agent_store hook add rm 'status=done' -- './hook-log.sh rm-pre')"
     rm_after_id="$(run_agent_store hook add rm 'not status=done' -- './hook-log.sh rm-after')"
-    run_agent_store rm "$record_id" >/tmp/agent-store-hook-query-887-rm.out
+    run_agent_store rm "$record_id" >"$tmp"/agent-store-hook-query-887-rm.out
 
     expected_log="$(printf "create-after\nset-after\nunset-after\nrm-pre\n")"
     test "$(cat hook-log.txt)" = "$expected_log"
@@ -316,7 +316,7 @@ PY
 
   hook_stdin_receives_record_snapshot)
     cd "$tmp"
-    run_agent_store init >/tmp/agent-store-hook-stdin-9i8-init.out
+    run_agent_store init >"$tmp"/agent-store-hook-stdin-9i8-init.out
 
     cat > hook-stdin.sh <<'SH'
 #!/usr/bin/env bash
@@ -331,13 +331,13 @@ SH
     record_id="$(run_agent_store create task title='Hello world' status=new flag=keep)"
 
     set_hook_id="$(run_agent_store hook add set -- './hook-stdin.sh set')"
-    run_agent_store set "$record_id" status=done note='needs review' >/tmp/agent-store-hook-stdin-9i8-set.out
+    run_agent_store set "$record_id" status=done note='needs review' >"$tmp"/agent-store-hook-stdin-9i8-set.out
 
     unset_hook_id="$(run_agent_store hook add unset -- './hook-stdin.sh unset')"
-    run_agent_store unset "$record_id" flag >/tmp/agent-store-hook-stdin-9i8-unset.out
+    run_agent_store unset "$record_id" flag >"$tmp"/agent-store-hook-stdin-9i8-unset.out
 
     rm_hook_id="$(run_agent_store hook add rm -- './hook-stdin.sh rm')"
-    run_agent_store rm "$record_id" >/tmp/agent-store-hook-stdin-9i8-rm.out
+    run_agent_store rm "$record_id" >"$tmp"/agent-store-hook-stdin-9i8-rm.out
 
     expected_log="$(
       printf "create:%s task flag=keep status=new title='Hello world'\n" "$record_id"
@@ -383,19 +383,19 @@ PY
 
   hook_failure_reports_details)
     cd "$tmp"
-    run_agent_store init >/tmp/agent-store-hook-failure-hxt-init.out
+    run_agent_store init >"$tmp"/agent-store-hook-failure-hxt-init.out
 
     hook_command='printf hook-stdout; printf hook-stderr >&2; exit 17'
     hook_id="$(run_agent_store hook add create -- "$hook_command")"
 
-    if run_agent_store create task title=Failure >/tmp/agent-store-hook-failure-hxt.out 2>/tmp/agent-store-hook-failure-hxt.err; then
+    if run_agent_store create task title=Failure >"$tmp"/agent-store-hook-failure-hxt.out 2>"$tmp"/agent-store-hook-failure-hxt.err; then
       exit 1
     fi
 
-    grep -Fq "hook $hook_id" /tmp/agent-store-hook-failure-hxt.err
-    grep -Fq -- "$hook_command" /tmp/agent-store-hook-failure-hxt.err
-    grep -Fq "exit status 17" /tmp/agent-store-hook-failure-hxt.err
-    grep -Fq "hook-stderr" /tmp/agent-store-hook-failure-hxt.err
+    grep -Fq "hook $hook_id" "$tmp"/agent-store-hook-failure-hxt.err
+    grep -Fq -- "$hook_command" "$tmp"/agent-store-hook-failure-hxt.err
+    grep -Fq "exit status 17" "$tmp"/agent-store-hook-failure-hxt.err
+    grep -Fq "hook-stderr" "$tmp"/agent-store-hook-failure-hxt.err
 
     python3 - .agent-store/store.sqlite "$hook_id" <<'PY'
 import sqlite3
@@ -423,32 +423,32 @@ PY
 
   hook_failure_or_timeout_reports_committed_mutation)
     cd "$tmp"
-    run_agent_store init >/tmp/agent-store-hook-committed-fgg-init.out
+    run_agent_store init >"$tmp"/agent-store-hook-committed-fgg-init.out
 
     failure_command='printf failure-stdout; printf failure-stderr >&2; exit 23'
     failure_hook_id="$(run_agent_store hook add create title=CommittedFailure -- "$failure_command")"
 
-    if run_agent_store create task title=CommittedFailure >/tmp/agent-store-hook-committed-fgg-failure.out 2>/tmp/agent-store-hook-committed-fgg-failure.err; then
+    if run_agent_store create task title=CommittedFailure >"$tmp"/agent-store-hook-committed-fgg-failure.out 2>"$tmp"/agent-store-hook-committed-fgg-failure.err; then
       exit 1
     fi
 
-    grep -Fq "Store mutation already committed" /tmp/agent-store-hook-committed-fgg-failure.err
-    grep -Fq "exit status 23" /tmp/agent-store-hook-committed-fgg-failure.err
-    grep -Fq "failure-stderr" /tmp/agent-store-hook-committed-fgg-failure.err
+    grep -Fq "Store mutation already committed" "$tmp"/agent-store-hook-committed-fgg-failure.err
+    grep -Fq "exit status 23" "$tmp"/agent-store-hook-committed-fgg-failure.err
+    grep -Fq "failure-stderr" "$tmp"/agent-store-hook-committed-fgg-failure.err
 
     timeout_command='printf timeout-stderr >&2; while :; do sleep 1; done'
     timeout_hook_id="$(run_agent_store hook add create title=CommittedTimeout -- "$timeout_command")"
 
     set +e
-    timeout 90s "$target_dir/debug/agent-store" create task title=CommittedTimeout >/tmp/agent-store-hook-committed-fgg-timeout.out 2>/tmp/agent-store-hook-committed-fgg-timeout.err
+    timeout 90s "$target_dir/debug/agent-store" create task title=CommittedTimeout >"$tmp"/agent-store-hook-committed-fgg-timeout.out 2>"$tmp"/agent-store-hook-committed-fgg-timeout.err
     timeout_status=$?
     set -e
 
     test "$timeout_status" -ne 0
     test "$timeout_status" -ne 124
-    grep -Fq "Store mutation already committed" /tmp/agent-store-hook-committed-fgg-timeout.err
-    grep -Fq "timed out after 30 seconds" /tmp/agent-store-hook-committed-fgg-timeout.err
-    grep -Fq "timeout-stderr" /tmp/agent-store-hook-committed-fgg-timeout.err
+    grep -Fq "Store mutation already committed" "$tmp"/agent-store-hook-committed-fgg-timeout.err
+    grep -Fq "timed out after 30 seconds" "$tmp"/agent-store-hook-committed-fgg-timeout.err
+    grep -Fq "timeout-stderr" "$tmp"/agent-store-hook-committed-fgg-timeout.err
 
     python3 - .agent-store/store.sqlite "$failure_hook_id" "$timeout_hook_id" <<'PY'
 import sqlite3
@@ -505,7 +505,7 @@ PY
 
   hook_command_launch_or_execution_failure_reports_committed_mutation)
     cd "$tmp"
-    run_agent_store init >/tmp/agent-store-hook-exec-7r8-init.out
+    run_agent_store init >"$tmp"/agent-store-hook-exec-7r8-init.out
     agent_store_bin="$target_dir/debug/agent-store"
 
     evidence_root="${AGENT_STORE_E2E_DIR:-}"
@@ -693,7 +693,7 @@ EOF
 
   json_mutation_hook_failure_or_timeout_reports_committed_without_success_json)
     cd "$tmp"
-    run_agent_store init >/tmp/agent-store-json-hook-failure-jhf-init.out
+    run_agent_store init >"$tmp"/agent-store-json-hook-failure-jhf-init.out
     agent_store_bin="$target_dir/debug/agent-store"
 
     evidence_root="${AGENT_STORE_E2E_DIR:-}"
@@ -730,7 +730,7 @@ SH
     unlink_source="$("$agent_store_bin" create task op=json-fail-unlink status=open)"
     unlink_target="$("$agent_store_bin" create note op=json-fail-unlink-target status=open)"
     timeout_record="$("$agent_store_bin" create task op=json-timeout-set status=pending)"
-    "$agent_store_bin" link "$unlink_source" blocks "$unlink_target" >/tmp/agent-store-json-hook-failure-jhf-seed-unlink.out
+    "$agent_store_bin" link "$unlink_source" blocks "$unlink_target" >"$tmp"/agent-store-json-hook-failure-jhf-seed-unlink.out
 
     create_hook_id="$("$agent_store_bin" hook add create 'kind=task and op=json-fail-create' -- './fail-hook.sh create')"
     set_hook_id="$("$agent_store_bin" hook add set 'kind=task and op=json-fail-set and status=done' -- './fail-hook.sh set')"
@@ -1026,7 +1026,7 @@ EOF
 
   json_multiple_matching_hooks_stop_after_failure_or_timeout)
     cd "$tmp"
-    run_agent_store init >/tmp/agent-store-json-multi-hook-9ev-init.out
+    run_agent_store init >"$tmp"/agent-store-json-multi-hook-9ev-init.out
     agent_store_bin="$target_dir/debug/agent-store"
 
     evidence_root="${AGENT_STORE_E2E_DIR:-}"
@@ -1105,7 +1105,7 @@ SH
     link_target="$("$agent_store_bin" create note op=json-multi-link-target status=open)"
     unlink_source="$("$agent_store_bin" create task op=json-multi-unlink status=open)"
     unlink_target="$("$agent_store_bin" create note op=json-multi-unlink-target status=open)"
-    "$agent_store_bin" link "$unlink_source" blocks "$unlink_target" >/tmp/agent-store-json-multi-hook-9ev-seed-unlink.out
+    "$agent_store_bin" link "$unlink_source" blocks "$unlink_target" >"$tmp"/agent-store-json-multi-hook-9ev-seed-unlink.out
 
     create_hook_ids="$(add_multi_hooks create 'kind=task and op=json-multi-create-fail' create-fail fail)"
     set_hook_ids="$(add_multi_hooks set 'kind=task and op=json-multi-set and status=done' set-fail fail)"
@@ -1460,7 +1460,7 @@ EOF
 
   hooks_run_sequentially_from_project_root_with_timeout)
     cd "$tmp"
-    run_agent_store init >/tmp/agent-store-hook-runtime-4as-init.out
+    run_agent_store init >"$tmp"/agent-store-hook-runtime-4as-init.out
     agent_store_bin="$target_dir/debug/agent-store"
 
     evidence_root="${AGENT_STORE_E2E_DIR:-}"
@@ -1632,7 +1632,7 @@ SH
     plain_link_target="$("$agent_store_bin" create note op=plain-multi-link-target status=open)"
     plain_unlink_source="$("$agent_store_bin" create task op=plain-multi-unlink status=open)"
     plain_unlink_target="$("$agent_store_bin" create note op=plain-multi-unlink-target status=open)"
-    "$agent_store_bin" link "$plain_unlink_source" blocks "$plain_unlink_target" >/tmp/agent-store-plain-multi-hook-4as-seed-unlink.out
+    "$agent_store_bin" link "$plain_unlink_source" blocks "$plain_unlink_target" >"$tmp"/agent-store-plain-multi-hook-4as-seed-unlink.out
 
     plain_create_hook_ids="$(add_plain_multi_hooks create 'kind=task and op=plain-multi-create-fail' create-fail fail)"
     plain_set_hook_ids="$(add_plain_multi_hooks set 'kind=task and op=plain-multi-set and status=done' set-fail fail)"
@@ -1990,7 +1990,7 @@ print(time.monotonic())
 PY
 )"
     set +e
-    timeout 90s "$agent_store_bin" create task title=Timeout >/tmp/agent-store-hook-timeout-4as.out 2>/tmp/agent-store-hook-timeout-4as.err
+    timeout 90s "$agent_store_bin" create task title=Timeout >"$tmp"/agent-store-hook-timeout-4as.out 2>"$tmp"/agent-store-hook-timeout-4as.err
     timeout_status=$?
     set -e
     ended_at="$(python3 - <<'PY'
@@ -2002,7 +2002,7 @@ PY
 
     test "$timeout_status" -ne 0
     test "$timeout_status" -ne 124
-    grep -Fq "timed out after 30 seconds" /tmp/agent-store-hook-timeout-4as.err
+    grep -Fq "timed out after 30 seconds" "$tmp"/agent-store-hook-timeout-4as.err
 
     python3 - "$started_at" "$ended_at" ".agent-store/store.sqlite" "$timeout_hook_id" <<'PY'
 import sqlite3
@@ -2052,7 +2052,7 @@ PY
 
   hook_env_vars_for_record_events)
     cd "$tmp"
-    run_agent_store init >/tmp/agent-store-hook-env-vun-init.out
+    run_agent_store init >"$tmp"/agent-store-hook-env-vun-init.out
 
     cat > hook-env.sh <<'SH'
 #!/usr/bin/env bash
@@ -2067,13 +2067,13 @@ SH
     record_id="$(run_agent_store create task title=Env status=new flag=keep)"
 
     set_hook_id="$(run_agent_store hook add set -- './hook-env.sh set')"
-    run_agent_store set "$record_id" status=done >/tmp/agent-store-hook-env-vun-set.out
+    run_agent_store set "$record_id" status=done >"$tmp"/agent-store-hook-env-vun-set.out
 
     unset_hook_id="$(run_agent_store hook add unset -- './hook-env.sh unset')"
-    run_agent_store unset "$record_id" flag >/tmp/agent-store-hook-env-vun-unset.out
+    run_agent_store unset "$record_id" flag >"$tmp"/agent-store-hook-env-vun-unset.out
 
     rm_hook_id="$(run_agent_store hook add rm -- './hook-env.sh rm')"
-    run_agent_store rm "$record_id" >/tmp/agent-store-hook-env-vun-rm.out
+    run_agent_store rm "$record_id" >"$tmp"/agent-store-hook-env-vun-rm.out
 
     expected_log="$(
       printf "create:create:%s:task\n" "$record_id"
@@ -2119,7 +2119,7 @@ PY
 
   link_hook_query_source_and_relation_env)
     cd "$tmp"
-    run_agent_store init >/tmp/agent-store-hook-link-env-pxx-init.out
+    run_agent_store init >"$tmp"/agent-store-hook-link-env-pxx-init.out
 
     cat > link-hook-env.sh <<'SH'
 #!/usr/bin/env bash
@@ -2138,8 +2138,8 @@ SH
     unlink_hook_id="$(run_agent_store hook add unlink 'kind=task and status=open' -- './link-hook-env.sh unlink')"
     unlink_skip_id="$(run_agent_store hook add unlink 'kind=note' -- './link-hook-env.sh unlink-skip')"
 
-    run_agent_store link "$source_id" blocks "$target_id" >/tmp/agent-store-hook-link-env-pxx-link.out
-    run_agent_store unlink "$source_id" blocks "$target_id" >/tmp/agent-store-hook-link-env-pxx-unlink.out
+    run_agent_store link "$source_id" blocks "$target_id" >"$tmp"/agent-store-hook-link-env-pxx-link.out
+    run_agent_store unlink "$source_id" blocks "$target_id" >"$tmp"/agent-store-hook-link-env-pxx-unlink.out
 
     expected_log="$(
       printf "link:link:%s:task:blocks:%s\n" "$source_id" "$target_id"
@@ -2183,7 +2183,7 @@ PY
 
   hook_failure_preserves_link_context_env)
     cd "$tmp"
-    run_agent_store init >/tmp/agent-store-hook-context-failure-06p-init.out
+    run_agent_store init >"$tmp"/agent-store-hook-context-failure-06p-init.out
     agent_store_bin="$target_dir/debug/agent-store"
 
     evidence_root="${AGENT_STORE_E2E_DIR:-}"
@@ -2309,7 +2309,7 @@ SH
     plain_target_id="$("$agent_store_bin" create note title=PlainLinkTarget status=open)"
     json_source_id="$("$agent_store_bin" create task title=JsonUnlinkContext status=open)"
     json_target_id="$("$agent_store_bin" create note title=JsonUnlinkTarget status=open)"
-    "$agent_store_bin" link "$json_source_id" relates "$json_target_id" >/tmp/agent-store-hook-context-failure-06p-seed-link.out
+    "$agent_store_bin" link "$json_source_id" relates "$json_target_id" >"$tmp"/agent-store-hook-context-failure-06p-seed-link.out
     plain_set_id="$("$agent_store_bin" create task title=PlainSetContext status=pending)"
     json_unset_id="$("$agent_store_bin" create task title=JsonUnsetContext flag=remove-me status=open)"
     plain_multi_set_id="$("$agent_store_bin" create task title=PlainMultiSetContext status=pending priority=low)"
@@ -3023,10 +3023,10 @@ EOF
 
   hook_output_capture_caps_and_help)
     cd "$tmp"
-    run_agent_store --help >/tmp/agent-store-hook-caps-lc1-help.out
-    grep -Fq "Hook stdout and stderr captures are capped at 8192 bytes each." /tmp/agent-store-hook-caps-lc1-help.out
+    run_agent_store --help >"$tmp"/agent-store-hook-caps-lc1-help.out
+    grep -Fq "Hook stdout and stderr captures are capped at 8192 bytes each." "$tmp"/agent-store-hook-caps-lc1-help.out
 
-    run_agent_store init >/tmp/agent-store-hook-caps-lc1-init.out
+    run_agent_store init >"$tmp"/agent-store-hook-caps-lc1-init.out
 
     cat > verbose-hook.py <<'PY'
 import sys
@@ -3279,7 +3279,7 @@ EOF
 
   hook_signal_termination_reports_committed_mutation)
     cd "$tmp"
-    run_agent_store init >/tmp/agent-store-hook-signal-yjb-init.out
+    run_agent_store init >"$tmp"/agent-store-hook-signal-yjb-init.out
     agent_store_bin="$target_dir/debug/agent-store"
 
     evidence_root="${AGENT_STORE_E2E_DIR:-}"
@@ -3814,7 +3814,7 @@ EOF
 
   hook_timeout_terminates_process_group)
     cd "$tmp"
-    run_agent_store init >/tmp/agent-store-hook-timeout-pgrp-ecj-init.out
+    run_agent_store init >"$tmp"/agent-store-hook-timeout-pgrp-ecj-init.out
     agent_store_bin="$target_dir/debug/agent-store"
 
     evidence_root="${AGENT_STORE_E2E_DIR:-}"
@@ -3943,7 +3943,7 @@ EOF
 
   hook_json_output)
     cd "$tmp"
-    run_agent_store init >/tmp/agent-store-hook-json-hkj-init.out
+    run_agent_store init >"$tmp"/agent-store-hook-json-hkj-init.out
 
     run_agent_store --json hook add create 'kind=task and status=open' -- echo created >add-with-query.json
     run_agent_store --json hook add rm -- echo removed >add-without-query.json
@@ -4000,7 +4000,7 @@ PY
 
   hook_runs_command)
     cd "$tmp"
-    run_agent_store init >/tmp/agent-store-hook-runs-q1r-init.out
+    run_agent_store init >"$tmp"/agent-store-hook-runs-q1r-init.out
 
     # Empty store: friendly plain message, empty JSON list, both exit 0.
     empty_plain="$(run_agent_store hook runs)"
@@ -4012,7 +4012,7 @@ PY
     fail_hook="$(run_agent_store hook add set -- 'echo hook-stderr >&2; exit 3')"
 
     record_id="$(run_agent_store create task title=demo)"
-    if run_agent_store set "$record_id" status=done 2>/tmp/agent-store-hook-runs-q1r-set.err; then
+    if run_agent_store set "$record_id" status=done 2>"$tmp"/agent-store-hook-runs-q1r-set.err; then
       echo "expected set to fail via failing hook" >&2
       exit 1
     fi

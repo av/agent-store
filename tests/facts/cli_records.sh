@@ -14,30 +14,30 @@ run_agent_store() {
 case "$case_name" in
   create_alias_matches_create)
     cd "$tmp"
-    run_agent_store init >/tmp/agent-store-cr-ee0-init.out
+    run_agent_store init >"$tmp"/agent-store-cr-ee0-init.out
     id="$(run_agent_store cr task title=Write status=open)"
     printf "%s\n" "$id" | grep -Eq "^[a-z0-9]{6,8}$"
     got="$(run_agent_store get "$id")"
     test "$got" = "$id task status=open title=Write"
 
     set +e
-    run_agent_store create >/tmp/agent-store-cr-ee0-create.out 2>/tmp/agent-store-cr-ee0-create.err
+    run_agent_store create >"$tmp"/agent-store-cr-ee0-create.out 2>"$tmp"/agent-store-cr-ee0-create.err
     create_status=$?
-    run_agent_store cr >/tmp/agent-store-cr-ee0-cr.out 2>/tmp/agent-store-cr-ee0-cr.err
+    run_agent_store cr >"$tmp"/agent-store-cr-ee0-cr.out 2>"$tmp"/agent-store-cr-ee0-cr.err
     cr_status=$?
     set -e
     test "$create_status" -ne 0
     test "$cr_status" -eq "$create_status"
-    cmp -s /tmp/agent-store-cr-ee0-create.out /tmp/agent-store-cr-ee0-cr.out
-    cmp -s /tmp/agent-store-cr-ee0-create.err /tmp/agent-store-cr-ee0-cr.err
+    cmp -s "$tmp"/agent-store-cr-ee0-create.out "$tmp"/agent-store-cr-ee0-cr.out
+    cmp -s "$tmp"/agent-store-cr-ee0-create.err "$tmp"/agent-store-cr-ee0-cr.err
     ;;
 
   find_alias_matches_find)
     cd "$tmp"
-    run_agent_store init >/tmp/agent-store-ls-8id-init.out
+    run_agent_store init >"$tmp"/agent-store-ls-8id-init.out
     open_task="$(run_agent_store create task title=Write status=open priority=high)"
-    run_agent_store create task title=Ship status=done priority=low >/tmp/agent-store-ls-8id-done.out
-    run_agent_store create note title=Write status=open priority=high >/tmp/agent-store-ls-8id-note.out
+    run_agent_store create task title=Ship status=done priority=low >"$tmp"/agent-store-ls-8id-done.out
+    run_agent_store create note title=Write status=open priority=high >"$tmp"/agent-store-ls-8id-note.out
 
     expected="$open_task task priority=high status=open title=Write"
     find_out="$(run_agent_store find 'kind=task and status=open')"
@@ -45,16 +45,16 @@ case "$case_name" in
     ls_out="$(run_agent_store ls kind=task and status=open)"
     test "$ls_out" = "$find_out"
 
-    run_agent_store find >/tmp/agent-store-ls-8id-find.out 2>/tmp/agent-store-ls-8id-find.err
-    run_agent_store ls >/tmp/agent-store-ls-8id-ls.out 2>/tmp/agent-store-ls-8id-ls.err
-    test "$(wc -l </tmp/agent-store-ls-8id-find.out)" -eq 3
-    cmp -s /tmp/agent-store-ls-8id-find.out /tmp/agent-store-ls-8id-ls.out
-    cmp -s /tmp/agent-store-ls-8id-find.err /tmp/agent-store-ls-8id-ls.err
+    run_agent_store find >"$tmp"/agent-store-ls-8id-find.out 2>"$tmp"/agent-store-ls-8id-find.err
+    run_agent_store ls >"$tmp"/agent-store-ls-8id-ls.out 2>"$tmp"/agent-store-ls-8id-ls.err
+    test "$(wc -l <"$tmp"/agent-store-ls-8id-find.out)" -eq 3
+    cmp -s "$tmp"/agent-store-ls-8id-find.out "$tmp"/agent-store-ls-8id-ls.out
+    cmp -s "$tmp"/agent-store-ls-8id-find.err "$tmp"/agent-store-ls-8id-ls.err
     ;;
 
   set_updates_fields)
     cd "$tmp"
-    run_agent_store init >/tmp/agent-store-set-1b1-init.out
+    run_agent_store init >"$tmp"/agent-store-set-1b1-init.out
     id="$(run_agent_store create task title=Write status=open note=keep missing=old)"
     prefix="$(printf "%s" "$id" | cut -c1-4)"
 
@@ -82,11 +82,11 @@ con.execute(
 con.commit()
 PY
 
-    if run_agent_store set "$id" status=partial zzz_fail_after_status=bad >/tmp/agent-store-set-1b1-rollback.out 2>/tmp/agent-store-set-1b1-rollback.err; then
+    if run_agent_store set "$id" status=partial zzz_fail_after_status=bad >"$tmp"/agent-store-set-1b1-rollback.out 2>"$tmp"/agent-store-set-1b1-rollback.err; then
       exit 1
     fi
-    grep -Fq "failed to set record" /tmp/agent-store-set-1b1-rollback.err
-    grep -Fq "forced set rollback" /tmp/agent-store-set-1b1-rollback.err
+    grep -Fq "failed to set record" "$tmp"/agent-store-set-1b1-rollback.err
+    grep -Fq "forced set rollback" "$tmp"/agent-store-set-1b1-rollback.err
     got="$(run_agent_store get "$id")"
     test "$got" = "$id task empty='' missing=null note=keep status=done title=Write"
 
@@ -115,7 +115,7 @@ PY
 
   unset_removes_fields)
     cd "$tmp"
-    run_agent_store init >/tmp/agent-store-unset-d77-init.out
+    run_agent_store init >"$tmp"/agent-store-unset-d77-init.out
     id="$(run_agent_store create task title=Write status=open note=keep missing=null empty=)"
     prefix="$(printf "%s" "$id" | cut -c1-4)"
 
@@ -145,7 +145,7 @@ assert fields == {
 assert con.execute("select count(*) from records where id = ?", (record_id,)).fetchone()[0] == 1
 PY
 
-    run_agent_store set "$id" note=keep zzz_fail_after_note=bad >/tmp/agent-store-unset-d77-set.out
+    run_agent_store set "$id" note=keep zzz_fail_after_note=bad >"$tmp"/agent-store-unset-d77-set.out
     python3 - .agent-store/store.sqlite <<'PY'
 import sqlite3
 import sys
@@ -165,21 +165,21 @@ con.execute(
 con.commit()
 PY
 
-    if run_agent_store unset "$id" note zzz_fail_after_note >/tmp/agent-store-unset-d77-rollback.out 2>/tmp/agent-store-unset-d77-rollback.err; then
+    if run_agent_store unset "$id" note zzz_fail_after_note >"$tmp"/agent-store-unset-d77-rollback.out 2>"$tmp"/agent-store-unset-d77-rollback.err; then
       exit 1
     fi
-    grep -Fq "failed to unset record" /tmp/agent-store-unset-d77-rollback.err
-    grep -Fq "forced unset rollback" /tmp/agent-store-unset-d77-rollback.err
+    grep -Fq "failed to unset record" "$tmp"/agent-store-unset-d77-rollback.err
+    grep -Fq "forced unset rollback" "$tmp"/agent-store-unset-d77-rollback.err
     got="$(run_agent_store get "$id")"
     test "$got" = "$id task empty='' note=keep title=Write zzz_fail_after_note=bad"
     ;;
 
   find_filters_records)
     cd "$tmp"
-    run_agent_store init >/tmp/agent-store-find-m2b-init.out
+    run_agent_store init >"$tmp"/agent-store-find-m2b-init.out
     open_task="$(run_agent_store create task title=Write status=open priority=high)"
-    run_agent_store create task title=Ship status=done priority=low >/tmp/agent-store-find-m2b-done.out
-    run_agent_store create note title=Write status=open priority=high >/tmp/agent-store-find-m2b-note.out
+    run_agent_store create task title=Ship status=done priority=low >"$tmp"/agent-store-find-m2b-done.out
+    run_agent_store create note title=Write status=open priority=high >"$tmp"/agent-store-find-m2b-note.out
 
     expected="$open_task task priority=high status=open title=Write"
     quoted="$(run_agent_store find 'kind=task and status=open')"
@@ -206,7 +206,7 @@ PY
 
   query_quoted_values)
     cd "$tmp"
-    run_agent_store init >/tmp/agent-store-quoted-q7v-init.out
+    run_agent_store init >"$tmp"/agent-store-quoted-q7v-init.out
     spaced="$(run_agent_store create task note='hello world' status=open)"
     other="$(run_agent_store create task note=hello status=open)"
     blank="$(run_agent_store create task note= status=open)"
@@ -235,15 +235,15 @@ PY
     unquoted="$(run_agent_store find note=hello)"
     test "$unquoted" = "$other task note=hello status=open"
 
-    if run_agent_store find "note='oops" >/tmp/agent-store-quoted-q7v-bad.out 2>/tmp/agent-store-quoted-q7v-bad.err; then
+    if run_agent_store find "note='oops" >"$tmp"/agent-store-quoted-q7v-bad.out 2>"$tmp"/agent-store-quoted-q7v-bad.err; then
       exit 1
     fi
-    grep -Fq "unterminated" /tmp/agent-store-quoted-q7v-bad.err
+    grep -Fq "unterminated" "$tmp"/agent-store-quoted-q7v-bad.err
     ;;
 
   find_lists_all_records)
     cd "$tmp"
-    run_agent_store init >/tmp/agent-store-listall-b4f-init.out
+    run_agent_store init >"$tmp"/agent-store-listall-b4f-init.out
     first="$(run_agent_store create task title=Write)"
     second="$(run_agent_store create note title=Read)"
 
@@ -261,10 +261,10 @@ PY
 
   arbitrary_field_queries)
     cd "$tmp"
-    run_agent_store init >/tmp/agent-store-find-41k-init.out
+    run_agent_store init >"$tmp"/agent-store-find-41k-init.out
     first="$(run_agent_store create artifact title=Alpha custom_41k=blue)"
     second="$(run_agent_store create artifact title=Beta other_41k=blue)"
-    run_agent_store create note title=Gamma custom_41k=red >/tmp/agent-store-find-41k-note.out
+    run_agent_store create note title=Gamma custom_41k=red >"$tmp"/agent-store-find-41k-note.out
 
     first_line="$first artifact custom_41k=blue title=Alpha"
     got="$(run_agent_store find custom_41k=blue)"
@@ -285,7 +285,7 @@ PY
 
   query_boolean_syntax)
     cd "$tmp"
-    run_agent_store init >/tmp/agent-store-query-s5i-init.out
+    run_agent_store init >"$tmp"/agent-store-query-s5i-init.out
     open_task="$(run_agent_store create task title=Write status=open priority=high lane=beta)"
     done_task="$(run_agent_store create task title=Ship status=done priority=low lane=alpha)"
     note="$(run_agent_store create note title=Note status=open priority=high lane=gamma)"
@@ -312,7 +312,7 @@ $note note lane=gamma priority=high status=open title=Note"
 
   query_contains_operator)
     cd "$tmp"
-    run_agent_store init >/tmp/agent-store-query-ooj-init.out
+    run_agent_store init >"$tmp"/agent-store-query-ooj-init.out
     login="$(run_agent_store create task title='Fix Login Page' status=open)"
     docs="$(run_agent_store create task title='update docs' status=open)"
     note="$(run_agent_store create note title='Login notes')"
@@ -339,20 +339,20 @@ $note note title='Login notes'"
 
     # Bare '~' without '=' is rejected.
     set +e
-    run_agent_store find 'title~login' >/tmp/agent-store-query-ooj.out 2>/tmp/agent-store-query-ooj.err
+    run_agent_store find 'title~login' >"$tmp"/agent-store-query-ooj.out 2>"$tmp"/agent-store-query-ooj.err
     status=$?
     set -e
     test "$status" -ne 0
-    grep -q "expected '=' after '~'" /tmp/agent-store-query-ooj.err
+    grep -q "expected '=' after '~'" "$tmp"/agent-store-query-ooj.err
     ;;
 
   query_argument_parity)
     cd "$tmp"
-    run_agent_store init >/tmp/agent-store-query-ly7-init.out
-    run_agent_store create task title=Write status=open priority=high lane=beta >/tmp/agent-store-query-ly7-open.out
-    run_agent_store create task title=Ship status=done priority=low lane=alpha >/tmp/agent-store-query-ly7-done.out
-    run_agent_store create note title=Note status=open priority=high lane=gamma >/tmp/agent-store-query-ly7-note.out
-    run_agent_store create bug title=Bug status=open priority=medium lane=delta >/tmp/agent-store-query-ly7-bug.out
+    run_agent_store init >"$tmp"/agent-store-query-ly7-init.out
+    run_agent_store create task title=Write status=open priority=high lane=beta >"$tmp"/agent-store-query-ly7-open.out
+    run_agent_store create task title=Ship status=done priority=low lane=alpha >"$tmp"/agent-store-query-ly7-done.out
+    run_agent_store create note title=Note status=open priority=high lane=gamma >"$tmp"/agent-store-query-ly7-note.out
+    run_agent_store create bug title=Bug status=open priority=medium lane=delta >"$tmp"/agent-store-query-ly7-bug.out
 
     quoted="$(run_agent_store find '(kind=note or kind=task) and lane>=beta and lane<delta and not status=done')"
     multi="$(run_agent_store find '(' kind=note or kind=task ')' and 'lane>=beta' and 'lane<delta' and not status=done)"
@@ -361,7 +361,7 @@ $note note title='Login notes'"
 
   query_typed_values)
     cd "$tmp"
-    run_agent_store init >/tmp/agent-store-query-t2s-init.out
+    run_agent_store init >"$tmp"/agent-store-query-t2s-init.out
     high="$(run_agent_store create sample title=High score=10 due=2026-01-02 stamp=2026-01-02T12:00:00Z active=true missing=null lane=beta)"
     low="$(run_agent_store create sample title=Low score=2 due=2026-01-01 stamp=2026-01-02T08:00:00Z active=false missing=value lane=alpha)"
     text="$(run_agent_store create sample title=Textual missing=value lane=gamma)"
@@ -426,7 +426,7 @@ $low_line" | sort)"
 
   field_value_parsing_semantics)
     cd "$tmp"
-    run_agent_store init >/tmp/agent-store-fields-om5-init.out
+    run_agent_store init >"$tmp"/agent-store-fields-om5-init.out
     id="$(run_agent_store create sample initial=seed active=true due=2026-06-26 stamp=2026-06-26T12:34:56Z score=001.50 missing=null text=hello empty=)"
     got="$(run_agent_store get "$id")"
     test "$got" = "$id sample active=true due=2026-06-26 empty='' initial=seed missing=null score=001.50 stamp=2026-06-26T12:34:56Z text=hello"
@@ -481,7 +481,7 @@ PY
 
   field_empty_null_unset_semantics)
     cd "$tmp"
-    run_agent_store init >/tmp/agent-store-fields-6pq-init.out
+    run_agent_store init >"$tmp"/agent-store-fields-6pq-init.out
     id="$(run_agent_store create task title=Write empty= missing=null)"
     got="$(run_agent_store get "$id")"
     test "$got" = "$id task empty='' missing=null title=Write"
@@ -510,13 +510,13 @@ PY
 
   record_id_generation_contract)
     cd "$tmp"
-    run_agent_store init >/tmp/agent-store-ids-lbl-init.out
+    run_agent_store init >"$tmp"/agent-store-ids-lbl-init.out
     ids_file="$tmp/record-ids"
 
     for n in 1 2 3 4 5 6 7 8; do
       id="$(run_agent_store create sample seq="$n")"
       printf "%s\n" "$id" | grep -Eq "^[a-z0-9]{6,8}$"
-      run_agent_store get "$id" >/tmp/agent-store-ids-lbl-get.out
+      run_agent_store get "$id" >"$tmp"/agent-store-ids-lbl-get.out
       printf "%s\n" "$id" >>"$ids_file"
     done
 
@@ -727,54 +727,57 @@ PY
 
     # Before init: runtime error is a JSON object on stderr, exit 1.
     set +e
-    run_agent_store --json get abcdef >/tmp/agent-store-jerr-out 2>/tmp/agent-store-jerr-err
+    run_agent_store --json get abcdef >"$tmp"/agent-store-jerr-out 2>"$tmp"/agent-store-jerr-err
     status=$?
     set -e
     test "$status" -eq 1
-    test ! -s /tmp/agent-store-jerr-out
-    python3 - /tmp/agent-store-jerr-err <<'PY'
+    test ! -s "$tmp"/agent-store-jerr-out
+    python3 - "$tmp"/agent-store-jerr-err <<'PY'
 import json, sys
 data = json.loads(open(sys.argv[1]).read())
 assert set(data) == {"error"}, data
 assert "no agent-store found" in data["error"], data
 PY
 
-    run_agent_store init >/tmp/agent-store-jerr-init.out
+    run_agent_store init >"$tmp"/agent-store-jerr-init.out
 
     # Unknown record ID: envelope message matches plain mode minus the prefix.
     set +e
-    run_agent_store --json get zzzzzz >/tmp/agent-store-jerr-out 2>/tmp/agent-store-jerr-err
+    run_agent_store --json get zzzzzz >"$tmp"/agent-store-jerr-out 2>"$tmp"/agent-store-jerr-err
     json_status=$?
-    run_agent_store get zzzzzz >/tmp/agent-store-jerr-plain-out 2>/tmp/agent-store-jerr-plain-err
+    run_agent_store get zzzzzz >"$tmp"/agent-store-jerr-plain-out 2>"$tmp"/agent-store-jerr-plain-err
     plain_status=$?
     set -e
     test "$json_status" -eq 1
     test "$plain_status" -eq 1
-    test ! -s /tmp/agent-store-jerr-out
-    plain_msg="$(sed "s/^error: //" /tmp/agent-store-jerr-plain-err)"
-    json_msg="$(python3 -c "import json,sys; print(json.load(open(\"/tmp/agent-store-jerr-err\"))[\"error\"])")"
+    test ! -s "$tmp"/agent-store-jerr-out
+    plain_msg="$(sed "s/^error: //" "$tmp"/agent-store-jerr-plain-err)"
+    json_msg="$(python3 -c "import json,sys; print(json.load(open(\"$tmp/agent-store-jerr-err\"))[\"error\"])")"
     test "$json_msg" = "$plain_msg"
 
     # Invalid query keeps exit code 2 with the envelope.
     set +e
-    run_agent_store --json find "kind=" >/tmp/agent-store-jerr-out 2>/tmp/agent-store-jerr-err
+    run_agent_store --json find "kind=" >"$tmp"/agent-store-jerr-out 2>"$tmp"/agent-store-jerr-err
     status=$?
     set -e
     test "$status" -eq 2
-    test ! -s /tmp/agent-store-jerr-out
-    grep -Fq "{\"error\":\"invalid query:" /tmp/agent-store-jerr-err
+    test ! -s "$tmp"/agent-store-jerr-out
+    grep -Fq "{\"error\":\"invalid query:" "$tmp"/agent-store-jerr-err
 
     # Usage/parse errors stay plain text even with --json.
     set +e
-    run_agent_store --json definitely-not-a-command >/tmp/agent-store-jerr-out 2>/tmp/agent-store-jerr-err
+    run_agent_store --json definitely-not-a-command >"$tmp"/agent-store-jerr-out 2>"$tmp"/agent-store-jerr-err
     status=$?
     set -e
     test "$status" -eq 2
-    grep -q "^error: " /tmp/agent-store-jerr-err
+    grep -q "^error: " "$tmp"/agent-store-jerr-err
     ;;
 
   uninitialized_store_errors)
-    cd "$tmp"
+    # Work in a subdirectory so evidence files under $tmp don't disturb the
+    # no-side-effect (directory stays empty) assertion below.
+    mkdir "$tmp/work"
+    cd "$tmp/work"
     expected_err="error: no agent-store found; run 'agent-store init' first"
     expected_json_err="{\"error\":\"no agent-store found; run 'agent-store init' first\"}"
     baseline="$(find . | sort)"
@@ -797,24 +800,24 @@ PY
       "--json create task title=Write"; do
       set +e
       # shellcheck disable=SC2086
-      run_agent_store $cmd >/tmp/agent-store-noinit-8fz.out 2>/tmp/agent-store-noinit-8fz.err
+      run_agent_store $cmd >$tmp/agent-store-noinit-8fz.out 2>$tmp/agent-store-noinit-8fz.err
       status=$?
       set -e
       test "$status" -eq 1
-      test ! -s /tmp/agent-store-noinit-8fz.out
+      test ! -s "$tmp"/agent-store-noinit-8fz.out
       case "$cmd" in
         --json*)
-          grep -Fxq "$expected_json_err" /tmp/agent-store-noinit-8fz.err
+          grep -Fxq "$expected_json_err" "$tmp"/agent-store-noinit-8fz.err
           ;;
         *)
-          grep -Fxq "$expected_err" /tmp/agent-store-noinit-8fz.err
+          grep -Fxq "$expected_err" "$tmp"/agent-store-noinit-8fz.err
           ;;
       esac
     done
     test "$(find . | sort)" = "$baseline"
     test ! -e .agent-store
 
-    run_agent_store init >/tmp/agent-store-noinit-8fz-init.out
+    run_agent_store init >"$tmp"/agent-store-noinit-8fz-init.out
     id="$(run_agent_store create task title=Write)"
     got="$(run_agent_store get "$id")"
     test "$got" = "$id task title=Write"
@@ -832,7 +835,7 @@ PY
     binary="$target_dir/debug/agent-store"
     test -x "$binary"
     cd "$tmp"
-    "$binary" init >/tmp/agent-store-pipe-9pe-init.out
+    "$binary" init >"$tmp"/agent-store-pipe-9pe-init.out
     for i in $(seq 1 200); do
       "$binary" create task title="Task $i" status=open >/dev/null
     done
@@ -841,32 +844,32 @@ PY
     id="${id_line%% *}"
 
     set +e
-    "$binary" find kind=task 2>/tmp/agent-store-pipe-9pe-find.err | head -c 1 >/dev/null
+    "$binary" find kind=task 2>"$tmp"/agent-store-pipe-9pe-find.err | head -c 1 >/dev/null
     find_status="${PIPESTATUS[0]}"
-    "$binary" --json get "$id" 2>/tmp/agent-store-pipe-9pe-get.err | true
+    "$binary" --json get "$id" 2>"$tmp"/agent-store-pipe-9pe-get.err | true
     get_status="${PIPESTATUS[0]}"
     set -e
 
     test "$find_status" -eq 0 -o "$find_status" -eq 141
     test "$get_status" -eq 0 -o "$get_status" -eq 141
-    ! grep -q "panicked" /tmp/agent-store-pipe-9pe-find.err
-    ! grep -q "panicked" /tmp/agent-store-pipe-9pe-get.err
-    test ! -s /tmp/agent-store-pipe-9pe-find.err
-    test ! -s /tmp/agent-store-pipe-9pe-get.err
+    ! grep -q "panicked" "$tmp"/agent-store-pipe-9pe-find.err
+    ! grep -q "panicked" "$tmp"/agent-store-pipe-9pe-get.err
+    test ! -s "$tmp"/agent-store-pipe-9pe-find.err
+    test ! -s "$tmp"/agent-store-pipe-9pe-get.err
     ;;
 
   identifier_validation_rejects_unsafe_names)
     cd "$tmp"
-    run_agent_store init >/tmp/agent-store-ident-6vl-init.out
+    run_agent_store init >"$tmp"/agent-store-ident-6vl-init.out
 
     reject() {
       set +e
-      run_agent_store "$@" >/tmp/agent-store-ident-6vl.out 2>/tmp/agent-store-ident-6vl.err
+      run_agent_store "$@" >"$tmp"/agent-store-ident-6vl.out 2>"$tmp"/agent-store-ident-6vl.err
       status=$?
       set -e
       test "$status" -eq 2
-      grep -Fq "error: $expected" /tmp/agent-store-ident-6vl.err
-      test ! -s /tmp/agent-store-ident-6vl.out
+      grep -Fq "error: $expected" "$tmp"/agent-store-ident-6vl.err
+      test ! -s "$tmp"/agent-store-ident-6vl.out
     }
 
     # Kinds with newline, whitespace, '=', control chars, or quotes are rejected.
@@ -917,62 +920,62 @@ PY
 
   create_stdin_imports_jsonl)
     cd "$tmp"
-    run_agent_store init >/tmp/agent-store-stdin-2p1-init.out
+    run_agent_store init >"$tmp"/agent-store-stdin-2p1-init.out
 
     # Hooks fire per imported record.
     run_agent_store hook add create 'kind=task' -- 'echo "$AGENT_STORE_ID" >> hook.log' \
-      >/tmp/agent-store-stdin-2p1-hook.out
+      >"$tmp"/agent-store-stdin-2p1-hook.out
 
     # Multi-line import with typed values, extra keys, and a blank line.
     printf '%s\n\n%s\n' \
       '{"kind":"task","id":"ignored","created_at":"x","updated_at":"y","fields":{"title":"a","n":3,"done":true,"note":null}}' \
       '{"kind":"task","fields":{"title":"b"}}' \
-      | run_agent_store create --stdin >/tmp/agent-store-stdin-2p1-ids.out
-    test "$(wc -l </tmp/agent-store-stdin-2p1-ids.out)" -eq 2
-    first="$(sed -n 1p /tmp/agent-store-stdin-2p1-ids.out)"
-    second="$(sed -n 2p /tmp/agent-store-stdin-2p1-ids.out)"
+      | run_agent_store create --stdin >"$tmp"/agent-store-stdin-2p1-ids.out
+    test "$(wc -l <"$tmp"/agent-store-stdin-2p1-ids.out)" -eq 2
+    first="$(sed -n 1p "$tmp"/agent-store-stdin-2p1-ids.out)"
+    second="$(sed -n 2p "$tmp"/agent-store-stdin-2p1-ids.out)"
     got="$(run_agent_store get "$first")"
     test "$got" = "$first task done=true n=3 note=null title=a"
     got="$(run_agent_store get "$second")"
     test "$got" = "$second task title=b"
-    cmp -s hook.log /tmp/agent-store-stdin-2p1-ids.out
+    cmp -s hook.log "$tmp"/agent-store-stdin-2p1-ids.out
 
     # Round-trip: find --json output re-imports into a fresh store.
-    run_agent_store find --json >/tmp/agent-store-stdin-2p1-export.json
+    run_agent_store find --json >"$tmp"/agent-store-stdin-2p1-export.json
     mkdir fresh
     (
       cd fresh
       run_agent_store init >/dev/null
-      jq -c '.records[]' </tmp/agent-store-stdin-2p1-export.json | run_agent_store create --stdin >/dev/null
+      jq -c '.records[]' <"$tmp"/agent-store-stdin-2p1-export.json | run_agent_store create --stdin >/dev/null
       test "$(run_agent_store find --count)" -eq 2
       test "$(run_agent_store find 'kind=task and title=a' --json | jq -r '.records[0].fields.n')" = 3
     )
 
     # --json output wraps full created record objects in a records array.
     echo '{"kind":"note","fields":{"k":"v"}}' | run_agent_store create --stdin --json \
-      >/tmp/agent-store-stdin-2p1-json.out
-    test "$(jq -r '.records | length' /tmp/agent-store-stdin-2p1-json.out)" -eq 1
-    test "$(jq -r '.records[0].kind' /tmp/agent-store-stdin-2p1-json.out)" = note
-    test "$(jq -r '.records[0].fields.k' /tmp/agent-store-stdin-2p1-json.out)" = v
+      >"$tmp"/agent-store-stdin-2p1-json.out
+    test "$(jq -r '.records | length' "$tmp"/agent-store-stdin-2p1-json.out)" -eq 1
+    test "$(jq -r '.records[0].kind' "$tmp"/agent-store-stdin-2p1-json.out)" = note
+    test "$(jq -r '.records[0].fields.k' "$tmp"/agent-store-stdin-2p1-json.out)" = v
     jq -e '.records[0].id and .records[0].created_at and .records[0].updated_at' \
-      /tmp/agent-store-stdin-2p1-json.out >/dev/null
+      "$tmp"/agent-store-stdin-2p1-json.out >/dev/null
 
     # Invalid line fails naming the line number and imports nothing.
     before="$(run_agent_store find --count)"
     set +e
     printf '%s\n%s\n' '{"kind":"task","fields":{"title":"ok"}}' 'not json' \
-      | run_agent_store create --stdin >/tmp/agent-store-stdin-2p1-bad.out 2>/tmp/agent-store-stdin-2p1-bad.err
+      | run_agent_store create --stdin >"$tmp"/agent-store-stdin-2p1-bad.out 2>"$tmp"/agent-store-stdin-2p1-bad.err
     bad_status=$?
     run_agent_store create --stdin task title=x \
-      >/tmp/agent-store-stdin-2p1-conflict.out 2>/tmp/agent-store-stdin-2p1-conflict.err
+      >"$tmp"/agent-store-stdin-2p1-conflict.out 2>"$tmp"/agent-store-stdin-2p1-conflict.err
     conflict_status=$?
     set -e
     test "$bad_status" -ne 0
-    grep -Fq "stdin line 2" /tmp/agent-store-stdin-2p1-bad.err
-    test ! -s /tmp/agent-store-stdin-2p1-bad.out
+    grep -Fq "stdin line 2" "$tmp"/agent-store-stdin-2p1-bad.err
+    test ! -s "$tmp"/agent-store-stdin-2p1-bad.out
     test "$(run_agent_store find --count)" = "$before"
     test "$conflict_status" -eq 2
-    grep -Fq "does not accept positional argument" /tmp/agent-store-stdin-2p1-conflict.err
+    grep -Fq "does not accept positional argument" "$tmp"/agent-store-stdin-2p1-conflict.err
     ;;
 
   init_output_summary)
@@ -980,34 +983,34 @@ PY
 
     # Fresh init with no AGENTS.md/CLAUDE.md: enumerates installed skills and
     # hints at the missing instructions file.
-    run_agent_store init >/tmp/agent-store-init-sum-1.out
-    grep -Fxq "Initialized .agent-store/" /tmp/agent-store-init-sum-1.out
+    run_agent_store init >"$tmp"/agent-store-init-sum-1.out
+    grep -Fxq "Initialized .agent-store/" "$tmp"/agent-store-init-sum-1.out
     for root in .agents/skills .claude/skills; do
       for skill in agent-store agent-store-patterns agent-store-pipelines; do
-        grep -Fxq "Installed $root/$skill/SKILL.md" /tmp/agent-store-init-sum-1.out
+        grep -Fxq "Installed $root/$skill/SKILL.md" "$tmp"/agent-store-init-sum-1.out
       done
     done
-    grep -Fq "No AGENTS.md or CLAUDE.md found; create one and re-run \`agent-store init\`" /tmp/agent-store-init-sum-1.out
+    grep -Fq "No AGENTS.md or CLAUDE.md found; create one and re-run \`agent-store init\`" "$tmp"/agent-store-init-sum-1.out
 
     # Re-init after AGENTS.md appears: block is added and reported.
     printf "# project\n" > AGENTS.md
-    run_agent_store init >/tmp/agent-store-init-sum-2.out
-    grep -Fxq "Already initialized .agent-store/" /tmp/agent-store-init-sum-2.out
-    grep -Fxq "Skills already installed in .agents/skills/ and .claude/skills/" /tmp/agent-store-init-sum-2.out
-    grep -Fxq "Added instructions block to AGENTS.md" /tmp/agent-store-init-sum-2.out
-    ! grep -Fq "No AGENTS.md or CLAUDE.md found" /tmp/agent-store-init-sum-2.out
+    run_agent_store init >"$tmp"/agent-store-init-sum-2.out
+    grep -Fxq "Already initialized .agent-store/" "$tmp"/agent-store-init-sum-2.out
+    grep -Fxq "Skills already installed in .agents/skills/ and .claude/skills/" "$tmp"/agent-store-init-sum-2.out
+    grep -Fxq "Added instructions block to AGENTS.md" "$tmp"/agent-store-init-sum-2.out
+    ! grep -Fq "No AGENTS.md or CLAUDE.md found" "$tmp"/agent-store-init-sum-2.out
 
     # Third run is idempotent and reports the block as already present.
-    run_agent_store init >/tmp/agent-store-init-sum-3.out
-    grep -Fxq "Instructions block already present in AGENTS.md" /tmp/agent-store-init-sum-3.out
+    run_agent_store init >"$tmp"/agent-store-init-sum-3.out
+    grep -Fxq "Instructions block already present in AGENTS.md" "$tmp"/agent-store-init-sum-3.out
     test "$(grep -Fc "<!-- agent-store:start -->" AGENTS.md)" -eq 1
 
     # JSON envelope reports the same facts.
-    run_agent_store --json init >/tmp/agent-store-init-sum-4.out
-    grep -Fq "\"status\":\"already-initialized\"" /tmp/agent-store-init-sum-4.out
-    grep -Fq "\"skills_installed\":[]" /tmp/agent-store-init-sum-4.out
-    grep -Fq "{\"path\":\"AGENTS.md\",\"status\":\"present\"}" /tmp/agent-store-init-sum-4.out
-    grep -Fq "{\"path\":\"CLAUDE.md\",\"status\":\"missing\"}" /tmp/agent-store-init-sum-4.out
+    run_agent_store --json init >"$tmp"/agent-store-init-sum-4.out
+    grep -Fq "\"status\":\"already-initialized\"" "$tmp"/agent-store-init-sum-4.out
+    grep -Fq "\"skills_installed\":[]" "$tmp"/agent-store-init-sum-4.out
+    grep -Fq "{\"path\":\"AGENTS.md\",\"status\":\"present\"}" "$tmp"/agent-store-init-sum-4.out
+    grep -Fq "{\"path\":\"CLAUDE.md\",\"status\":\"missing\"}" "$tmp"/agent-store-init-sum-4.out
     ;;
 
   *)

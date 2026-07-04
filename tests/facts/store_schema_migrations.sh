@@ -298,12 +298,12 @@ PY
     cd "$tmp"
     run_agent_store init >/dev/null
     victim="$(create_record task title=victim status=open note="hello world")"
-    run_agent_store rm "$victim" >/tmp/agent-store-rm-vju.out
-    grep -Fxq "Removed $victim" /tmp/agent-store-rm-vju.out
-    if run_agent_store get "$victim" >/tmp/agent-store-rm-vju-get.out 2>/tmp/agent-store-rm-vju-get.err; then
+    run_agent_store rm "$victim" >"$tmp"/agent-store-rm-vju.out
+    grep -Fxq "Removed $victim" "$tmp"/agent-store-rm-vju.out
+    if run_agent_store get "$victim" >"$tmp"/agent-store-rm-vju-get.out 2>"$tmp"/agent-store-rm-vju-get.err; then
       exit 1
     fi
-    grep -Fq "was not found" /tmp/agent-store-rm-vju-get.err
+    grep -Fq "was not found" "$tmp"/agent-store-rm-vju-get.err
     python3 - .agent-store/store.sqlite "$victim" <<'PY'
 import json
 import sqlite3
@@ -367,10 +367,10 @@ con.execute(
 con.commit()
 assert con.execute("select count(*) from records where id = ?", (seed,)).fetchone()[0] == 1
 PY
-    if run_agent_store create task fail_after_record=bad title=partial >/tmp/agent-store-create-0uf.out 2>/tmp/agent-store-create-0uf.err; then
+    if run_agent_store create task fail_after_record=bad title=partial >"$tmp"/agent-store-create-0uf.out 2>"$tmp"/agent-store-create-0uf.err; then
       exit 1
     fi
-    grep -Fq "failed to create record" /tmp/agent-store-create-0uf.err
+    grep -Fq "failed to create record" "$tmp"/agent-store-create-0uf.err
     python3 - .agent-store/store.sqlite "$seed" <<'PY'
 import sqlite3
 import sys
@@ -407,10 +407,10 @@ con.execute(
 )
 con.commit()
 PY
-    if run_agent_store rm "$victim" >/tmp/agent-store-rm-0uf.out 2>/tmp/agent-store-rm-0uf.err; then
+    if run_agent_store rm "$victim" >"$tmp"/agent-store-rm-0uf.out 2>"$tmp"/agent-store-rm-0uf.err; then
       exit 1
     fi
-    grep -Fq "forced rm rollback" /tmp/agent-store-rm-0uf.err
+    grep -Fq "forced rm rollback" "$tmp"/agent-store-rm-0uf.err
     out="$(run_agent_store get "$victim")"
     test "$out" = "$victim task status=open title=victim"
     python3 - .agent-store/store.sqlite "$victim" <<'PY'
@@ -468,19 +468,19 @@ con.execute(
 )
 con.commit()
 PY
-    if run_agent_store create task title=bad >/tmp/agent-store-facts-checksum.out 2>/tmp/agent-store-facts-checksum.err; then
+    if run_agent_store create task title=bad >"$tmp"/agent-store-facts-checksum.out 2>"$tmp"/agent-store-facts-checksum.err; then
       exit 1
     fi
-    grep -Fq "checksum mismatch" /tmp/agent-store-facts-checksum.err
-    grep -Fq "expected" /tmp/agent-store-facts-checksum.err
-    grep -Fq "found bad" /tmp/agent-store-facts-checksum.err
+    grep -Fq "checksum mismatch" "$tmp"/agent-store-facts-checksum.err
+    grep -Fq "expected" "$tmp"/agent-store-facts-checksum.err
+    grep -Fq "found bad" "$tmp"/agent-store-facts-checksum.err
     ;;
 
   concurrent_process_writers)
     CARGO_TARGET_DIR="$target_dir" cargo build --quiet --manifest-path "$repo/Cargo.toml"
     agent_store_bin="$target_dir/debug/agent-store"
     cd "$tmp"
-    "$agent_store_bin" init >/tmp/agent-store-concurrent-init.out
+    "$agent_store_bin" init >"$tmp"/agent-store-concurrent-init.out
 
     ready_dir="$tmp/ready"
     start_file="$tmp/start"
@@ -538,11 +538,11 @@ PY
     CARGO_TARGET_DIR="$target_dir" cargo build --quiet --manifest-path "$repo/Cargo.toml"
     agent_store_bin="$target_dir/debug/agent-store"
     cd "$tmp"
-    "$agent_store_bin" init >/tmp/agent-store-concurrent-hooks-init.out
+    "$agent_store_bin" init >"$tmp"/agent-store-concurrent-hooks-init.out
     hook_side_effects="$tmp/hook-side-effects.log"
     "$agent_store_bin" hook add create -- \
       "sleep 0.03; printf '%s\n' \"\$AGENT_STORE_ID\" >> \"$hook_side_effects\"" \
-      >/tmp/agent-store-concurrent-hooks-hook.out
+      >"$tmp"/agent-store-concurrent-hooks-hook.out
 
     ready_dir="$tmp/ready"
     start_file="$tmp/start"
@@ -609,7 +609,7 @@ PY
     CARGO_TARGET_DIR="$target_dir" cargo build --quiet --manifest-path "$repo/Cargo.toml"
     agent_store_bin="$target_dir/debug/agent-store"
     cd "$tmp"
-    "$agent_store_bin" init >/tmp/agent-store-concurrent-mutations-init.out
+    "$agent_store_bin" init >"$tmp"/agent-store-concurrent-mutations-init.out
 
     hook_side_effects="$tmp/hook-side-effects"
     mkdir "$hook_side_effects"
@@ -625,10 +625,10 @@ printf "%s" "$AGENT_STORE_EVENT"
 SH
     chmod +x hook-touch.sh
 
-    "$agent_store_bin" hook add set 'kind=task and status=done' -- './hook-touch.sh hook-side-effects' >/tmp/agent-store-concurrent-mutations-set-hook.out
-    "$agent_store_bin" hook add link 'kind=task and status=done' -- './hook-touch.sh hook-side-effects' >/tmp/agent-store-concurrent-mutations-link-hook.out
-    "$agent_store_bin" hook add unlink 'kind=task and status=done' -- './hook-touch.sh hook-side-effects' >/tmp/agent-store-concurrent-mutations-unlink-hook.out
-    "$agent_store_bin" hook add rm 'kind=note and batch=mutation-hook-concurrent' -- './hook-touch.sh hook-side-effects' >/tmp/agent-store-concurrent-mutations-rm-hook.out
+    "$agent_store_bin" hook add set 'kind=task and status=done' -- './hook-touch.sh hook-side-effects' >"$tmp"/agent-store-concurrent-mutations-set-hook.out
+    "$agent_store_bin" hook add link 'kind=task and status=done' -- './hook-touch.sh hook-side-effects' >"$tmp"/agent-store-concurrent-mutations-link-hook.out
+    "$agent_store_bin" hook add unlink 'kind=task and status=done' -- './hook-touch.sh hook-side-effects' >"$tmp"/agent-store-concurrent-mutations-unlink-hook.out
+    "$agent_store_bin" hook add rm 'kind=note and batch=mutation-hook-concurrent' -- './hook-touch.sh hook-side-effects' >"$tmp"/agent-store-concurrent-mutations-rm-hook.out
 
     ready_dir="$tmp/ready"
     start_file="$tmp/start"
@@ -755,7 +755,7 @@ PY
     CARGO_TARGET_DIR="$target_dir" cargo build --quiet --manifest-path "$repo/Cargo.toml"
     agent_store_bin="$target_dir/debug/agent-store"
     cd "$tmp"
-    "$agent_store_bin" init >/tmp/agent-store-hook-lifecycle-init.out
+    "$agent_store_bin" init >"$tmp"/agent-store-hook-lifecycle-init.out
 
     evidence_root="${AGENT_STORE_E2E_DIR:-}"
     if [ -n "$evidence_root" ]; then
@@ -1030,7 +1030,7 @@ EOF
     CARGO_TARGET_DIR="$target_dir" cargo build --quiet --manifest-path "$repo/Cargo.toml"
     agent_store_bin="$target_dir/debug/agent-store"
     cd "$tmp"
-    "$agent_store_bin" init >/tmp/agent-store-hook-lifecycle-mutations-init.out
+    "$agent_store_bin" init >"$tmp"/agent-store-hook-lifecycle-mutations-init.out
 
     evidence_root="${AGENT_STORE_E2E_DIR:-}"
     if [ -n "$evidence_root" ]; then
@@ -1371,7 +1371,7 @@ EOF
     CARGO_TARGET_DIR="$target_dir" cargo build --quiet --manifest-path "$repo/Cargo.toml"
     agent_store_bin="$target_dir/debug/agent-store"
     cd "$tmp"
-    "$agent_store_bin" init >/tmp/agent-store-json-mutation-hook-lifecycle-init.out
+    "$agent_store_bin" init >"$tmp"/agent-store-json-mutation-hook-lifecycle-init.out
 
     evidence_root="${AGENT_STORE_E2E_DIR:-}"
     if [ -n "$evidence_root" ]; then
@@ -1751,7 +1751,7 @@ EOF
     CARGO_TARGET_DIR="$target_dir" cargo build --quiet --manifest-path "$repo/Cargo.toml"
     agent_store_bin="$target_dir/debug/agent-store"
     cd "$tmp"
-    "$agent_store_bin" init >/tmp/agent-store-hook-churn-reads-init.out
+    "$agent_store_bin" init >"$tmp"/agent-store-hook-churn-reads-init.out
 
     evidence_root="${AGENT_STORE_E2E_DIR:-}"
     if [ -n "$evidence_root" ]; then
@@ -2033,7 +2033,7 @@ EOF
     CARGO_TARGET_DIR="$target_dir" cargo build --quiet --manifest-path "$repo/Cargo.toml"
     agent_store_bin="$target_dir/debug/agent-store"
     cd "$tmp"
-    "$agent_store_bin" init >/tmp/agent-store-record-readers-init.out
+    "$agent_store_bin" init >"$tmp"/agent-store-record-readers-init.out
 
     evidence_root="${AGENT_STORE_E2E_DIR:-}"
     if [ -n "$evidence_root" ]; then
@@ -2318,7 +2318,7 @@ EOF
     CARGO_TARGET_DIR="$target_dir" cargo build --quiet --manifest-path "$repo/Cargo.toml"
     agent_store_bin="$target_dir/debug/agent-store"
     cd "$tmp"
-    "$agent_store_bin" init >/tmp/agent-store-json-record-readers-init.out
+    "$agent_store_bin" init >"$tmp"/agent-store-json-record-readers-init.out
 
     evidence_root="${AGENT_STORE_E2E_DIR:-}"
     if [ -n "$evidence_root" ]; then
@@ -2746,7 +2746,7 @@ EOF
     CARGO_TARGET_DIR="$target_dir" cargo build --quiet --manifest-path "$repo/Cargo.toml"
     agent_store_bin="$target_dir/debug/agent-store"
     cd "$tmp"
-    "$agent_store_bin" init >/tmp/agent-store-link-rm-race-init.out
+    "$agent_store_bin" init >"$tmp"/agent-store-link-rm-race-init.out
 
     evidence_root="${AGENT_STORE_E2E_DIR:-}"
     if [ -n "$evidence_root" ]; then
@@ -2773,8 +2773,8 @@ SH
       "$agent_store_bin" link "$source_id" blocks "$target_id" >"$tmp/setup-link-$index.out" 2>"$tmp/setup-link-$index.err"
     done
 
-    "$agent_store_bin" hook add link 'kind=task and batch=disappear-race and link.out=blocks' -- './hook-touch.sh hook-side-effects' >/tmp/agent-store-link-rm-race-link-hook.out
-    "$agent_store_bin" hook add unlink 'kind=task and batch=disappear-race' -- './hook-touch.sh hook-side-effects' >/tmp/agent-store-link-rm-race-unlink-hook.out
+    "$agent_store_bin" hook add link 'kind=task and batch=disappear-race and link.out=blocks' -- './hook-touch.sh hook-side-effects' >"$tmp"/agent-store-link-rm-race-link-hook.out
+    "$agent_store_bin" hook add unlink 'kind=task and batch=disappear-race' -- './hook-touch.sh hook-side-effects' >"$tmp"/agent-store-link-rm-race-unlink-hook.out
 
     event_marker="$(python3 - .agent-store/store.sqlite <<'PY'
 import sqlite3
@@ -3048,7 +3048,7 @@ EOF
     CARGO_TARGET_DIR="$target_dir" cargo build --quiet --manifest-path "$repo/Cargo.toml"
     agent_store_bin="$target_dir/debug/agent-store"
     cd "$tmp"
-    "$agent_store_bin" init >/tmp/agent-store-set-unset-link-snapshot-init.out
+    "$agent_store_bin" init >"$tmp"/agent-store-set-unset-link-snapshot-init.out
 
     evidence_root="${AGENT_STORE_E2E_DIR:-}"
     if [ -n "$evidence_root" ]; then
@@ -3069,12 +3069,12 @@ SH
     set_source="$("$agent_store_bin" create task title=set-source batch=snapshot-set status=open)"
     set_target="$("$agent_store_bin" create note title=set-target batch=snapshot-set)"
     "$agent_store_bin" link "$set_source" blocks "$set_target" >"$tmp/setup-set-link.out" 2>"$tmp/setup-set-link.err"
-    "$agent_store_bin" hook add set 'kind=task and batch=snapshot-set and status=done and link.out=blocks' -- './hook-touch.sh hook-side-effects' >/tmp/agent-store-set-link-snapshot-hook.out
+    "$agent_store_bin" hook add set 'kind=task and batch=snapshot-set and status=done and link.out=blocks' -- './hook-touch.sh hook-side-effects' >"$tmp"/agent-store-set-link-snapshot-hook.out
 
     unset_source="$("$agent_store_bin" create task title=unset-source batch=snapshot-unset status=open flag=present)"
     unset_target="$("$agent_store_bin" create note title=unset-target batch=snapshot-unset)"
     "$agent_store_bin" link "$unset_source" blocks "$unset_target" >"$tmp/setup-unset-link.out" 2>"$tmp/setup-unset-link.err"
-    "$agent_store_bin" hook add unset 'kind=task and batch=snapshot-unset and not flag=present and link.out=blocks' -- './hook-touch.sh hook-side-effects' >/tmp/agent-store-unset-link-snapshot-hook.out
+    "$agent_store_bin" hook add unset 'kind=task and batch=snapshot-unset and not flag=present and link.out=blocks' -- './hook-touch.sh hook-side-effects' >"$tmp"/agent-store-unset-link-snapshot-hook.out
 
     event_marker="$(python3 - .agent-store/store.sqlite <<'PY'
 import sqlite3
@@ -3238,7 +3238,7 @@ EOF
     CARGO_TARGET_DIR="$target_dir" cargo build --quiet --manifest-path "$repo/Cargo.toml"
     agent_store_bin="$target_dir/debug/agent-store"
     cd "$tmp"
-    "$agent_store_bin" init >/tmp/agent-store-create-rm-link-snapshot-init.out
+    "$agent_store_bin" init >"$tmp"/agent-store-create-rm-link-snapshot-init.out
 
     evidence_root="${AGENT_STORE_E2E_DIR:-}"
     if [ -n "$evidence_root" ]; then
@@ -3381,7 +3381,7 @@ EOF
     CARGO_TARGET_DIR="$target_dir" cargo build --quiet --manifest-path "$repo/Cargo.toml"
     agent_store_bin="$target_dir/debug/agent-store"
     cd "$tmp"
-    "$agent_store_bin" init >/tmp/agent-store-same-target-races-init.out
+    "$agent_store_bin" init >"$tmp"/agent-store-same-target-races-init.out
 
     evidence_root="${AGENT_STORE_E2E_DIR:-}"
     if [ -n "$evidence_root" ]; then
@@ -3402,11 +3402,11 @@ printf "%s" "$AGENT_STORE_EVENT"
 SH
     chmod +x hook-touch.sh
 
-    "$agent_store_bin" hook add link 'kind=task and batch=same-target-link' -- './hook-touch.sh hook-side-effects' >/tmp/agent-store-same-target-link-hook.out
-    "$agent_store_bin" hook add unlink 'kind=task and batch=same-target-link' -- './hook-touch.sh hook-side-effects' >/tmp/agent-store-same-target-unlink-hook.out
-    "$agent_store_bin" hook add set 'kind=task and batch=same-target-record' -- './hook-touch.sh hook-side-effects' >/tmp/agent-store-same-target-set-hook.out
-    "$agent_store_bin" hook add unset 'kind=task and batch=same-target-record' -- './hook-touch.sh hook-side-effects' >/tmp/agent-store-same-target-unset-hook.out
-    "$agent_store_bin" hook add rm 'kind=task and batch=same-target-record' -- './hook-touch.sh hook-side-effects' >/tmp/agent-store-same-target-rm-hook.out
+    "$agent_store_bin" hook add link 'kind=task and batch=same-target-link' -- './hook-touch.sh hook-side-effects' >"$tmp"/agent-store-same-target-link-hook.out
+    "$agent_store_bin" hook add unlink 'kind=task and batch=same-target-link' -- './hook-touch.sh hook-side-effects' >"$tmp"/agent-store-same-target-unlink-hook.out
+    "$agent_store_bin" hook add set 'kind=task and batch=same-target-record' -- './hook-touch.sh hook-side-effects' >"$tmp"/agent-store-same-target-set-hook.out
+    "$agent_store_bin" hook add unset 'kind=task and batch=same-target-record' -- './hook-touch.sh hook-side-effects' >"$tmp"/agent-store-same-target-unset-hook.out
+    "$agent_store_bin" hook add rm 'kind=task and batch=same-target-record' -- './hook-touch.sh hook-side-effects' >"$tmp"/agent-store-same-target-rm-hook.out
 
     source_id="$("$agent_store_bin" create task title=source batch=same-target-link status=open)"
     target_id="$("$agent_store_bin" create note title=target batch=same-target-link)"
@@ -3772,7 +3772,7 @@ EOF
     CARGO_TARGET_DIR="$target_dir" cargo build --quiet --manifest-path "$repo/Cargo.toml"
     agent_store_bin="$target_dir/debug/agent-store"
     cd "$tmp"
-    "$agent_store_bin" init >/tmp/agent-store-id-prefix-race-init.out
+    "$agent_store_bin" init >"$tmp"/agent-store-id-prefix-race-init.out
 
     evidence_root="${AGENT_STORE_E2E_DIR:-}"
     if [ -n "$evidence_root" ]; then
@@ -4093,8 +4093,8 @@ EOF
     CARGO_TARGET_DIR="$target_dir" cargo build --quiet --manifest-path "$repo/Cargo.toml"
     agent_store_bin="$target_dir/debug/agent-store"
     cd "$tmp"
-    "$agent_store_bin" init >/tmp/agent-store-json-prefix-hook-race-init.out
-    "$agent_store_bin" ctx >/tmp/agent-store-json-prefix-hook-race-schema.out
+    "$agent_store_bin" init >"$tmp"/agent-store-json-prefix-hook-race-init.out
+    "$agent_store_bin" ctx >"$tmp"/agent-store-json-prefix-hook-race-schema.out
 
     evidence_root="${AGENT_STORE_E2E_DIR:-}"
     if [ -n "$evidence_root" ]; then
@@ -4561,8 +4561,8 @@ EOF
     CARGO_TARGET_DIR="$target_dir" cargo build --quiet --manifest-path "$repo/Cargo.toml"
     agent_store_bin="$target_dir/debug/agent-store"
     cd "$tmp"
-    "$agent_store_bin" init >/tmp/agent-store-json-mutation-prefix-race-init.out
-    "$agent_store_bin" ctx >/tmp/agent-store-json-mutation-prefix-race-schema.out
+    "$agent_store_bin" init >"$tmp"/agent-store-json-mutation-prefix-race-init.out
+    "$agent_store_bin" ctx >"$tmp"/agent-store-json-mutation-prefix-race-schema.out
 
     evidence_root="${AGENT_STORE_E2E_DIR:-}"
     if [ -n "$evidence_root" ]; then
