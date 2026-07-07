@@ -20,7 +20,7 @@ _agent_store() {
         cword=$COMP_CWORD
     fi
 
-    local commands="init create cr find ls get set unset rm link unlink links ctx context hook"
+    local commands="init create cr find ls get set unset rm link unlink links ctx context hook schedule"
     local global_opts="--json --help --version -h -V"
 
     # Locate the subcommand (first non-option word after the program name).
@@ -78,6 +78,33 @@ _agent_store() {
         add)
             if [[ "$prev" == "add" ]]; then
                 COMPREPLY=($(compgen -W "create set unset rm link unlink" -- "$cur"))
+            fi
+            ;;
+        runs)
+            [[ "$prev" != "--limit" ]] &&
+                COMPREPLY=($(compgen -W "--limit" -- "$cur"))
+            ;;
+        esac
+        ;;
+    schedule)
+        local sub="" j
+        for ((j = i + 1; j < cword; j++)); do
+            case "${words[j]}" in
+            -*) ;;
+            *)
+                sub="${words[j]}"
+                break
+                ;;
+            esac
+        done
+        if [[ -z "$sub" ]]; then
+            COMPREPLY=($(compgen -W "add ls rm runs tick enable disable" -- "$cur"))
+            return
+        fi
+        case "$sub" in
+        add)
+            if [[ "$prev" == "add" ]]; then
+                COMPREPLY=($(compgen -W "at every" -- "$cur"))
             fi
             ;;
         runs)

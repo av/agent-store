@@ -32,16 +32,21 @@ mod cli;
 mod output;
 
 use agent_store::query::{record_sort_value, Query};
-use agent_store::store::{FieldChange, Hook, Link, LinkEdge, Record, Store, StoreError, STORE_DIR};
-use agent_store::value::FieldValue;
-use cli::{CliCommand, HookCliCommand};
+use agent_store::store::{
+    FieldChange, Hook, Link, LinkEdge, Record, Schedule, Store, StoreError, STORE_DIR,
+};
+use agent_store::value::{self, FieldValue};
+use cli::{CliCommand, HookCliCommand, ScheduleCliCommand};
 use output::{
     count_json, error_json, format_hook, format_hook_run_detail, format_hook_run_summary,
-    format_quick_context, format_record, format_record_with_timestamps, help_text,
-    hook_mutation_json, hook_runs_json, hooks_json, init_json, link_mutation_json, mutation_json,
-    print_json, quick_context_json, record_links_json, records_json, single_hook_run_json,
-    single_record_json, USAGE,
+    format_quick_context, format_record, format_record_with_timestamps, format_schedule,
+    format_schedule_run_detail, format_schedule_run_summary, help_text, hook_mutation_json,
+    hook_runs_json, hooks_json, init_json, link_mutation_json, mutation_json, print_json,
+    quick_context_json, record_links_json, records_json, schedule_mutation_json,
+    schedule_runs_json, schedules_json, single_hook_run_json,
+    single_record_json, single_schedule_run_json, tick_json, USAGE,
 };
+use serde_json::json;
 use std::cmp::Ordering;
 use std::env;
 use std::fs::{self, OpenOptions};
@@ -171,6 +176,36 @@ exactly one field, `AGENT_STORE_FIELD` and `AGENT_STORE_KEY` hold the field
 key, `AGENT_STORE_VALUE` the new value (the old value on unset), and
 `AGENT_STORE_OLD_VALUE`/`AGENT_STORE_NEW_VALUE` the before/after values
 (empty when absent).
+
+Schedules run bash commands on a time basis, complementing event-triggered
+hooks. Two kinds: `at` fires once at an absolute timestamp, `every` fires
+repeatedly at a duration interval. Commands use the same execution model as
+hooks (bash -c, 30s timeout, process group management, stdin record, env
+vars). An optional query scopes execution to matching records (one run per
+match):
+
+```bash
+agent-store schedule add every 5m -- 'echo heartbeat'
+agent-store schedule add at 2026-07-07T12:00:00Z -- 'cleanup.sh'
+agent-store schedule add every 1h 'kind=task and status=open' -- 'notify.sh'
+agent-store schedule ls
+agent-store schedule runs            # recent runs; `schedule runs <run-id>` for detail
+agent-store schedule rm <id>
+```
+
+Schedules are daemon-less. `schedule tick` is the heartbeat command: it finds
+all due schedules, atomically claims them (advances next_run_at or marks `at`
+schedules completed), then runs their commands. Use `schedule enable` to
+install a per-minute crontab entry that calls tick, and `schedule disable` to
+remove it:
+
+```bash
+agent-store schedule enable      # installs cron entry
+agent-store schedule disable     # removes cron entry
+```
+
+Duration expressions: `Ns` (seconds), `Nm` (minutes), `Nh` (hours), `Nd`
+(days). Timestamps must be ISO 8601 with a `T` separator.
 "#,
     },
     BuiltinSkill {
@@ -796,6 +831,159 @@ fn main() {
                 }
             }
         },
+        CliCommand::Schedule(command) => match command {
+            ScheduleCliCommand::Add {
+                kind,
+                expression,
+                query,
+                command,
+            } => {
+                let mut store = open_store_or_exit(cli.json_output);
+                let (next_run_at, interval_seconds) =
+                    resolve_schedule_time(&store, &kind, &expression, cli.json_output);
+                match store.add_schedule(
+                    &kind,
+                    &expression,
+                    interval_seconds,
+                    &next_run_at,
+                    query,
+                    &command,
+                ) {
+                    Ok(schedule) => {
+                        if cli.json_output {
+                            print_json(schedule_mutation_json("added", &schedule));
+                        } else {
+                            outln!("{}", schedule.id);
+                        }
+                    }
+                    Err(error) => {
+                        fail(
+                            cli.json_output,
+                            1,
+                            format!("failed to add schedule: {error}"),
+                        );
+                    }
+                }
+            }
+            ScheduleCliCommand::List => {
+                let store = open_store_or_exit(cli.json_output);
+                match store.list_schedules() {
+                    Ok(schedules) => {
+                        if cli.json_output {
+                            print_json(schedules_json(&schedules));
+                        } else {
+                            for schedule in schedules {
+                                outln!("{}", format_schedule(&schedule));
+                            }
+                        }
+                    }
+                    Err(error) => {
+                        fail(
+                            cli.json_output,
+                            1,
+                            format!("failed to list schedules: {error}"),
+                        );
+                    }
+                }
+            }
+            ScheduleCliCommand::Remove { id } => {
+                let mut store = open_store_or_exit(cli.json_output);
+                match store.delete_schedule(&id) {
+                    Ok(schedule) => {
+                        if cli.json_output {
+                            print_json(schedule_mutation_json("removed", &schedule));
+                        } else {
+                            outln!("Removed {}", schedule.id);
+                        }
+                    }
+                    Err(error) => {
+                        fail(
+                            cli.json_output,
+                            1,
+                            format!("failed to remove schedule: {error}"),
+                        );
+                    }
+                }
+            }
+            ScheduleCliCommand::Runs { limit, run_id } => {
+                let store = open_store_or_exit(cli.json_output);
+                if let Some(run_id) = run_id {
+                    match store.get_schedule_run(run_id) {
+                        Ok(run) => {
+                            if cli.json_output {
+                                print_json(single_schedule_run_json(&run));
+                            } else {
+                                outln!("{}", format_schedule_run_detail(&run));
+                            }
+                        }
+                        Err(error) => {
+                            fail(
+                                cli.json_output,
+                                1,
+                                format!("failed to get schedule run: {error}"),
+                            );
+                        }
+                    }
+                } else {
+                    match store.list_recent_schedule_runs(limit) {
+                        Ok(runs) => {
+                            if cli.json_output {
+                                print_json(schedule_runs_json(&runs));
+                            } else if runs.is_empty() {
+                                outln!("No schedule runs recorded yet.");
+                            } else {
+                                for run in runs {
+                                    outln!("{}", format_schedule_run_summary(&run));
+                                }
+                            }
+                        }
+                        Err(error) => {
+                            fail(
+                                cli.json_output,
+                                1,
+                                format!("failed to list schedule runs: {error}"),
+                            );
+                        }
+                    }
+                }
+            }
+            ScheduleCliCommand::Tick => {
+                let mut store = open_store_or_exit(cli.json_output);
+                execute_tick(&mut store, cli.json_output);
+            }
+            ScheduleCliCommand::Enable => {
+                let store = open_store_or_exit(cli.json_output);
+                match enable_schedule_cron(&store) {
+                    Ok(()) => {
+                        if cli.json_output {
+                            print_json(json!({"status": "enabled"}));
+                        } else {
+                            outln!("Enabled: crontab entry installed for schedule tick");
+                        }
+                    }
+                    Err(error) => {
+                        fail(cli.json_output, 1, error);
+                    }
+                }
+            }
+            ScheduleCliCommand::Disable => {
+                let store = open_store_or_exit(cli.json_output);
+                match disable_schedule_cron(&store) {
+                    Ok(removed) => {
+                        if cli.json_output {
+                            print_json(json!({"status": "disabled"}));
+                        } else if removed {
+                            outln!("Disabled: crontab entry removed");
+                        } else {
+                            outln!("No crontab entry found for this project");
+                        }
+                    }
+                    Err(error) => {
+                        fail(cli.json_output, 1, error);
+                    }
+                }
+            }
+        },
     }
 }
 
@@ -839,6 +1027,325 @@ fn sort_type_rank(value: &FieldValue) -> u8 {
         FieldValue::Text(_) => 3,
         FieldValue::Null => 4,
     }
+}
+
+fn resolve_schedule_time(
+    store: &Store,
+    kind: &str,
+    expression: &str,
+    json_output: bool,
+) -> (String, Option<i64>) {
+    if let Some(seconds) = value::parse_duration_seconds(expression) {
+        let next_run_at = match store.now_plus_seconds(seconds) {
+            Ok(ts) => ts,
+            Err(error) => {
+                fail(
+                    json_output,
+                    1,
+                    format!("failed to compute schedule time: {error}"),
+                );
+            }
+        };
+        let interval_seconds = if kind == "every" {
+            Some(seconds)
+        } else {
+            None
+        };
+        return (next_run_at, interval_seconds);
+    }
+
+    if kind == "every" {
+        fail(
+            json_output,
+            2,
+            format!("invalid interval '{expression}'; expected a duration like 5m, 1h, or 2d"),
+        );
+    }
+
+    let parsed = FieldValue::parse(expression);
+    match parsed {
+        FieldValue::Date(date) => {
+            let timestamp = format!("{date}T00:00:00.000Z");
+            (timestamp, None)
+        }
+        FieldValue::Timestamp(ts) => (ts, None),
+        _ => {
+            fail(
+                json_output,
+                2,
+                format!(
+                    "invalid time '{expression}'; expected a duration (5m, 1h, 2d) or timestamp"
+                ),
+            );
+        }
+    }
+}
+
+fn execute_tick(store: &mut Store, json_output: bool) {
+    let due_schedules = match store.tick_due_schedules() {
+        Ok(schedules) => schedules,
+        Err(error) => {
+            fail(
+                json_output,
+                1,
+                format!("failed to tick schedules: {error}"),
+            );
+        }
+    };
+
+    let project_root = store.project_root().to_path_buf();
+    let mut all_runs = Vec::new();
+
+    for schedule in &due_schedules {
+        if let Some(query_text) = &schedule.query {
+            let query = match agent_store::query::Query::parse(query_text) {
+                Ok(q) => q,
+                Err(error) => {
+                    eprintln!(
+                        "warning: schedule {} has invalid query, skipping: {error}",
+                        schedule.id
+                    );
+                    continue;
+                }
+            };
+            let records = match store.find_records(Some(&query)) {
+                Ok(r) => r,
+                Err(error) => {
+                    eprintln!(
+                        "warning: schedule {} query failed, skipping: {error}",
+                        schedule.id
+                    );
+                    continue;
+                }
+            };
+            for record in &records {
+                let run = execute_schedule_command(
+                    store,
+                    schedule,
+                    Some(&record),
+                    &project_root,
+                );
+                all_runs.push(run);
+            }
+        } else {
+            let run = execute_schedule_command(store, schedule, None, &project_root);
+            all_runs.push(run);
+        }
+    }
+
+    if json_output {
+        print_json(tick_json(&all_runs));
+    } else {
+        for run in &all_runs {
+            outln!("{}", format_schedule_run_summary(run));
+        }
+    }
+}
+
+fn execute_schedule_command(
+    store: &mut Store,
+    schedule: &Schedule,
+    record: Option<&Record>,
+    project_root: &Path,
+) -> agent_store::store::ScheduleRun {
+    let stdin_payload = match record {
+        Some(r) => format!("{}\n", format_record(r)),
+        None => String::new(),
+    };
+
+    let mut env_vars: Vec<(&'static str, String)> = vec![
+        ("AGENT_STORE_SCHEDULE_ID", schedule.id.clone()),
+    ];
+    if let Some(record) = record {
+        env_vars.push(("AGENT_STORE_EVENT", "tick".to_owned()));
+        env_vars.push(("AGENT_STORE_ID", record.id.clone()));
+        env_vars.push(("AGENT_STORE_KIND", record.kind.clone()));
+    }
+
+    let hook = Hook {
+        id: schedule.id.clone(),
+        event: "tick".to_owned(),
+        query: schedule.query.clone(),
+        command: schedule.command.clone(),
+    };
+
+    let output = match run_hook_command(
+        &hook,
+        &stdin_payload,
+        project_root,
+        DEFAULT_HOOK_TIMEOUT,
+        &env_vars,
+    ) {
+        Ok(output) => output,
+        Err(error) => {
+            let record_id = record.map(|r| r.id.as_str());
+            let run = store
+                .record_schedule_run(&schedule.id, record_id, 1, "", &error)
+                .unwrap_or_else(|_| agent_store::store::ScheduleRun {
+                    id: 0,
+                    schedule_id: schedule.id.clone(),
+                    record_id: record_id.map(str::to_owned),
+                    exit_status: 1,
+                    stdout_summary: String::new(),
+                    stderr_summary: error,
+                    created_at: String::new(),
+                });
+            return run;
+        }
+    };
+
+    let exit_status = if output.timed_out {
+        HOOK_TIMEOUT_EXIT_STATUS
+    } else {
+        hook_exit_status(&output.status)
+    };
+    let stdout_summary = String::from_utf8_lossy(&output.stdout).into_owned();
+    let mut stderr_summary = String::from_utf8_lossy(&output.stderr).into_owned();
+    if output.timed_out {
+        let timeout_note = format!("timed out after {} seconds", DEFAULT_HOOK_TIMEOUT.as_secs());
+        if stderr_summary.is_empty() {
+            stderr_summary = timeout_note;
+        } else {
+            stderr_summary.push_str("; ");
+            stderr_summary.push_str(&timeout_note);
+        }
+    }
+
+    let record_id = record.map(|r| r.id.as_str());
+    store
+        .record_schedule_run(
+            &schedule.id,
+            record_id,
+            exit_status,
+            &stdout_summary,
+            &stderr_summary,
+        )
+        .unwrap_or_else(|_| agent_store::store::ScheduleRun {
+            id: 0,
+            schedule_id: schedule.id.clone(),
+            record_id: record_id.map(str::to_owned),
+            exit_status,
+            stdout_summary,
+            stderr_summary,
+            created_at: String::new(),
+        })
+}
+
+const CRON_MARKER_PREFIX: &str = "# agent-store:tick:";
+
+fn enable_schedule_cron(store: &Store) -> Result<(), String> {
+    let project_root = store
+        .project_root()
+        .canonicalize()
+        .map_err(|e| format!("failed to resolve project root: {e}"))?;
+    let project_root_str = project_root.display().to_string();
+    let binary_path = env::current_exe()
+        .and_then(|p| p.canonicalize())
+        .map_err(|e| format!("failed to resolve agent-store binary path: {e}"))?;
+    let binary_path_str = binary_path.display().to_string();
+
+    let existing = read_crontab();
+    let marker = format!("{CRON_MARKER_PREFIX}{project_root_str}");
+
+    let mut new_lines = Vec::new();
+    let mut skip_next = false;
+    for line in existing.lines() {
+        if skip_next {
+            skip_next = false;
+            continue;
+        }
+        if line.starts_with(&marker) {
+            skip_next = true;
+            continue;
+        }
+        new_lines.push(line.to_owned());
+    }
+
+    new_lines.push(marker);
+    new_lines.push(format!(
+        "* * * * * cd {project_root_str} && {binary_path_str} schedule tick >/dev/null 2>&1"
+    ));
+
+    write_crontab(&new_lines.join("\n"))
+}
+
+fn disable_schedule_cron(store: &Store) -> Result<bool, String> {
+    let project_root = store
+        .project_root()
+        .canonicalize()
+        .map_err(|e| format!("failed to resolve project root: {e}"))?;
+    let project_root_str = project_root.display().to_string();
+
+    let existing = read_crontab();
+    let marker = format!("{CRON_MARKER_PREFIX}{project_root_str}");
+
+    let mut new_lines = Vec::new();
+    let mut skip_next = false;
+    let mut removed = false;
+    for line in existing.lines() {
+        if skip_next {
+            skip_next = false;
+            removed = true;
+            continue;
+        }
+        if line.starts_with(&marker) {
+            skip_next = true;
+            removed = true;
+            continue;
+        }
+        new_lines.push(line.to_owned());
+    }
+
+    if removed {
+        write_crontab(&new_lines.join("\n"))?;
+    }
+
+    Ok(removed)
+}
+
+fn read_crontab() -> String {
+    let output = Command::new("crontab")
+        .arg("-l")
+        .stdout(process::Stdio::piped())
+        .stderr(process::Stdio::piped())
+        .output();
+
+    match output {
+        Ok(out) if out.status.success() => String::from_utf8_lossy(&out.stdout).into_owned(),
+        _ => String::new(),
+    }
+}
+
+fn write_crontab(content: &str) -> Result<(), String> {
+    let mut content = content.to_owned();
+    if !content.is_empty() && !content.ends_with('\n') {
+        content.push('\n');
+    }
+
+    let mut child = Command::new("crontab")
+        .arg("-")
+        .stdin(process::Stdio::piped())
+        .stdout(process::Stdio::piped())
+        .stderr(process::Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("failed to run crontab: {e}"))?;
+
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin
+            .write_all(content.as_bytes())
+            .map_err(|e| format!("failed to write crontab: {e}"))?;
+    }
+
+    let output = child
+        .wait_with_output()
+        .map_err(|e| format!("failed to wait for crontab: {e}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("crontab failed: {stderr}"));
+    }
+
+    Ok(())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

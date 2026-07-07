@@ -371,6 +371,38 @@
   command: bash tests/facts/cli_context.sh ctx_link_summaries
   tags: [implemented]
 
+## schedules
+- label: agent-store schedule add at|every <expression> [query] -- <command> creates a Schedule with a generated ID, kind, expression, optional query, and command, then prints the Schedule ID; schedule ls lists schedules; schedule rm removes by ID prefix
+  command: bash tests/facts/cli_schedules.sh schedule_add_list_remove
+  tags: [implemented]
+- label: agent-store schedule add, ls, and rm accept --json and print structured JSON ({"status":"added","schedule":{...}}, {"schedules":[...]}, {"status":"removed","schedule":{...}}) with id, kind, expression, interval_seconds, query, command, next_run_at, and status
+  command: bash tests/facts/cli_schedules.sh schedule_json_output
+  tags: [implemented]
+- label: agent-store schedule tick finds due schedules, marks at-schedules completed, advances every-schedules' next_run_at, runs their commands, and records ScheduleRuns with exit status and captured output
+  command: bash tests/facts/cli_schedules.sh schedule_tick_fires_due
+  tags: [implemented]
+- label: agent-store --json schedule tick returns {"ticked":N,"schedule_runs":[...]} with run details for each executed schedule
+  command: bash tests/facts/cli_schedules.sh schedule_tick_json
+  tags: [implemented]
+- label: schedules with a query run their command once per matching record, passing AGENT_STORE_RECORD_ID and the record on stdin
+  command: bash tests/facts/cli_schedules.sh schedule_with_query
+  tags: [implemented]
+- label: agent-store schedule runs lists recent runs newest first with summary; schedule runs <run-id> shows full detail including captured stdout/stderr
+  command: bash tests/facts/cli_schedules.sh schedule_runs_detail
+  tags: [implemented]
+- label: agent-store schedule enable installs a per-minute crontab entry for tick; schedule disable removes it cleanly
+  command: bash tests/facts/cli_schedules.sh schedule_enable_disable
+  tags: [implemented]
+- label: agent-store ctx and ctx --json include schedule_summary with active/completed counts and next_run_at when schedules exist
+  command: bash tests/facts/cli_schedules.sh schedule_ctx_integration
+  tags: [implemented]
+- label: agent-store schedule --help and schedule add --help document all subcommands including tick, enable, disable, at, and every
+  command: bash tests/facts/cli_schedules.sh schedule_help
+  tags: [implemented]
+- label: a Schedule is a stored time-triggered rule with a generated ID, kind (at or every), expression, optional interval_seconds, optional query, bash command, next_run_at, status, and created_at; a ScheduleRun persists one execution result
+  command: cargo test --quiet schedule_add_list_delete_lifecycle && cargo test --quiet schedule_runs_are_recorded_and_retrieved
+  tags: [implemented]
+
 # query
 - label: agent-store find <Query> supports boolean expressions with and, or, not, parentheses, and comparison operators =, !=, <, <=, >, and >= over Record kind and Field text values
   id: s5i

@@ -57,6 +57,7 @@ rows = con.execute("select version, name, length(checksum), applied_at from sche
 assert [(row[0], row[1]) for row in rows] == [
     (1, "initial_schema"),
     (2, "preserve_hook_runs_after_hook_delete"),
+    (3, "add_schedules"),
 ], rows
 for row in rows:
     assert row[2] == 16, row

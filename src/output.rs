@@ -1,5 +1,8 @@
 use crate::cli::HelpTopic;
-use agent_store::store::{Hook, HookRun, Link, LinkEdge, QuickContextSummary, Record};
+use agent_store::store::{
+    Hook, HookRun, Link, LinkEdge, QuickContextSummary, Record, Schedule, ScheduleRun,
+    ScheduleSummary,
+};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 
@@ -31,9 +34,10 @@ Commands:
   links         Print incoming and outgoing links for a record
   ctx, context  Print a compact Quick Context summary
   hook          Manage stored hooks
+  schedule      Manage time-based schedules
 
 Quick Context output is capped at 8192 bytes.
-Hook stdout and stderr captures are capped at 8192 bytes each.
+Hook and schedule stdout and stderr captures are capped at 8192 bytes each.
 ";
 
 const INIT_USAGE: &str = "\
@@ -233,6 +237,96 @@ including captured stdout and stderr. Captures are capped at 8192 bytes each;
 negative exit status means the Hook was killed by a signal or timed out.
 ";
 
+const SCHEDULE_USAGE: &str = "\
+Usage: agent-store schedule <COMMAND>
+
+Manage time-based schedules. Schedule commands are killed after a 30-second
+timeout, using the same execution model as hooks.
+
+Commands:
+  add           Add a schedule (at or every)
+  ls            List schedules
+  rm            Remove a schedule by ID
+  runs          List recent schedule runs or show one run's detail
+  tick          Execute all due schedules
+  enable        Install a system crontab entry to run tick automatically
+  disable       Remove the system crontab entry
+
+Use `schedule tick` manually, via cron, or via `schedule enable` which
+installs a crontab entry that runs tick every minute.
+";
+
+const SCHEDULE_ADD_USAGE: &str = "\
+Usage: agent-store schedule add at <time> [<Query>] -- <bash command>
+       agent-store schedule add every <interval> [<Query>] -- <bash command>
+
+Add a time-based schedule.
+
+  at <time>       One-shot schedule. <time> is an absolute timestamp
+                  (2026-07-10, 2026-07-10T15:00:00Z) or a relative duration
+                  (5m, 1h, 2d) meaning \"from now\".
+  every <interval> Recurring schedule. <interval> is a duration: Ns, Nm, Nh,
+                  or Nd (seconds, minutes, hours, days).
+
+The optional Query scopes the schedule to matching records: when the schedule
+fires, the command runs once per matching record with the record on stdin and
+AGENT_STORE_ID, AGENT_STORE_KIND in the environment. Without a query, the
+command runs once with no record context.
+";
+
+const SCHEDULE_LIST_USAGE: &str = "\
+Usage: agent-store schedule ls
+
+Print stored schedules in creation order.
+";
+
+const SCHEDULE_REMOVE_USAGE: &str = "\
+Usage: agent-store schedule rm <ID>
+
+Resolve a schedule ID prefix and remove that schedule.
+";
+
+const SCHEDULE_RUNS_USAGE: &str = "\
+Usage: agent-store schedule runs [--limit <N>]
+       agent-store schedule runs <RUN-ID>
+
+List recent schedule runs newest first, one summary line per run (20 by
+default, override with --limit). Pass a run ID to print that run's full
+detail, including captured stdout and stderr.
+";
+
+const SCHEDULE_TICK_USAGE: &str = "\
+Usage: agent-store schedule tick
+
+Find and execute all due schedules. A schedule is due when its next_run_at
+timestamp is at or before the current time.
+
+For one-shot (at) schedules, the status is set to completed after firing.
+For recurring (every) schedules, next_run_at advances by the interval.
+
+Tick is idempotent and safe to call concurrently: due schedules are claimed
+atomically before their commands run.
+";
+
+const SCHEDULE_ENABLE_USAGE: &str = "\
+Usage: agent-store schedule enable
+
+Install a system crontab entry that runs `agent-store schedule tick` every
+minute for this project. The entry is scoped to the project root directory
+so multiple projects can have independent schedules.
+
+Requires `crontab` to be available. On macOS and Linux, no special
+permissions are needed.
+";
+
+const SCHEDULE_DISABLE_USAGE: &str = "\
+Usage: agent-store schedule disable
+
+Remove the system crontab entry for this project, installed by
+`schedule enable`. The schedules themselves are not removed; use
+`schedule rm` to delete individual schedules.
+";
+
 pub fn help_text(topic: HelpTopic) -> &'static str {
     match topic {
         HelpTopic::Top => USAGE,
@@ -252,6 +346,14 @@ pub fn help_text(topic: HelpTopic) -> &'static str {
         HelpTopic::HookList => HOOK_LIST_USAGE,
         HelpTopic::HookRemove => HOOK_REMOVE_USAGE,
         HelpTopic::HookRuns => HOOK_RUNS_USAGE,
+        HelpTopic::Schedule => SCHEDULE_USAGE,
+        HelpTopic::ScheduleAdd => SCHEDULE_ADD_USAGE,
+        HelpTopic::ScheduleList => SCHEDULE_LIST_USAGE,
+        HelpTopic::ScheduleRemove => SCHEDULE_REMOVE_USAGE,
+        HelpTopic::ScheduleRuns => SCHEDULE_RUNS_USAGE,
+        HelpTopic::ScheduleTick => SCHEDULE_TICK_USAGE,
+        HelpTopic::ScheduleEnable => SCHEDULE_ENABLE_USAGE,
+        HelpTopic::ScheduleDisable => SCHEDULE_DISABLE_USAGE,
     }
 }
 
@@ -412,6 +514,7 @@ fn quick_context_json_with_recent(summary: &QuickContextSummary, keep: usize) ->
         "link_count": summary.link_count,
         "links_by_relation": &summary.links_by_relation,
         "hook_count": summary.hook_count,
+        "schedule_summary": schedule_summary_json(&summary.schedule_summary),
         "latest_activity_at": &summary.latest_activity_at,
         "recent_records": summary.recent_records[..keep]
             .iter()
@@ -454,6 +557,119 @@ fn format_recent_record(record: &Record) -> String {
         output.push_str(&shell_quote_value(&truncate_field_value(value)));
     }
     output
+}
+
+pub fn schedule_mutation_json(status: &str, schedule: &Schedule) -> Value {
+    json!({
+        "status": status,
+        "schedule": schedule_json(schedule),
+    })
+}
+
+pub fn schedules_json(schedules: &[Schedule]) -> Value {
+    json!({
+        "schedules": schedules.iter().map(schedule_json).collect::<Vec<_>>(),
+    })
+}
+
+pub fn schedule_runs_json(runs: &[ScheduleRun]) -> Value {
+    json!({
+        "schedule_runs": runs.iter().map(schedule_run_json).collect::<Vec<_>>(),
+    })
+}
+
+pub fn single_schedule_run_json(run: &ScheduleRun) -> Value {
+    json!({
+        "schedule_run": schedule_run_json(run),
+    })
+}
+
+pub fn tick_json(runs: &[ScheduleRun]) -> Value {
+    json!({
+        "ticked": runs.len(),
+        "schedule_runs": runs.iter().map(schedule_run_json).collect::<Vec<_>>(),
+    })
+}
+
+fn schedule_json(schedule: &Schedule) -> Value {
+    json!({
+        "id": &schedule.id,
+        "kind": schedule.kind.as_str(),
+        "expression": &schedule.expression,
+        "interval_seconds": schedule.interval_seconds,
+        "query": &schedule.query,
+        "command": &schedule.command,
+        "next_run_at": &schedule.next_run_at,
+        "status": schedule.status.as_str(),
+        "created_at": &schedule.created_at,
+    })
+}
+
+fn schedule_run_json(run: &ScheduleRun) -> Value {
+    json!({
+        "id": run.id,
+        "schedule_id": &run.schedule_id,
+        "record_id": &run.record_id,
+        "exit_status": run.exit_status,
+        "stdout": &run.stdout_summary,
+        "stderr": &run.stderr_summary,
+        "created_at": &run.created_at,
+    })
+}
+
+pub fn format_schedule(schedule: &Schedule) -> String {
+    let mut output = format!(
+        "{} {} {} next={}",
+        schedule.id,
+        schedule.kind.as_str(),
+        schedule.expression,
+        schedule.next_run_at
+    );
+    output.push_str(&format!(" status={}", schedule.status.as_str()));
+    if let Some(query) = &schedule.query {
+        output.push_str(" query=");
+        output.push_str(&shell_quote_value(query));
+    }
+    output.push_str(" -- ");
+    output.push_str(&shell_quote_value(&schedule.command));
+    output
+}
+
+pub fn format_schedule_run_summary(run: &ScheduleRun) -> String {
+    let record_part = match &run.record_id {
+        Some(id) => format!(" record={id}"),
+        None => String::new(),
+    };
+    format!(
+        "{} {} schedule={}{} exit={}",
+        run.id, run.created_at, run.schedule_id, record_part, run.exit_status
+    )
+}
+
+pub fn format_schedule_run_detail(run: &ScheduleRun) -> String {
+    let record_line = match &run.record_id {
+        Some(id) => format!("\nrecord: {id}"),
+        None => String::new(),
+    };
+    format!(
+        "run: {}\ncreated_at: {}\nschedule: {}{}\nexit_status: {}\nstdout:\n{}\nstderr:\n{}",
+        run.id,
+        run.created_at,
+        run.schedule_id,
+        record_line,
+        run.exit_status,
+        run.stdout_summary,
+        run.stderr_summary
+    )
+}
+
+pub fn schedule_summary_json(summary: &ScheduleSummary) -> Value {
+    json!({
+        "status": if summary.active_count > 0 { "enabled" } else { "disabled" },
+        "active_schedules": summary.active_count,
+        "completed_schedules": summary.completed_count,
+        "next_run_at": summary.next_run_at,
+    })
 }
 
 pub fn record_links_json(record_id: &str, links: &[LinkEdge]) -> Value {
@@ -580,6 +796,20 @@ pub fn format_quick_context(summary: &QuickContextSummary) -> String {
     }
 
     lines.push(format!("Hooks: {}", summary.hook_count));
+
+    let sched = &summary.schedule_summary;
+    if sched.active_count > 0 || sched.completed_count > 0 {
+        lines.push(format!(
+            "Schedules: {} active, {} completed",
+            sched.active_count, sched.completed_count
+        ));
+        if let Some(next) = &sched.next_run_at {
+            lines.push(format!("  next run: {next}"));
+        }
+    } else {
+        lines.push("Schedules: none".to_owned());
+    }
+
     lines.push(format!(
         "Latest activity: {}",
         summary.latest_activity_at.as_deref().unwrap_or("none")
@@ -792,6 +1022,11 @@ mod tests {
                 ("depends_on".to_owned(), 1),
             ]),
             hook_count: 1,
+            schedule_summary: ScheduleSummary {
+                active_count: 2,
+                completed_count: 1,
+                next_run_at: Some("2026-06-27T00:00:00.000Z".to_owned()),
+            },
             latest_activity_at: Some("2026-06-26T12:34:56.789Z".to_owned()),
             recent_records: vec![Record {
                 id: "abc123".to_owned(),
@@ -804,7 +1039,7 @@ mod tests {
 
         assert_eq!(
             format_quick_context(&summary),
-            "Quick Context\nRecords: 3\nRecord kinds:\n  note: 1\n    fields: title\n  task: 2\n    fields: due, status, title\n    status: open=2\n    due: 2026-06-26..2026-06-30\nLinks: 3\n  blocks: 2\n  depends_on: 1\nHooks: 1\nLatest activity: 2026-06-26T12:34:56.789Z\nRecent records:\n  abc123 note title='hello world'"
+            "Quick Context\nRecords: 3\nRecord kinds:\n  note: 1\n    fields: title\n  task: 2\n    fields: due, status, title\n    status: open=2\n    due: 2026-06-26..2026-06-30\nLinks: 3\n  blocks: 2\n  depends_on: 1\nHooks: 1\nSchedules: 2 active, 1 completed\n  next run: 2026-06-27T00:00:00.000Z\nLatest activity: 2026-06-26T12:34:56.789Z\nRecent records:\n  abc123 note title='hello world'"
         );
     }
 
@@ -863,6 +1098,11 @@ mod tests {
             link_count: 0,
             links_by_relation: BTreeMap::new(),
             hook_count: 0,
+            schedule_summary: ScheduleSummary {
+                active_count: 0,
+                completed_count: 0,
+                next_run_at: None,
+            },
             latest_activity_at: Some("2026-06-26T12:34:56.789Z".to_owned()),
             recent_records,
         };
@@ -892,6 +1132,11 @@ mod tests {
             link_count: 0,
             links_by_relation: BTreeMap::new(),
             hook_count: 0,
+            schedule_summary: ScheduleSummary {
+                active_count: 0,
+                completed_count: 0,
+                next_run_at: None,
+            },
             latest_activity_at: None,
             recent_records: Vec::new(),
         };

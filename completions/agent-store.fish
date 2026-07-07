@@ -5,7 +5,7 @@
 # Erase any previously loaded completions for this command.
 complete -c agent-store -e
 
-set -l seen_no_sub "not __fish_seen_subcommand_from init create cr find ls get set unset rm link unlink links ctx context hook"
+set -l seen_no_sub "not __fish_seen_subcommand_from init create cr find ls get set unset rm link unlink links ctx context hook schedule"
 
 # Global options
 complete -c agent-store -l json -d 'Print structured JSON for command output'
@@ -28,6 +28,7 @@ complete -c agent-store -f -n $seen_no_sub -a links -d 'Print incoming and outgo
 complete -c agent-store -f -n $seen_no_sub -a ctx -d 'Print a compact Quick Context summary'
 complete -c agent-store -f -n $seen_no_sub -a context -d 'Print a compact Quick Context summary (alias)'
 complete -c agent-store -f -n $seen_no_sub -a hook -d 'Manage stored hooks'
+complete -c agent-store -f -n $seen_no_sub -a schedule -d 'Manage time-based schedules'
 
 # create / cr
 complete -c agent-store -f -n '__fish_seen_subcommand_from create cr' -l stdin -d 'Bulk-import JSONL from stdin'
@@ -55,4 +56,22 @@ complete -c agent-store -f -n '__fish_seen_subcommand_from hook; and __fish_seen
 
 # hook runs
 complete -c agent-store -x -n '__fish_seen_subcommand_from hook; and __fish_seen_subcommand_from runs' \
+    -l limit -d 'List at most N runs'
+
+# schedule subcommands
+set -l sched_no_sub '__fish_seen_subcommand_from schedule; and not __fish_seen_subcommand_from add ls rm runs tick enable disable'
+complete -c agent-store -f -n $sched_no_sub -a add -d 'Add a schedule'
+complete -c agent-store -f -n $sched_no_sub -a ls -d 'List schedules'
+complete -c agent-store -f -n $sched_no_sub -a rm -d 'Remove a schedule by ID'
+complete -c agent-store -f -n $sched_no_sub -a runs -d 'List recent schedule runs'
+complete -c agent-store -f -n $sched_no_sub -a tick -d 'Process due schedules'
+complete -c agent-store -f -n $sched_no_sub -a enable -d 'Install crontab entry for tick'
+complete -c agent-store -f -n $sched_no_sub -a disable -d 'Remove crontab entry'
+
+# schedule add <kind>
+complete -c agent-store -f -n '__fish_seen_subcommand_from schedule; and __fish_seen_subcommand_from add' \
+    -a 'at every' -d 'Schedule kind'
+
+# schedule runs
+complete -c agent-store -x -n '__fish_seen_subcommand_from schedule; and __fish_seen_subcommand_from runs' \
     -l limit -d 'List at most N runs'

@@ -44,6 +44,7 @@ Record kinds:
     fields: status, title
     status: done=1, open=1
 Hooks: 1
+Schedules: none
 Latest activity: $latest
 Recent records:
   $note note status=open title=Plan
@@ -70,6 +71,7 @@ Record kinds:
   task: 2
     fields: title
 Hooks: 1
+Schedules: none
 Latest activity: $latest
 Recent records:
   $bug bug title=Fix
@@ -99,6 +101,7 @@ Record kinds:
     status: open=1
     due: 2026-07-20..2026-07-20
 Hooks: 1
+Schedules: none
 Latest activity: $latest
 Recent records:
   $note_id note title='Private Note' topic=confidential
@@ -141,6 +144,7 @@ Recent records:
 Records: 0
 Record kinds: none
 Hooks: 0
+Schedules: none
 Latest activity: none"
     got="$(run_agent_store ctx)"
     test "$got" = "$expected"
@@ -162,6 +166,7 @@ Record kinds:
   task: 2
     fields: deadline, phase, priority, task_only, title
 Hooks: 0
+Schedules: none
 Latest activity: $latest
 Recent records:
   $note note note_only=yes title=Plan topic=agents
@@ -199,6 +204,7 @@ Record kinds:
     due: 2026-06-28..2026-07-15
     start: 2026-06-01..2026-06-03T09:30:00Z
 Hooks: 0
+Schedules: none
 Latest activity: $latest
 Recent records:
   $bug_two bug due=2026-06-29 status=open title=Triage
@@ -242,6 +248,7 @@ Links: 4
   relates_to: 1
   tracks: 1
 Hooks: 0
+Schedules: none
 Latest activity: $latest
 Recent records:
   $milestone_id milestone title=Launch
@@ -303,6 +310,12 @@ assert summary["date_windows_by_kind"] == {
 assert summary["link_count"] == 1, summary
 assert summary["links_by_relation"] == {"blocks": 1}, summary
 assert summary["hook_count"] == 1, summary
+assert summary["schedule_summary"] == {
+    "status": "disabled",
+    "active_schedules": 0,
+    "completed_schedules": 0,
+    "next_run_at": None,
+}, summary
 assert summary["latest_activity_at"] == sys.argv[2], summary
 assert summary["recent_records"] == [
     {"id": sys.argv[3], "kind": "note", "fields": {"title": "Plan"}},

@@ -106,6 +106,48 @@ Resolve a hook ID prefix and remove that hook.
 List recent hook runs newest first (20 by default), or print one run's
 full detail including captured stdout and stderr (capped at 8192 bytes
 each).
+.TP
+\fBschedule add\fR \fIat|every\fR \fIexpression\fR [\fIquery\fR] \fB\-\-\fR \fIbash command\fR
+Create a time-triggered schedule.
+.B at
+fires once at the given timestamp (ISO 8601, e.g. \fB2026-07-07T12:00:00Z\fR).
+.B every
+fires repeatedly at a duration interval (\fBNs\fR, \fBNm\fR, \fBNh\fR,
+\fBNd\fR).
+When a query is provided, the command runs once per matching record.
+Schedule commands use the same execution model as hooks: \fBbash \-c\fR,
+30-second timeout, process group management, stdin record snapshot, and
+.B AGENT_STORE_*
+environment variables.
+.TP
+.B schedule ls
+List all schedules.
+.TP
+\fBschedule rm\fR \fIID\fR
+Resolve a schedule ID prefix and remove that schedule.
+.TP
+\fBschedule runs\fR [\fB\-\-limit\fR \fIN\fR | \fIRUN-ID\fR]
+List recent schedule runs newest first (20 by default), or print one
+run's full detail.
+.TP
+.B schedule tick
+Process all due schedules.
+Designed to be called by cron, not interactively.
+Atomically claims due schedules (advances next_run_at for
+.BR every ,
+marks
+.B at
+schedules as completed) before running commands, preventing double-firing
+on concurrent calls.
+.TP
+.B schedule enable
+Install a per-minute crontab entry that runs
+.B schedule tick
+for this project.
+.TP
+.B schedule disable
+Remove the crontab entry installed by
+.BR "schedule enable" .
 .SH QUERY LANGUAGE
 Queries combine comparisons with
 .BR and ,
@@ -148,6 +190,10 @@ agent-store find 'severity=high or priority<2' --sort created_at --desc
 agent-store set 1a2b3c status=done
 agent-store link 1a2b3c blocks 4d5e6f
 agent-store hook add set kind=task -- 'echo "$AGENT_STORE_ID" >> audit.log'
+agent-store schedule add every 5m -- 'echo tick'
+agent-store schedule add at 2026-07-07T12:00:00Z -- 'echo one-shot'
+agent-store schedule add every 1h 'kind=task and status=open' -- 'process_task.sh'
+agent-store schedule enable
 agent-store ctx
 .fi
 .SH FILES

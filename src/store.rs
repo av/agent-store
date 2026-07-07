@@ -132,6 +132,30 @@ struct Migration {
     sql: &'static str,
 }
 
+const ADD_SCHEDULES: &str = r#"
+CREATE TABLE schedules (
+    id TEXT PRIMARY KEY NOT NULL,
+    kind TEXT NOT NULL,
+    expression TEXT NOT NULL,
+    interval_seconds INTEGER,
+    query TEXT,
+    command TEXT NOT NULL,
+    next_run_at TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active',
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE TABLE schedule_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    schedule_id TEXT NOT NULL,
+    record_id TEXT,
+    exit_status INTEGER,
+    stdout_summary TEXT,
+    stderr_summary TEXT,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+"#;
+
 const MIGRATIONS: &[Migration] = &[
     Migration {
         version: 1,
@@ -142,6 +166,11 @@ const MIGRATIONS: &[Migration] = &[
         version: 2,
         name: "preserve_hook_runs_after_hook_delete",
         sql: PRESERVE_HOOK_RUNS_AFTER_HOOK_DELETE,
+    },
+    Migration {
+        version: 3,
+        name: "add_schedules",
+        sql: ADD_SCHEDULES,
     },
 ];
 
@@ -230,6 +259,76 @@ pub struct HookRun {
     pub created_at: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScheduleKind {
+    At,
+    Every,
+}
+
+impl ScheduleKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::At => "at",
+            Self::Every => "every",
+        }
+    }
+
+    fn parse(s: &str) -> Option<Self> {
+        match s {
+            "at" => Some(Self::At),
+            "every" => Some(Self::Every),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScheduleStatus {
+    Active,
+    Completed,
+}
+
+impl ScheduleStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Active => "active",
+            Self::Completed => "completed",
+        }
+    }
+
+    fn parse(s: &str) -> Option<Self> {
+        match s {
+            "active" => Some(Self::Active),
+            "completed" => Some(Self::Completed),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Schedule {
+    pub id: String,
+    pub kind: ScheduleKind,
+    pub expression: String,
+    pub interval_seconds: Option<i64>,
+    pub query: Option<String>,
+    pub command: String,
+    pub next_run_at: String,
+    pub status: ScheduleStatus,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScheduleRun {
+    pub id: i64,
+    pub schedule_id: String,
+    pub record_id: Option<String>,
+    pub exit_status: i32,
+    pub stdout_summary: String,
+    pub stderr_summary: String,
+    pub created_at: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QuickContextSummary {
     pub record_count: i64,
@@ -240,6 +339,7 @@ pub struct QuickContextSummary {
     pub link_count: i64,
     pub links_by_relation: BTreeMap<String, i64>,
     pub hook_count: i64,
+    pub schedule_summary: ScheduleSummary,
     pub latest_activity_at: Option<String>,
     pub recent_records: Vec<Record>,
 }
@@ -296,6 +396,14 @@ pub enum StoreError {
     HookNotFound(String),
     HookRunNotFound(i64),
     AmbiguousHookId(String),
+    InvalidScheduleId(String),
+    InvalidScheduleKind(String),
+    InvalidScheduleExpression(String),
+    EmptyScheduleCommand,
+    ScheduleNotFound(String),
+    ScheduleRunNotFound(i64),
+    AmbiguousScheduleId(String),
+    ScheduleIdCollisionExhausted,
 }
 
 impl fmt::Display for StoreError {
@@ -362,6 +470,25 @@ impl fmt::Display for StoreError {
             Self::HookRunNotFound(id) => write!(f, "hook run {id} was not found"),
             Self::AmbiguousHookId(id) => {
                 write!(f, "hook ID prefix '{id}' matches multiple hooks")
+            }
+            Self::InvalidScheduleId(id) => {
+                write!(f, "'{id}' is not a valid schedule ID prefix")
+            }
+            Self::InvalidScheduleKind(kind) => {
+                write!(f, "schedule kind '{kind}' is not supported; expected at or every")
+            }
+            Self::InvalidScheduleExpression(expr) => write!(
+                f,
+                "invalid schedule expression '{expr}'; expected a duration (e.g. 5m, 1h, 2d) or timestamp"
+            ),
+            Self::EmptyScheduleCommand => write!(f, "schedule command cannot be empty"),
+            Self::ScheduleNotFound(id) => write!(f, "schedule '{id}' was not found"),
+            Self::ScheduleRunNotFound(id) => write!(f, "schedule run {id} was not found"),
+            Self::AmbiguousScheduleId(id) => {
+                write!(f, "schedule ID prefix '{id}' matches multiple schedules")
+            }
+            Self::ScheduleIdCollisionExhausted => {
+                write!(f, "could not generate a unique schedule ID")
             }
         }
     }
@@ -725,6 +852,24 @@ impl Store {
         }
 
         let hook_count = tx.query_row("SELECT COUNT(*) FROM hooks", [], |row| row.get(0))?;
+
+        let active_schedule_count =
+            tx.query_row("SELECT COUNT(*) FROM schedules WHERE status = 'active'", [], |row| {
+                row.get(0)
+            })?;
+        let completed_schedule_count =
+            tx.query_row("SELECT COUNT(*) FROM schedules WHERE status = 'completed'", [], |row| {
+                row.get(0)
+            })?;
+        let next_schedule_run_at: Option<String> = tx
+            .query_row(
+                "SELECT MIN(next_run_at) FROM schedules WHERE status = 'active'",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?
+            .flatten();
+
         let latest_activity_at = tx
             .query_row(
                 "SELECT created_at FROM store_events ORDER BY id DESC LIMIT 1",
@@ -744,6 +889,11 @@ impl Store {
             link_count,
             links_by_relation,
             hook_count,
+            schedule_summary: ScheduleSummary {
+                active_count: active_schedule_count,
+                completed_count: completed_schedule_count,
+                next_run_at: next_schedule_run_at,
+            },
             latest_activity_at,
             recent_records,
         })
@@ -1139,6 +1289,210 @@ impl Store {
             result => result,
         }
     }
+
+    pub fn now_plus_seconds(&self, seconds: i64) -> StoreResult<String> {
+        self.conn
+            .query_row(
+                "SELECT strftime('%Y-%m-%dT%H:%M:%fZ', 'now', printf('+%d seconds', ?1))",
+                params![seconds],
+                |row| row.get(0),
+            )
+            .map_err(StoreError::from)
+    }
+
+    pub fn add_schedule(
+        &mut self,
+        kind: &str,
+        expression: &str,
+        interval_seconds: Option<i64>,
+        next_run_at: &str,
+        query: Option<String>,
+        command: &str,
+    ) -> StoreResult<Schedule> {
+        validate_schedule_kind(kind)?;
+        validate_schedule_command(command)?;
+
+        for _ in 0..ID_RETRIES {
+            let id = generate_id();
+            let tx = self
+                .conn
+                .transaction_with_behavior(TransactionBehavior::Immediate)?;
+            match tx.execute(
+                r#"
+                INSERT INTO schedules (id, kind, expression, interval_seconds, query, command, next_run_at)
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                "#,
+                params![
+                    &id,
+                    kind,
+                    expression,
+                    interval_seconds,
+                    query.as_deref(),
+                    command,
+                    next_run_at
+                ],
+            ) {
+                Ok(_) => {
+                    let schedule = get_schedule_by_id(&tx, &id)?;
+                    tx.commit()?;
+                    return Ok(schedule);
+                }
+                Err(error) if is_constraint_violation(&error) => continue,
+                Err(error) => return Err(StoreError::Sql(error)),
+            }
+        }
+
+        Err(StoreError::ScheduleIdCollisionExhausted)
+    }
+
+    pub fn list_schedules(&self) -> StoreResult<Vec<Schedule>> {
+        let mut stmt = self.conn.prepare(
+            r#"
+            SELECT id, kind, expression, interval_seconds, query, command, next_run_at, status, created_at
+            FROM schedules
+            ORDER BY created_at, rowid
+            "#,
+        )?;
+        let rows = stmt.query_map([], schedule_from_row)?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    pub fn delete_schedule(&mut self, id_prefix: &str) -> StoreResult<Schedule> {
+        validate_schedule_id_prefix(id_prefix)?;
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let id = resolve_schedule_id(&tx, id_prefix)?;
+        let schedule = get_schedule_by_id(&tx, &id)?;
+        tx.execute("DELETE FROM schedules WHERE id = ?1", params![&schedule.id])?;
+        tx.commit()?;
+        Ok(schedule)
+    }
+
+    pub fn tick_due_schedules(&mut self) -> StoreResult<Vec<Schedule>> {
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+
+        let mut stmt = tx.prepare(
+            r#"
+            SELECT id, kind, expression, interval_seconds, query, command, next_run_at, status, created_at
+            FROM schedules
+            WHERE status = 'active'
+              AND next_run_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+            ORDER BY next_run_at
+            "#,
+        )?;
+        let rows = stmt.query_map([], schedule_from_row)?;
+        let due: Vec<Schedule> = rows.collect::<Result<_, _>>()?;
+        drop(stmt);
+
+        for schedule in &due {
+            match schedule.kind {
+                ScheduleKind::At => {
+                    tx.execute(
+                        "UPDATE schedules SET status = 'completed' WHERE id = ?1",
+                        params![&schedule.id],
+                    )?;
+                }
+                ScheduleKind::Every => {
+                    let interval = schedule.interval_seconds.unwrap_or(0);
+                    tx.execute(
+                        r#"
+                        UPDATE schedules
+                        SET next_run_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', printf('+%d seconds', ?2))
+                        WHERE id = ?1
+                        "#,
+                        params![&schedule.id, interval],
+                    )?;
+                }
+            }
+        }
+
+        tx.commit()?;
+        Ok(due)
+    }
+
+    pub fn record_schedule_run(
+        &mut self,
+        schedule_id: &str,
+        record_id: Option<&str>,
+        exit_status: i32,
+        stdout_summary: &str,
+        stderr_summary: &str,
+    ) -> StoreResult<ScheduleRun> {
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        tx.execute(
+            r#"
+            INSERT INTO schedule_runs (
+                schedule_id, record_id, exit_status, stdout_summary, stderr_summary
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5)
+            "#,
+            params![schedule_id, record_id, exit_status, stdout_summary, stderr_summary],
+        )?;
+        let id = tx.last_insert_rowid();
+        let run = get_schedule_run_by_id(&tx, id)?;
+        tx.commit()?;
+        Ok(run)
+    }
+
+    pub fn list_recent_schedule_runs(&self, limit: usize) -> StoreResult<Vec<ScheduleRun>> {
+        let mut stmt = self.conn.prepare(
+            r#"
+            SELECT id, schedule_id, record_id, exit_status, stdout_summary, stderr_summary, created_at
+            FROM schedule_runs
+            ORDER BY id DESC
+            LIMIT ?1
+            "#,
+        )?;
+        let rows = stmt.query_map(params![limit as i64], schedule_run_from_row)?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    pub fn get_schedule_run(&self, id: i64) -> StoreResult<ScheduleRun> {
+        match get_schedule_run_by_id(&self.conn, id) {
+            Err(StoreError::Sql(rusqlite::Error::QueryReturnedNoRows)) => {
+                Err(StoreError::ScheduleRunNotFound(id))
+            }
+            result => result,
+        }
+    }
+
+    pub fn schedule_summary(&self) -> StoreResult<ScheduleSummary> {
+        let tx = self.conn.unchecked_transaction()?;
+        let active_count =
+            tx.query_row("SELECT COUNT(*) FROM schedules WHERE status = 'active'", [], |row| {
+                row.get(0)
+            })?;
+        let completed_count =
+            tx.query_row("SELECT COUNT(*) FROM schedules WHERE status = 'completed'", [], |row| {
+                row.get(0)
+            })?;
+        let next_run_at: Option<String> = tx
+            .query_row(
+                "SELECT MIN(next_run_at) FROM schedules WHERE status = 'active'",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?
+            .flatten();
+        tx.commit()?;
+        Ok(ScheduleSummary {
+            active_count,
+            completed_count,
+            next_run_at,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScheduleSummary {
+    pub active_count: i64,
+    pub completed_count: i64,
+    pub next_run_at: Option<String>,
 }
 
 fn get_hook_by_id(conn: &Connection, id: &str) -> StoreResult<Hook> {
@@ -1185,6 +1539,100 @@ fn hook_run_from_row(row: &rusqlite::Row<'_>) -> Result<HookRun, rusqlite::Error
         stderr_summary: row.get(6)?,
         created_at: row.get(7)?,
     })
+}
+
+fn get_schedule_by_id(conn: &Connection, id: &str) -> StoreResult<Schedule> {
+    conn.query_row(
+        r#"
+        SELECT id, kind, expression, interval_seconds, query, command, next_run_at, status, created_at
+        FROM schedules
+        WHERE id = ?1
+        "#,
+        params![id],
+        schedule_from_row,
+    )
+    .map_err(StoreError::from)
+}
+
+fn schedule_from_row(row: &rusqlite::Row<'_>) -> Result<Schedule, rusqlite::Error> {
+    let kind_str: String = row.get(1)?;
+    let status_str: String = row.get(7)?;
+    Ok(Schedule {
+        id: row.get(0)?,
+        kind: ScheduleKind::parse(&kind_str).unwrap_or(ScheduleKind::At),
+        expression: row.get(2)?,
+        interval_seconds: row.get(3)?,
+        query: row.get(4)?,
+        command: row.get(5)?,
+        next_run_at: row.get(6)?,
+        status: ScheduleStatus::parse(&status_str).unwrap_or(ScheduleStatus::Active),
+        created_at: row.get(8)?,
+    })
+}
+
+fn get_schedule_run_by_id(conn: &Connection, id: i64) -> StoreResult<ScheduleRun> {
+    conn.query_row(
+        r#"
+        SELECT id, schedule_id, record_id, exit_status, stdout_summary, stderr_summary, created_at
+        FROM schedule_runs
+        WHERE id = ?1
+        "#,
+        params![id],
+        schedule_run_from_row,
+    )
+    .map_err(StoreError::from)
+}
+
+fn schedule_run_from_row(row: &rusqlite::Row<'_>) -> Result<ScheduleRun, rusqlite::Error> {
+    Ok(ScheduleRun {
+        id: row.get(0)?,
+        schedule_id: row.get(1)?,
+        record_id: row.get(2)?,
+        exit_status: row.get(3)?,
+        stdout_summary: row.get(4)?,
+        stderr_summary: row.get(5)?,
+        created_at: row.get(6)?,
+    })
+}
+
+fn resolve_schedule_id(conn: &Connection, id_prefix: &str) -> StoreResult<String> {
+    let pattern = format!("{id_prefix}%");
+    let mut stmt =
+        conn.prepare("SELECT id FROM schedules WHERE id LIKE ?1 ORDER BY id LIMIT 2")?;
+    let rows = stmt.query_map(params![pattern], |row| row.get::<_, String>(0))?;
+    let ids: Vec<String> = rows.collect::<Result<_, _>>()?;
+
+    match ids.as_slice() {
+        [] => Err(StoreError::ScheduleNotFound(id_prefix.to_owned())),
+        [id] => Ok(id.clone()),
+        _ => Err(StoreError::AmbiguousScheduleId(id_prefix.to_owned())),
+    }
+}
+
+fn validate_schedule_id_prefix(id_prefix: &str) -> StoreResult<()> {
+    if id_prefix.is_empty()
+        || id_prefix.len() > 8
+        || !id_prefix
+            .chars()
+            .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit())
+    {
+        return Err(StoreError::InvalidScheduleId(id_prefix.to_owned()));
+    }
+    Ok(())
+}
+
+fn validate_schedule_kind(kind: &str) -> StoreResult<()> {
+    match kind {
+        "at" | "every" => Ok(()),
+        _ => Err(StoreError::InvalidScheduleKind(kind.to_owned())),
+    }
+}
+
+fn validate_schedule_command(command: &str) -> StoreResult<()> {
+    if command.trim().is_empty() {
+        return Err(StoreError::EmptyScheduleCommand);
+    }
+    Ok(())
 }
 
 fn get_record_by_id(conn: &Connection, id: &str) -> StoreResult<Record> {
@@ -1855,13 +2303,207 @@ mod tests {
                 row.get(0)
             })
             .unwrap();
-        assert_eq!(migration_count, 2);
+        assert_eq!(migration_count, MIGRATIONS.len() as i64);
         store.delete_hook("aaaaaa").unwrap();
 
         let runs = store.list_hook_runs().unwrap();
         assert_eq!(runs.len(), 1);
         assert_eq!(runs[0].hook_id, "aaaaaa");
         assert_eq!(runs[0].record_id, "bbbbbb");
+
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    fn open_temp_store() -> (Store, std::path::PathBuf) {
+        let dir = std::env::temp_dir().join(format!("agent-store-test-{}", generate_id()));
+        fs::create_dir_all(dir.join(STORE_DIR)).unwrap();
+        let store = Store::open(dir.join(STORE_DIR).join(STORE_DB_FILE)).unwrap();
+        (store, dir)
+    }
+
+    #[test]
+    fn schedule_add_list_delete_lifecycle() {
+        let (mut store, dir) = open_temp_store();
+
+        let s = store
+            .add_schedule("every", "5m", Some(300), "2026-07-06T12:00:00.000Z", None, "echo tick")
+            .unwrap();
+        assert_eq!(s.kind, ScheduleKind::Every);
+        assert_eq!(s.expression, "5m");
+        assert_eq!(s.interval_seconds, Some(300));
+        assert_eq!(s.command, "echo tick");
+        assert_eq!(s.status, ScheduleStatus::Active);
+        assert!(s.query.is_none());
+
+        let all = store.list_schedules().unwrap();
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].id, s.id);
+
+        let deleted = store.delete_schedule(&s.id).unwrap();
+        assert_eq!(deleted.id, s.id);
+
+        let all = store.list_schedules().unwrap();
+        assert!(all.is_empty());
+
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn schedule_at_completes_on_tick() {
+        let (mut store, dir) = open_temp_store();
+
+        store
+            .add_schedule("at", "2020-01-01T00:00:00Z", None, "2020-01-01T00:00:00Z", None, "echo once")
+            .unwrap();
+
+        let due = store.tick_due_schedules().unwrap();
+        assert_eq!(due.len(), 1);
+        assert_eq!(due[0].kind, ScheduleKind::At);
+
+        let all = store.list_schedules().unwrap();
+        assert_eq!(all[0].status, ScheduleStatus::Completed);
+
+        let due2 = store.tick_due_schedules().unwrap();
+        assert!(due2.is_empty());
+
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn schedule_every_advances_next_run_at_on_tick() {
+        let (mut store, dir) = open_temp_store();
+
+        store
+            .add_schedule("every", "5m", Some(300), "2020-01-01T00:00:00.000Z", None, "echo tick")
+            .unwrap();
+
+        let due = store.tick_due_schedules().unwrap();
+        assert_eq!(due.len(), 1);
+
+        let all = store.list_schedules().unwrap();
+        assert_eq!(all[0].status, ScheduleStatus::Active);
+        assert_ne!(all[0].next_run_at, "2020-01-01T00:00:00.000Z");
+
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn schedule_runs_are_recorded_and_retrieved() {
+        let (mut store, dir) = open_temp_store();
+
+        let s = store
+            .add_schedule("every", "1h", Some(3600), "2020-01-01T00:00:00.000Z", None, "echo hello")
+            .unwrap();
+
+        let run = store
+            .record_schedule_run(&s.id, None, 0, "hello\n", "")
+            .unwrap();
+        assert_eq!(run.schedule_id, s.id);
+        assert_eq!(run.exit_status, 0);
+        assert_eq!(run.stdout_summary, "hello\n");
+
+        let runs = store.list_recent_schedule_runs(10).unwrap();
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].id, run.id);
+
+        let fetched = store.get_schedule_run(run.id).unwrap();
+        assert_eq!(fetched.id, run.id);
+
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn schedule_summary_reflects_state() {
+        let (mut store, dir) = open_temp_store();
+
+        let summary = store.schedule_summary().unwrap();
+        assert_eq!(summary.active_count, 0);
+        assert_eq!(summary.completed_count, 0);
+        assert!(summary.next_run_at.is_none());
+
+        store
+            .add_schedule("every", "1h", Some(3600), "2026-12-01T00:00:00.000Z", None, "echo a")
+            .unwrap();
+        store
+            .add_schedule("at", "2020-01-01T00:00:00Z", None, "2020-01-01T00:00:00Z", None, "echo b")
+            .unwrap();
+        store.tick_due_schedules().unwrap();
+
+        let summary = store.schedule_summary().unwrap();
+        assert_eq!(summary.active_count, 1);
+        assert_eq!(summary.completed_count, 1);
+        assert_eq!(summary.next_run_at, Some("2026-12-01T00:00:00.000Z".to_owned()));
+
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn schedule_with_query_is_stored() {
+        let (mut store, dir) = open_temp_store();
+
+        let s = store
+            .add_schedule(
+                "every",
+                "30m",
+                Some(1800),
+                "2026-07-06T12:00:00.000Z",
+                Some("kind=task and status=open".to_owned()),
+                "echo $AGENT_STORE_RECORD_ID",
+            )
+            .unwrap();
+        assert_eq!(s.query.as_deref(), Some("kind=task and status=open"));
+
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn schedule_delete_by_prefix() {
+        let (mut store, dir) = open_temp_store();
+
+        let s = store
+            .add_schedule("every", "1h", Some(3600), "2026-07-06T12:00:00.000Z", None, "echo a")
+            .unwrap();
+        let prefix = &s.id[..3];
+        let deleted = store.delete_schedule(prefix).unwrap();
+        assert_eq!(deleted.id, s.id);
+        assert!(store.list_schedules().unwrap().is_empty());
+
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn schedule_invalid_kind_is_rejected() {
+        let (mut store, dir) = open_temp_store();
+        let err = store
+            .add_schedule("weekly", "1h", Some(3600), "2026-07-06T12:00:00.000Z", None, "echo a")
+            .unwrap_err();
+        assert!(err.to_string().contains("at"), "{err}");
+        assert!(err.to_string().contains("every"), "{err}");
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn schedule_empty_command_is_rejected() {
+        let (mut store, dir) = open_temp_store();
+        let err = store
+            .add_schedule("every", "1h", Some(3600), "2026-07-06T12:00:00.000Z", None, "")
+            .unwrap_err();
+        assert!(err.to_string().contains("empty"), "{err}");
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn schedule_ctx_includes_schedule_summary() {
+        let (mut store, dir) = open_temp_store();
+
+        store
+            .add_schedule("every", "1h", Some(3600), "2026-12-01T00:00:00.000Z", None, "echo tick")
+            .unwrap();
+
+        let ctx = store.quick_context_summary().unwrap();
+        assert_eq!(ctx.schedule_summary.active_count, 1);
+        assert_eq!(ctx.schedule_summary.completed_count, 0);
+        assert_eq!(ctx.schedule_summary.next_run_at, Some("2026-12-01T00:00:00.000Z".to_owned()));
 
         fs::remove_dir_all(dir).unwrap();
     }

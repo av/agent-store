@@ -28,6 +28,14 @@ pub enum HelpTopic {
     HookList,
     HookRemove,
     HookRuns,
+    Schedule,
+    ScheduleAdd,
+    ScheduleList,
+    ScheduleRemove,
+    ScheduleRuns,
+    ScheduleTick,
+    ScheduleEnable,
+    ScheduleDisable,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -80,6 +88,7 @@ pub enum CliCommand {
     },
     Context,
     Hook(HookCliCommand),
+    Schedule(ScheduleCliCommand),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -97,6 +106,27 @@ pub enum HookCliCommand {
         limit: usize,
         run_id: Option<i64>,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ScheduleCliCommand {
+    Add {
+        kind: String,
+        expression: String,
+        query: Option<String>,
+        command: String,
+    },
+    List,
+    Remove {
+        id: String,
+    },
+    Runs {
+        limit: usize,
+        run_id: Option<i64>,
+    },
+    Tick,
+    Enable,
+    Disable,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -334,6 +364,7 @@ fn parse_command(
             Ok(CliCommand::Context)
         }
         "hook" => parse_hook_command(args),
+        "schedule" => parse_schedule_command(args),
         _ => Err(CliParseError::with_usage(format!(
             "unrecognized command '{command}'{}",
             did_you_mean(&command, COMMANDS)
@@ -430,14 +461,221 @@ fn parse_hook_runs_args(args: impl Iterator<Item = String>) -> Result<CliCommand
     Ok(CliCommand::Hook(HookCliCommand::Runs { limit, run_id }))
 }
 
+fn parse_schedule_command(args: Vec<String>) -> Result<CliCommand, CliParseError> {
+    match args.first().map(String::as_str) {
+        Some(command) if is_help_arg(command) => Ok(help_command(HelpTopic::Schedule)),
+        Some("add") => {
+            if schedule_add_help_requested(&args[1..]) {
+                return Ok(help_command(HelpTopic::ScheduleAdd));
+            }
+            parse_schedule_add_args(args.into_iter().skip(1))
+        }
+        Some("ls") => {
+            if command_help_requested(&args[1..]) {
+                return Ok(help_command(HelpTopic::ScheduleList));
+            }
+            let mut args = args.into_iter().skip(1);
+            if let Some(extra) = args.next() {
+                return Err(CliParseError::new(format!(
+                    "schedule ls does not accept argument '{extra}'"
+                )));
+            }
+            Ok(CliCommand::Schedule(ScheduleCliCommand::List))
+        }
+        Some("rm") => {
+            if command_help_requested(&args[1..]) {
+                return Ok(help_command(HelpTopic::ScheduleRemove));
+            }
+            let mut args = args.into_iter().skip(1);
+            let id = args
+                .next()
+                .ok_or_else(|| CliParseError::new("schedule rm requires a schedule ID"))?;
+            if let Some(extra) = args.next() {
+                return Err(CliParseError::new(format!(
+                    "schedule rm does not accept argument '{extra}'"
+                )));
+            }
+            Ok(CliCommand::Schedule(ScheduleCliCommand::Remove { id }))
+        }
+        Some("runs") => {
+            if command_help_requested(&args[1..]) {
+                return Ok(help_command(HelpTopic::ScheduleRuns));
+            }
+            parse_schedule_runs_args(args.into_iter().skip(1))
+        }
+        Some("tick") => {
+            if command_help_requested(&args[1..]) {
+                return Ok(help_command(HelpTopic::ScheduleTick));
+            }
+            let mut args = args.into_iter().skip(1);
+            if let Some(extra) = args.next() {
+                return Err(CliParseError::new(format!(
+                    "schedule tick does not accept argument '{extra}'"
+                )));
+            }
+            Ok(CliCommand::Schedule(ScheduleCliCommand::Tick))
+        }
+        Some("enable") => {
+            if command_help_requested(&args[1..]) {
+                return Ok(help_command(HelpTopic::ScheduleEnable));
+            }
+            let mut args = args.into_iter().skip(1);
+            if let Some(extra) = args.next() {
+                return Err(CliParseError::new(format!(
+                    "schedule enable does not accept argument '{extra}'"
+                )));
+            }
+            Ok(CliCommand::Schedule(ScheduleCliCommand::Enable))
+        }
+        Some("disable") => {
+            if command_help_requested(&args[1..]) {
+                return Ok(help_command(HelpTopic::ScheduleDisable));
+            }
+            let mut args = args.into_iter().skip(1);
+            if let Some(extra) = args.next() {
+                return Err(CliParseError::new(format!(
+                    "schedule disable does not accept argument '{extra}'"
+                )));
+            }
+            Ok(CliCommand::Schedule(ScheduleCliCommand::Disable))
+        }
+        Some(command) => Err(CliParseError::new(format!(
+            "unrecognized schedule command '{command}'{}",
+            did_you_mean(command, SCHEDULE_COMMANDS)
+        ))),
+        None => Err(CliParseError::new(
+            "schedule requires add, ls, rm, runs, tick, enable, or disable",
+        )),
+    }
+}
+
+fn parse_schedule_add_args(
+    args: impl Iterator<Item = String>,
+) -> Result<CliCommand, CliParseError> {
+    let args = args.collect::<Vec<_>>();
+    let Some(kind) = args.first() else {
+        return Err(CliParseError::new(
+            "schedule add requires at or every",
+        ));
+    };
+    match kind.as_str() {
+        "at" | "every" => {}
+        _ => {
+            return Err(CliParseError::new(format!(
+                "schedule add requires at or every, got '{kind}'"
+            )));
+        }
+    }
+
+    let rest = &args[1..];
+    let Some(expression) = rest.first() else {
+        return Err(CliParseError::new(format!(
+            "schedule add {kind} requires a time expression"
+        )));
+    };
+
+    let Some(separator) = rest.iter().position(|arg| arg == "--") else {
+        return Err(CliParseError::new(
+            "schedule add requires [<Query>] -- <bash command>",
+        ));
+    };
+
+    let between = &rest[1..separator];
+    let after_separator = &rest[separator + 1..];
+    if after_separator.is_empty() {
+        return Err(CliParseError::new(
+            "schedule add requires a bash command after --",
+        ));
+    }
+
+    let query = if between.is_empty() {
+        None
+    } else {
+        let query_text = between.join(" ");
+        Query::parse(&query_text)
+            .map_err(|error| CliParseError::new(format!("invalid schedule query: {error}")))?;
+        Some(query_text)
+    };
+
+    let command = after_separator.join(" ");
+    if command.trim().is_empty() {
+        return Err(CliParseError::new(
+            "schedule add requires a non-empty bash command after --",
+        ));
+    }
+
+    Ok(CliCommand::Schedule(ScheduleCliCommand::Add {
+        kind: kind.clone(),
+        expression: expression.clone(),
+        query,
+        command,
+    }))
+}
+
+const DEFAULT_SCHEDULE_RUNS_LIMIT: usize = 20;
+
+fn parse_schedule_runs_args(
+    args: impl Iterator<Item = String>,
+) -> Result<CliCommand, CliParseError> {
+    let mut args = args.peekable();
+    let mut limit = DEFAULT_SCHEDULE_RUNS_LIMIT;
+    let mut run_id = None;
+
+    while let Some(arg) = args.next() {
+        if arg == "--limit" {
+            let value = args
+                .next()
+                .ok_or_else(|| CliParseError::new("schedule runs --limit requires a number"))?;
+            limit = value.parse::<usize>().map_err(|_| {
+                CliParseError::new(format!("invalid schedule runs --limit value '{value}'"))
+            })?;
+            if limit == 0 {
+                return Err(CliParseError::new(
+                    "schedule runs --limit requires a positive number",
+                ));
+            }
+        } else if run_id.is_none() && !arg.starts_with('-') {
+            run_id = Some(arg.parse::<i64>().map_err(|_| {
+                CliParseError::new(format!(
+                    "invalid schedule run ID '{arg}': expected a number"
+                ))
+            })?);
+        } else {
+            return Err(CliParseError::new(format!(
+                "schedule runs does not accept argument '{arg}'"
+            )));
+        }
+    }
+
+    Ok(CliCommand::Schedule(ScheduleCliCommand::Runs {
+        limit,
+        run_id,
+    }))
+}
+
+fn schedule_add_help_requested(args: &[String]) -> bool {
+    for arg in args {
+        if arg == "--" {
+            return false;
+        }
+        if is_help_arg(arg) {
+            return true;
+        }
+    }
+    false
+}
+
 /// Top-level command names and aliases, used for typo suggestions.
 const COMMANDS: &[&str] = &[
     "init", "create", "cr", "get", "find", "ls", "set", "unset", "rm", "link", "unlink", "links",
-    "ctx", "context", "hook",
+    "ctx", "context", "hook", "schedule",
 ];
 
 /// Hook subcommand names, used for typo suggestions.
 const HOOK_COMMANDS: &[&str] = &["add", "ls", "rm", "runs"];
+
+/// Schedule subcommand names, used for typo suggestions.
+const SCHEDULE_COMMANDS: &[&str] = &["add", "ls", "rm", "runs", "tick", "enable", "disable"];
 
 /// Returns a " (did you mean '<command>'?)" suffix when `input` is within
 /// edit distance 2 of a known command, and an empty string otherwise. The
@@ -1190,5 +1428,90 @@ mod tests {
         let error = parse_args(["hook".to_owned(), "nothing".to_owned()])
             .expect_err("unrecognized hook command should fail");
         assert_eq!(error.to_string(), "unrecognized hook command 'nothing'");
+    }
+
+    #[test]
+    fn parses_schedule_add_every_with_and_without_query() {
+        let result =
+            parse_args("schedule add every 5m -- echo tick".split_whitespace().map(String::from))
+                .unwrap();
+        match result.command {
+            CliCommand::Schedule(ScheduleCliCommand::Add {
+                kind,
+                expression,
+                query,
+                command,
+            }) => {
+                assert_eq!(kind, "every");
+                assert_eq!(expression, "5m");
+                assert!(query.is_none());
+                assert_eq!(command, "echo tick");
+            }
+            other => panic!("expected Schedule(Add), got {other:?}"),
+        }
+
+        let result = parse_args(
+            "schedule add every 1h kind=task -- echo go"
+                .split_whitespace()
+                .map(String::from),
+        )
+        .unwrap();
+        match result.command {
+            CliCommand::Schedule(ScheduleCliCommand::Add {
+                kind,
+                expression,
+                query,
+                command,
+            }) => {
+                assert_eq!(kind, "every");
+                assert_eq!(expression, "1h");
+                assert_eq!(query, Some("kind=task".to_owned()));
+                assert_eq!(command, "echo go");
+            }
+            other => panic!("expected Schedule(Add), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_schedule_at() {
+        let result = parse_args(
+            "schedule add at 2026-07-07T12:00:00Z -- echo done"
+                .split_whitespace()
+                .map(String::from),
+        )
+        .unwrap();
+        match result.command {
+            CliCommand::Schedule(ScheduleCliCommand::Add {
+                kind, expression, ..
+            }) => {
+                assert_eq!(kind, "at");
+                assert_eq!(expression, "2026-07-07T12:00:00Z");
+            }
+            other => panic!("expected Schedule(Add), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn schedule_add_rejects_missing_double_dash() {
+        let error = parse_args(
+            "schedule add every 5m echo tick"
+                .split_whitespace()
+                .map(String::from),
+        )
+        .expect_err("missing -- should fail");
+        assert!(
+            error.to_string().contains("--"),
+            "error should mention --: {error}"
+        );
+    }
+
+    #[test]
+    fn typoed_schedule_commands_suggest_the_nearest_schedule_command() {
+        let error = parse_args(["schedule".to_owned(), "enabel".to_owned()])
+            .expect_err("unrecognized schedule command should fail");
+        assert_eq!(
+            error.to_string(),
+            "unrecognized schedule command 'enabel' (did you mean 'enable'?)"
+        );
     }
 }

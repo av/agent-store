@@ -119,6 +119,24 @@ fn looks_like_timestamp(raw: &str) -> bool {
     bytes.len() > 10 && looks_like_date_bytes(&bytes[..10]) && bytes[10] == b'T'
 }
 
+pub fn parse_duration_seconds(input: &str) -> Option<i64> {
+    if input.len() < 2 {
+        return None;
+    }
+    let (digits, suffix) = input.split_at(input.len() - 1);
+    let n: i64 = digits.parse().ok()?;
+    if n <= 0 {
+        return None;
+    }
+    match suffix {
+        "s" => Some(n),
+        "m" => n.checked_mul(60),
+        "h" => n.checked_mul(3600),
+        "d" => n.checked_mul(86400),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -150,6 +168,21 @@ mod tests {
         assert_eq!(text.value_ordering(&stamp), None);
         assert!(!text.value_equals(&date));
         assert!(!text.value_equals(&stamp));
+    }
+
+    #[test]
+    fn parses_duration_seconds() {
+        assert_eq!(parse_duration_seconds("30s"), Some(30));
+        assert_eq!(parse_duration_seconds("5m"), Some(300));
+        assert_eq!(parse_duration_seconds("1h"), Some(3600));
+        assert_eq!(parse_duration_seconds("2d"), Some(172800));
+        assert_eq!(parse_duration_seconds("0m"), None);
+        assert_eq!(parse_duration_seconds("-1h"), None);
+        assert_eq!(parse_duration_seconds("m"), None);
+        assert_eq!(parse_duration_seconds(""), None);
+        assert_eq!(parse_duration_seconds("1x"), None);
+        assert_eq!(parse_duration_seconds("abc"), None);
+        assert_eq!(parse_duration_seconds("1"), None);
     }
 
     #[test]
