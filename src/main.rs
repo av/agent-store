@@ -43,8 +43,8 @@ use output::{
     format_schedule_run_detail, format_schedule_run_summary, help_text, hook_mutation_json,
     hook_runs_json, hooks_json, init_json, link_mutation_json, mutation_json, print_json,
     quick_context_json, record_links_json, records_json, schedule_mutation_json,
-    schedule_runs_json, schedules_json, single_hook_run_json,
-    single_record_json, single_schedule_run_json, tick_json, USAGE,
+    schedule_runs_json, schedules_json, single_hook_run_json, single_record_json,
+    single_schedule_run_json, tick_json, USAGE,
 };
 use serde_json::json;
 use std::cmp::Ordering;
@@ -1046,11 +1046,7 @@ fn resolve_schedule_time(
                 );
             }
         };
-        let interval_seconds = if kind == "every" {
-            Some(seconds)
-        } else {
-            None
-        };
+        let interval_seconds = if kind == "every" { Some(seconds) } else { None };
         return (next_run_at, interval_seconds);
     }
 
@@ -1085,11 +1081,7 @@ fn execute_tick(store: &mut Store, json_output: bool) {
     let due_schedules = match store.tick_due_schedules() {
         Ok(schedules) => schedules,
         Err(error) => {
-            fail(
-                json_output,
-                1,
-                format!("failed to tick schedules: {error}"),
-            );
+            fail(json_output, 1, format!("failed to tick schedules: {error}"));
         }
     };
 
@@ -1119,12 +1111,7 @@ fn execute_tick(store: &mut Store, json_output: bool) {
                 }
             };
             for record in &records {
-                let run = execute_schedule_command(
-                    store,
-                    schedule,
-                    Some(&record),
-                    &project_root,
-                );
+                let run = execute_schedule_command(store, schedule, Some(&record), &project_root);
                 all_runs.push(run);
             }
         } else {
@@ -1153,9 +1140,8 @@ fn execute_schedule_command(
         None => String::new(),
     };
 
-    let mut env_vars: Vec<(&'static str, String)> = vec![
-        ("AGENT_STORE_SCHEDULE_ID", schedule.id.clone()),
-    ];
+    let mut env_vars: Vec<(&'static str, String)> =
+        vec![("AGENT_STORE_SCHEDULE_ID", schedule.id.clone())];
     if let Some(record) = record {
         env_vars.push(("AGENT_STORE_EVENT", "tick".to_owned()));
         env_vars.push(("AGENT_STORE_ID", record.id.clone()));

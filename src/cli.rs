@@ -554,9 +554,7 @@ fn parse_schedule_add_args(
 ) -> Result<CliCommand, CliParseError> {
     let args = args.collect::<Vec<_>>();
     let Some(kind) = args.first() else {
-        return Err(CliParseError::new(
-            "schedule add requires at or every",
-        ));
+        return Err(CliParseError::new("schedule add requires at or every"));
     };
     match kind.as_str() {
         "at" | "every" => {}
@@ -1432,9 +1430,12 @@ mod tests {
 
     #[test]
     fn parses_schedule_add_every_with_and_without_query() {
-        let result =
-            parse_args("schedule add every 5m -- echo tick".split_whitespace().map(String::from))
-                .unwrap();
+        let result = parse_args(
+            "schedule add every 5m -- echo tick"
+                .split_whitespace()
+                .map(String::from),
+        )
+        .unwrap();
         match result.command {
             CliCommand::Schedule(ScheduleCliCommand::Add {
                 kind,

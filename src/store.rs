@@ -853,14 +853,16 @@ impl Store {
 
         let hook_count = tx.query_row("SELECT COUNT(*) FROM hooks", [], |row| row.get(0))?;
 
-        let active_schedule_count =
-            tx.query_row("SELECT COUNT(*) FROM schedules WHERE status = 'active'", [], |row| {
-                row.get(0)
-            })?;
-        let completed_schedule_count =
-            tx.query_row("SELECT COUNT(*) FROM schedules WHERE status = 'completed'", [], |row| {
-                row.get(0)
-            })?;
+        let active_schedule_count = tx.query_row(
+            "SELECT COUNT(*) FROM schedules WHERE status = 'active'",
+            [],
+            |row| row.get(0),
+        )?;
+        let completed_schedule_count = tx.query_row(
+            "SELECT COUNT(*) FROM schedules WHERE status = 'completed'",
+            [],
+            |row| row.get(0),
+        )?;
         let next_schedule_run_at: Option<String> = tx
             .query_row(
                 "SELECT MIN(next_run_at) FROM schedules WHERE status = 'active'",
@@ -1431,7 +1433,13 @@ impl Store {
             )
             VALUES (?1, ?2, ?3, ?4, ?5)
             "#,
-            params![schedule_id, record_id, exit_status, stdout_summary, stderr_summary],
+            params![
+                schedule_id,
+                record_id,
+                exit_status,
+                stdout_summary,
+                stderr_summary
+            ],
         )?;
         let id = tx.last_insert_rowid();
         let run = get_schedule_run_by_id(&tx, id)?;
@@ -1463,14 +1471,16 @@ impl Store {
 
     pub fn schedule_summary(&self) -> StoreResult<ScheduleSummary> {
         let tx = self.conn.unchecked_transaction()?;
-        let active_count =
-            tx.query_row("SELECT COUNT(*) FROM schedules WHERE status = 'active'", [], |row| {
-                row.get(0)
-            })?;
-        let completed_count =
-            tx.query_row("SELECT COUNT(*) FROM schedules WHERE status = 'completed'", [], |row| {
-                row.get(0)
-            })?;
+        let active_count = tx.query_row(
+            "SELECT COUNT(*) FROM schedules WHERE status = 'active'",
+            [],
+            |row| row.get(0),
+        )?;
+        let completed_count = tx.query_row(
+            "SELECT COUNT(*) FROM schedules WHERE status = 'completed'",
+            [],
+            |row| row.get(0),
+        )?;
         let next_run_at: Option<String> = tx
             .query_row(
                 "SELECT MIN(next_run_at) FROM schedules WHERE status = 'active'",
@@ -1597,8 +1607,7 @@ fn schedule_run_from_row(row: &rusqlite::Row<'_>) -> Result<ScheduleRun, rusqlit
 
 fn resolve_schedule_id(conn: &Connection, id_prefix: &str) -> StoreResult<String> {
     let pattern = format!("{id_prefix}%");
-    let mut stmt =
-        conn.prepare("SELECT id FROM schedules WHERE id LIKE ?1 ORDER BY id LIMIT 2")?;
+    let mut stmt = conn.prepare("SELECT id FROM schedules WHERE id LIKE ?1 ORDER BY id LIMIT 2")?;
     let rows = stmt.query_map(params![pattern], |row| row.get::<_, String>(0))?;
     let ids: Vec<String> = rows.collect::<Result<_, _>>()?;
 
@@ -2326,7 +2335,14 @@ mod tests {
         let (mut store, dir) = open_temp_store();
 
         let s = store
-            .add_schedule("every", "5m", Some(300), "2026-07-06T12:00:00.000Z", None, "echo tick")
+            .add_schedule(
+                "every",
+                "5m",
+                Some(300),
+                "2026-07-06T12:00:00.000Z",
+                None,
+                "echo tick",
+            )
             .unwrap();
         assert_eq!(s.kind, ScheduleKind::Every);
         assert_eq!(s.expression, "5m");
@@ -2353,7 +2369,14 @@ mod tests {
         let (mut store, dir) = open_temp_store();
 
         store
-            .add_schedule("at", "2020-01-01T00:00:00Z", None, "2020-01-01T00:00:00Z", None, "echo once")
+            .add_schedule(
+                "at",
+                "2020-01-01T00:00:00Z",
+                None,
+                "2020-01-01T00:00:00Z",
+                None,
+                "echo once",
+            )
             .unwrap();
 
         let due = store.tick_due_schedules().unwrap();
@@ -2374,7 +2397,14 @@ mod tests {
         let (mut store, dir) = open_temp_store();
 
         store
-            .add_schedule("every", "5m", Some(300), "2020-01-01T00:00:00.000Z", None, "echo tick")
+            .add_schedule(
+                "every",
+                "5m",
+                Some(300),
+                "2020-01-01T00:00:00.000Z",
+                None,
+                "echo tick",
+            )
             .unwrap();
 
         let due = store.tick_due_schedules().unwrap();
@@ -2392,7 +2422,14 @@ mod tests {
         let (mut store, dir) = open_temp_store();
 
         let s = store
-            .add_schedule("every", "1h", Some(3600), "2020-01-01T00:00:00.000Z", None, "echo hello")
+            .add_schedule(
+                "every",
+                "1h",
+                Some(3600),
+                "2020-01-01T00:00:00.000Z",
+                None,
+                "echo hello",
+            )
             .unwrap();
 
         let run = store
@@ -2422,17 +2459,34 @@ mod tests {
         assert!(summary.next_run_at.is_none());
 
         store
-            .add_schedule("every", "1h", Some(3600), "2026-12-01T00:00:00.000Z", None, "echo a")
+            .add_schedule(
+                "every",
+                "1h",
+                Some(3600),
+                "2026-12-01T00:00:00.000Z",
+                None,
+                "echo a",
+            )
             .unwrap();
         store
-            .add_schedule("at", "2020-01-01T00:00:00Z", None, "2020-01-01T00:00:00Z", None, "echo b")
+            .add_schedule(
+                "at",
+                "2020-01-01T00:00:00Z",
+                None,
+                "2020-01-01T00:00:00Z",
+                None,
+                "echo b",
+            )
             .unwrap();
         store.tick_due_schedules().unwrap();
 
         let summary = store.schedule_summary().unwrap();
         assert_eq!(summary.active_count, 1);
         assert_eq!(summary.completed_count, 1);
-        assert_eq!(summary.next_run_at, Some("2026-12-01T00:00:00.000Z".to_owned()));
+        assert_eq!(
+            summary.next_run_at,
+            Some("2026-12-01T00:00:00.000Z".to_owned())
+        );
 
         fs::remove_dir_all(dir).unwrap();
     }
@@ -2461,7 +2515,14 @@ mod tests {
         let (mut store, dir) = open_temp_store();
 
         let s = store
-            .add_schedule("every", "1h", Some(3600), "2026-07-06T12:00:00.000Z", None, "echo a")
+            .add_schedule(
+                "every",
+                "1h",
+                Some(3600),
+                "2026-07-06T12:00:00.000Z",
+                None,
+                "echo a",
+            )
             .unwrap();
         let prefix = &s.id[..3];
         let deleted = store.delete_schedule(prefix).unwrap();
@@ -2475,7 +2536,14 @@ mod tests {
     fn schedule_invalid_kind_is_rejected() {
         let (mut store, dir) = open_temp_store();
         let err = store
-            .add_schedule("weekly", "1h", Some(3600), "2026-07-06T12:00:00.000Z", None, "echo a")
+            .add_schedule(
+                "weekly",
+                "1h",
+                Some(3600),
+                "2026-07-06T12:00:00.000Z",
+                None,
+                "echo a",
+            )
             .unwrap_err();
         assert!(err.to_string().contains("at"), "{err}");
         assert!(err.to_string().contains("every"), "{err}");
@@ -2486,7 +2554,14 @@ mod tests {
     fn schedule_empty_command_is_rejected() {
         let (mut store, dir) = open_temp_store();
         let err = store
-            .add_schedule("every", "1h", Some(3600), "2026-07-06T12:00:00.000Z", None, "")
+            .add_schedule(
+                "every",
+                "1h",
+                Some(3600),
+                "2026-07-06T12:00:00.000Z",
+                None,
+                "",
+            )
             .unwrap_err();
         assert!(err.to_string().contains("empty"), "{err}");
         fs::remove_dir_all(dir).unwrap();
@@ -2497,13 +2572,23 @@ mod tests {
         let (mut store, dir) = open_temp_store();
 
         store
-            .add_schedule("every", "1h", Some(3600), "2026-12-01T00:00:00.000Z", None, "echo tick")
+            .add_schedule(
+                "every",
+                "1h",
+                Some(3600),
+                "2026-12-01T00:00:00.000Z",
+                None,
+                "echo tick",
+            )
             .unwrap();
 
         let ctx = store.quick_context_summary().unwrap();
         assert_eq!(ctx.schedule_summary.active_count, 1);
         assert_eq!(ctx.schedule_summary.completed_count, 0);
-        assert_eq!(ctx.schedule_summary.next_run_at, Some("2026-12-01T00:00:00.000Z".to_owned()));
+        assert_eq!(
+            ctx.schedule_summary.next_run_at,
+            Some("2026-12-01T00:00:00.000Z".to_owned())
+        );
 
         fs::remove_dir_all(dir).unwrap();
     }
