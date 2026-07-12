@@ -65,6 +65,13 @@ const CLAUDE_SKILLS_DIR: &str = ".claude/skills";
 const INSTRUCTION_FILES: &[&str] = &["AGENTS.md", "CLAUDE.md"];
 const INSTRUCTIONS_START: &str = "<!-- agent-store:start -->";
 const DEFAULT_HOOK_TIMEOUT: Duration = Duration::from_secs(30);
+/// Environment variable carrying the current hook/schedule nesting depth.
+/// Every spawned hook or schedule command receives `current depth + 1`.
+const HOOK_DEPTH_ENV: &str = "AGENT_STORE_HOOK_DEPTH";
+/// Mutations performed at or beyond this nesting depth commit normally but
+/// skip hook dispatch, so a hook that mutates the store cannot recurse
+/// without bound. A note is printed on stderr when dispatch is skipped.
+const MAX_HOOK_DEPTH: usize = 3;
 const HOOK_TIMEOUT_EXIT_STATUS: i32 = -1;
 const HOOK_OUTPUT_CAPTURE_LIMIT_BYTES: usize = 8192;
 const HOOK_ENV_KEYS: &[&str] = &[
@@ -392,6 +399,11 @@ fn main() {
             let mut store = open_store_or_exit(cli.json_output);
             match store.create_record(&kind, fields) {
                 Ok(record) => {
+                    if cli.json_output {
+                        print_json(mutation_json("created", &record));
+                    } else {
+                        outln!("{}", record.id);
+                    }
                     run_hooks_or_exit(
                         cli.json_output,
                         &mut store,
@@ -400,11 +412,6 @@ fn main() {
                         Some(&[]),
                         &[],
                     );
-                    if cli.json_output {
-                        print_json(mutation_json("created", &record));
-                    } else {
-                        outln!("{}", record.id);
-                    }
                 }
                 Err(error) => {
                     fail(
@@ -445,14 +452,6 @@ fn main() {
             for (kind, fields) in parsed_lines {
                 match store.create_record(&kind, fields) {
                     Ok(record) => {
-                        run_hooks_or_exit(
-                            cli.json_output,
-                            &mut store,
-                            "create",
-                            &record,
-                            Some(&[]),
-                            &[],
-                        );
                         created.push(record);
                     }
                     Err(error) => {
@@ -464,9 +463,20 @@ fn main() {
             if cli.json_output {
                 print_json(records_json(&created));
             } else {
-                for record in created {
+                for record in &created {
                     outln!("{}", record.id);
                 }
+            }
+
+            for record in &created {
+                run_hooks_or_exit(
+                    cli.json_output,
+                    &mut store,
+                    "create",
+                    record,
+                    Some(&[]),
+                    &[],
+                );
             }
         }
         CliCommand::Get { id, timestamps } => {
@@ -545,6 +555,11 @@ fn main() {
             let mut store = open_store_or_exit(cli.json_output);
             match store.set_record_with_snapshot(&id, fields) {
                 Ok(mutation) => {
+                    if cli.json_output {
+                        print_json(mutation_json("updated", &mutation.record));
+                    } else {
+                        outln!("Updated {}", mutation.record.id);
+                    }
                     run_hooks_or_exit(
                         cli.json_output,
                         &mut store,
@@ -553,11 +568,6 @@ fn main() {
                         Some(&mutation.record_links),
                         &mutation.field_changes,
                     );
-                    if cli.json_output {
-                        print_json(mutation_json("updated", &mutation.record));
-                    } else {
-                        outln!("Updated {}", mutation.record.id);
-                    }
                 }
                 Err(error) => {
                     fail(cli.json_output, 1, format!("failed to set record: {error}"));
@@ -568,6 +578,11 @@ fn main() {
             let mut store = open_store_or_exit(cli.json_output);
             match store.unset_record_with_snapshot(&id, keys) {
                 Ok(mutation) => {
+                    if cli.json_output {
+                        print_json(mutation_json("updated", &mutation.record));
+                    } else {
+                        outln!("Updated {}", mutation.record.id);
+                    }
                     run_hooks_or_exit(
                         cli.json_output,
                         &mut store,
@@ -576,11 +591,6 @@ fn main() {
                         Some(&mutation.record_links),
                         &mutation.field_changes,
                     );
-                    if cli.json_output {
-                        print_json(mutation_json("updated", &mutation.record));
-                    } else {
-                        outln!("Updated {}", mutation.record.id);
-                    }
                 }
                 Err(error) => {
                     fail(
@@ -595,6 +605,11 @@ fn main() {
             let mut store = open_store_or_exit(cli.json_output);
             match store.delete_record_with_snapshot(&id) {
                 Ok(mutation) => {
+                    if cli.json_output {
+                        print_json(mutation_json("removed", &mutation.record));
+                    } else {
+                        outln!("Removed {}", mutation.record.id);
+                    }
                     run_hooks_or_exit(
                         cli.json_output,
                         &mut store,
@@ -603,11 +618,6 @@ fn main() {
                         Some(&mutation.record_links),
                         &[],
                     );
-                    if cli.json_output {
-                        print_json(mutation_json("removed", &mutation.record));
-                    } else {
-                        outln!("Removed {}", mutation.record.id);
-                    }
                 }
                 Err(error) => {
                     fail(
@@ -622,14 +632,6 @@ fn main() {
             let mut store = open_store_or_exit(cli.json_output);
             match store.link_records_with_snapshot(&from, &rel, &to) {
                 Ok(mutation) => {
-                    run_link_hooks_or_exit(
-                        cli.json_output,
-                        &mut store,
-                        "link",
-                        &mutation.source,
-                        &mutation.link,
-                        &mutation.source_links,
-                    );
                     if cli.json_output {
                         print_json(link_mutation_json("linked", &mutation.link));
                     } else {
@@ -640,6 +642,14 @@ fn main() {
                             mutation.link.to_record_id
                         );
                     }
+                    run_link_hooks_or_exit(
+                        cli.json_output,
+                        &mut store,
+                        "link",
+                        &mutation.source,
+                        &mutation.link,
+                        &mutation.source_links,
+                    );
                 }
                 Err(error @ StoreError::SelfLink(_)) => {
                     fail(cli.json_output, 1, format!("{error}"));
@@ -657,14 +667,6 @@ fn main() {
             let mut store = open_store_or_exit(cli.json_output);
             match store.unlink_records_with_snapshot(&from, &rel, &to) {
                 Ok(mutation) => {
-                    run_link_hooks_or_exit(
-                        cli.json_output,
-                        &mut store,
-                        "unlink",
-                        &mutation.source,
-                        &mutation.link,
-                        &mutation.source_links,
-                    );
                     if cli.json_output {
                         print_json(link_mutation_json("unlinked", &mutation.link));
                     } else {
@@ -675,6 +677,14 @@ fn main() {
                             mutation.link.to_record_id
                         );
                     }
+                    run_link_hooks_or_exit(
+                        cli.json_output,
+                        &mut store,
+                        "unlink",
+                        &mutation.source,
+                        &mutation.link,
+                        &mutation.source_links,
+                    );
                 }
                 Err(error @ StoreError::LinkNotFound { .. }) => {
                     fail(cli.json_output, 1, format!("{error}"));
@@ -1111,7 +1121,7 @@ fn execute_tick(store: &mut Store, json_output: bool) {
                 }
             };
             for record in &records {
-                let run = execute_schedule_command(store, schedule, Some(&record), &project_root);
+                let run = execute_schedule_command(store, schedule, Some(record), &project_root);
                 all_runs.push(run);
             }
         } else {
@@ -1414,6 +1424,10 @@ fn open_store_or_exit(json_output: bool) -> Store {
     }
 }
 
+/// Runs matching hooks for a committed mutation, exiting 1 with a stderr
+/// report when one fails. Callers must print the mutation's normal stdout
+/// output (the record ID, or the JSON envelope) before calling this, so a
+/// failing hook never hides the committed result from stdout consumers.
 fn run_hooks_or_exit(
     json_output: bool,
     store: &mut Store,
@@ -1466,8 +1480,23 @@ fn run_matching_hooks_after_commit(
     let hooks = store
         .list_hooks()
         .map_err(|error| format!("failed to list hooks: {error}"))?;
+    let mut matching = hooks
+        .into_iter()
+        .filter(|hook| hook.event == event_type)
+        .peekable();
 
-    for hook in hooks.into_iter().filter(|hook| hook.event == event_type) {
+    let depth = current_hook_depth();
+    if depth >= MAX_HOOK_DEPTH {
+        if matching.peek().is_some() {
+            eprintln!(
+                "note: skipped hook dispatch for {event_type} {}: hook depth {depth} reached the recursion cap of {MAX_HOOK_DEPTH}",
+                record.id
+            );
+        }
+        return Ok(());
+    }
+
+    for hook in matching {
         if !hook_query_matches(store, event_type, &hook, record, link_context)? {
             continue;
         }
@@ -1536,6 +1565,15 @@ fn run_matching_hooks_after_commit(
     }
 
     Ok(())
+}
+
+/// Current hook/schedule nesting depth, read from the environment. Zero when
+/// unset or unparsable (i.e. a top-level invocation).
+fn current_hook_depth() -> usize {
+    env::var(HOOK_DEPTH_ENV)
+        .ok()
+        .and_then(|value| value.trim().parse().ok())
+        .unwrap_or(0)
 }
 
 fn hook_exit_status(status: &process::ExitStatus) -> i32 {
@@ -1612,6 +1650,7 @@ fn run_hook_command(
     for (key, value) in env_vars {
         command.env(key, value);
     }
+    command.env(HOOK_DEPTH_ENV, (current_hook_depth() + 1).to_string());
 
     #[cfg(unix)]
     command.process_group(0);

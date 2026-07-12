@@ -547,7 +547,7 @@ PY
     printf "%s" "$invalid_status" >"$tmp/hook-exec-json-invalid.status"
 
     test "$missing_status" -ne 0
-    test ! -s "$tmp/hook-exec-missing.out"
+    test "$(wc -l <"$tmp/hook-exec-missing.out")" -eq 1
     grep -Fq "Store mutation already committed" "$tmp/hook-exec-missing.err"
     grep -Fq "hook $missing_hook_id" "$tmp/hook-exec-missing.err"
     grep -Fq "$missing_command" "$tmp/hook-exec-missing.err"
@@ -555,7 +555,7 @@ PY
     grep -Fq "definitely-missing-hook-executable" "$tmp/hook-exec-missing.err"
 
     test "$invalid_status" -ne 0
-    test ! -s "$tmp/hook-exec-json-invalid.out"
+    grep -Fq '"status":"updated"' "$tmp/hook-exec-json-invalid.out"
     grep -Fq "Store mutation already committed" "$tmp/hook-exec-json-invalid.err"
     grep -Fq "hook $invalid_hook_id" "$tmp/hook-exec-json-invalid.err"
     grep -Fq "$invalid_command" "$tmp/hook-exec-json-invalid.err"
@@ -595,7 +595,7 @@ for name, expected in [
     stdout = (tmp / f"hook-exec-{name}.out").read_text(encoding="utf-8")
     stderr = (tmp / f"hook-exec-{name}.err").read_text(encoding="utf-8")
     status = int((tmp / f"hook-exec-{name}.status").read_text(encoding="utf-8"))
-    assert stdout == "", (name, stdout)
+    assert len(stdout.splitlines()) == 1 and stdout.strip(), (name, stdout)
     assert status != 0, (name, status)
     assert "Store mutation already committed" in stderr, (name, stderr)
     assert expected in stderr, (name, stderr)
@@ -767,7 +767,7 @@ PY
       set -e
       printf "%s" "$status" >"$tmp/json-hook-$name.status"
       test "$status" -ne 0
-      test ! -s "$tmp/json-hook-$name.out"
+      grep -Fq '"status":"' "$tmp/json-hook-$name.out"
       grep -Fq "Store mutation already committed" "$tmp/json-hook-$name.err"
       grep -Fq "exit status 31" "$tmp/json-hook-$name.err"
       grep -Fq "$name-failure-stderr" "$tmp/json-hook-$name.err"
@@ -787,7 +787,7 @@ PY
     printf "%s" "$timeout_status" >"$tmp/json-hook-timeout.status"
     test "$timeout_status" -ne 0
     test "$timeout_status" -ne 124
-    test ! -s "$tmp/json-hook-timeout.out"
+    grep -Fq '"status":"updated"' "$tmp/json-hook-timeout.out"
     grep -Fq "Store mutation already committed" "$tmp/json-hook-timeout.err"
     grep -Fq "timed out after 30 seconds" "$tmp/json-hook-timeout.err"
     grep -Fq "set-timeout-stderr" "$tmp/json-hook-timeout.err"
@@ -799,7 +799,7 @@ PY
     printf "%s" "$create_timeout_status" >"$tmp/json-hook-create-timeout.status"
     test "$create_timeout_status" -ne 0
     test "$create_timeout_status" -ne 124
-    test ! -s "$tmp/json-hook-create-timeout.out"
+    grep -Fq '"status":"created"' "$tmp/json-hook-create-timeout.out"
     grep -Fq "Store mutation already committed" "$tmp/json-hook-create-timeout.err"
     grep -Fq "timed out after 30 seconds" "$tmp/json-hook-create-timeout.err"
     grep -Fq "create-timeout-stderr" "$tmp/json-hook-create-timeout.err"
@@ -860,7 +860,7 @@ for name in ["create", "set", "unset", "rm", "link", "unlink", "timeout", "creat
     stdout = (tmp / f"json-hook-{name}.out").read_text(encoding="utf-8")
     stderr = (tmp / f"json-hook-{name}.err").read_text(encoding="utf-8")
     status = int((tmp / f"json-hook-{name}.status").read_text(encoding="utf-8"))
-    assert stdout == "", (name, stdout)
+    assert len(stdout.splitlines()) == 1 and stdout.strip(), (name, stdout)
     assert status != 0, (name, status)
     assert "Store mutation already committed" in stderr, (name, stderr)
     if name in {"timeout", "create-timeout"}:
@@ -989,7 +989,7 @@ assert "create-timeout-stderr" in create_timeout_row[4], create_timeout_row
 assert "timed out after 30 seconds" in create_timeout_row[4], create_timeout_row
 
 print(
-    "json_failures=6 json_timeouts=2 stdout_empty=8 hook_runs={} events={} create_record={} create_timeout_record={}".format(
+    "json_failures=6 json_timeouts=2 stdout_committed=8 hook_runs={} events={} create_record={} create_timeout_record={}".format(
         len(rows),
         len(event_rows),
         create_record,
@@ -1141,7 +1141,7 @@ PY
       set -e
       printf "%s" "$status" >"$tmp/json-multi-$name.status"
       test "$status" -ne 0
-      test ! -s "$tmp/json-multi-$name.out"
+      grep -Fq '"status":"' "$tmp/json-multi-$name.out"
       grep -Fq "Store mutation already committed" "$tmp/json-multi-$name.err"
       grep -Fq "exit status 41" "$tmp/json-multi-$name.err"
       grep -Fq "$expected_stderr" "$tmp/json-multi-$name.err"
@@ -1158,7 +1158,7 @@ PY
       printf "%s" "$status" >"$tmp/json-multi-$name.status"
       test "$status" -ne 0
       test "$status" -ne 124
-      test ! -s "$tmp/json-multi-$name.out"
+      grep -Fq '"status":"' "$tmp/json-multi-$name.out"
       grep -Fq "Store mutation already committed" "$tmp/json-multi-$name.err"
       grep -Fq "timed out after 30 seconds" "$tmp/json-multi-$name.err"
       grep -Fq "$expected_stderr" "$tmp/json-multi-$name.err"
@@ -1228,7 +1228,7 @@ for name, expected in [
     stdout = (tmp / f"json-multi-{name}.out").read_text(encoding="utf-8")
     stderr = (tmp / f"json-multi-{name}.err").read_text(encoding="utf-8")
     status = int((tmp / f"json-multi-{name}.status").read_text(encoding="utf-8"))
-    assert stdout == "", (name, stdout)
+    assert len(stdout.splitlines()) == 1 and stdout.strip(), (name, stdout)
     assert status != 0, (name, status)
     assert "Store mutation already committed" in stderr, (name, stderr)
     assert expected in stderr, (name, stderr)
@@ -1668,7 +1668,7 @@ PY
       set -e
       printf "%s" "$status" >"$tmp/plain-multi-$name.status"
       test "$status" -ne 0
-      test ! -s "$tmp/plain-multi-$name.out"
+      test "$(wc -l <"$tmp/plain-multi-$name.out")" -eq 1
       grep -Fq "Store mutation already committed" "$tmp/plain-multi-$name.err"
       grep -Fq "exit status 41" "$tmp/plain-multi-$name.err"
       grep -Fq "$expected_stderr" "$tmp/plain-multi-$name.err"
@@ -1685,7 +1685,7 @@ PY
       printf "%s" "$status" >"$tmp/plain-multi-$name.status"
       test "$status" -ne 0
       test "$status" -ne 124
-      test ! -s "$tmp/plain-multi-$name.out"
+      test "$(wc -l <"$tmp/plain-multi-$name.out")" -eq 1
       grep -Fq "Store mutation already committed" "$tmp/plain-multi-$name.err"
       grep -Fq "timed out after 30 seconds" "$tmp/plain-multi-$name.err"
       grep -Fq "$expected_stderr" "$tmp/plain-multi-$name.err"
@@ -1755,7 +1755,7 @@ for name, expected in [
     stdout = (tmp / f"plain-multi-{name}.out").read_text(encoding="utf-8")
     stderr = (tmp / f"plain-multi-{name}.err").read_text(encoding="utf-8")
     status = int((tmp / f"plain-multi-{name}.status").read_text(encoding="utf-8"))
-    assert stdout == "", (name, stdout)
+    assert len(stdout.splitlines()) == 1 and stdout.strip(), (name, stdout)
     assert status != 0, (name, status)
     assert "Store mutation already committed" in stderr, (name, stderr)
     assert expected in stderr, (name, stderr)
@@ -2371,7 +2371,7 @@ PY
     set -e
     printf "%s" "$plain_create_status" >"$tmp/hook-context-plain-create.status"
     test "$plain_create_status" -ne 0
-    test ! -s "$tmp/hook-context-plain-create.out"
+    test "$(wc -l <"$tmp/hook-context-plain-create.out")" -eq 1
     grep -Fq "Store mutation already committed" "$tmp/hook-context-plain-create.err"
     grep -Fq "exit status 33" "$tmp/hook-context-plain-create.err"
     grep -Fq "plain-create-stderr" "$tmp/hook-context-plain-create.err"
@@ -2395,6 +2395,7 @@ print(rows[0][0])
 PY
 )"
     printf "%s" "$plain_create_id" >"$tmp/hook-context-plain-create.id"
+    test "$(cat "$tmp/hook-context-plain-create.out")" = "$plain_create_id"
 
     set +e
     "$agent_store_bin" link "$plain_source_id" blocks "$plain_target_id" >"$tmp/hook-context-plain-link.out" 2>"$tmp/hook-context-plain-link.err"
@@ -2402,7 +2403,7 @@ PY
     set -e
     printf "%s" "$plain_status" >"$tmp/hook-context-plain-link.status"
     test "$plain_status" -ne 0
-    test ! -s "$tmp/hook-context-plain-link.out"
+    test "$(cat "$tmp/hook-context-plain-link.out")" = "Linked $plain_source_id blocks $plain_target_id"
     grep -Fq "Store mutation already committed" "$tmp/hook-context-plain-link.err"
     grep -Fq "exit status 33" "$tmp/hook-context-plain-link.err"
     grep -Fq "plain-link-stderr" "$tmp/hook-context-plain-link.err"
@@ -2413,7 +2414,7 @@ PY
     set -e
     printf "%s" "$json_status" >"$tmp/hook-context-json-unlink.status"
     test "$json_status" -ne 0
-    test ! -s "$tmp/hook-context-json-unlink.out"
+    grep -Fq '"status":"unlinked"' "$tmp/hook-context-json-unlink.out"
     grep -Fq "Store mutation already committed" "$tmp/hook-context-json-unlink.err"
     grep -Fq "exit status 33" "$tmp/hook-context-json-unlink.err"
     grep -Fq "json-unlink-stderr" "$tmp/hook-context-json-unlink.err"
@@ -2424,7 +2425,7 @@ PY
     set -e
     printf "%s" "$json_rm_status" >"$tmp/hook-context-json-rm.status"
     test "$json_rm_status" -ne 0
-    test ! -s "$tmp/hook-context-json-rm.out"
+    grep -Fq '"status":"removed"' "$tmp/hook-context-json-rm.out"
     grep -Fq "Store mutation already committed" "$tmp/hook-context-json-rm.err"
     grep -Fq "exit status 33" "$tmp/hook-context-json-rm.err"
     grep -Fq "json-rm-stderr" "$tmp/hook-context-json-rm.err"
@@ -2435,7 +2436,7 @@ PY
     set -e
     printf "%s" "$plain_set_status" >"$tmp/hook-context-plain-set.status"
     test "$plain_set_status" -ne 0
-    test ! -s "$tmp/hook-context-plain-set.out"
+    test "$(cat "$tmp/hook-context-plain-set.out")" = "Updated $plain_set_id"
     grep -Fq "Store mutation already committed" "$tmp/hook-context-plain-set.err"
     grep -Fq "exit status 33" "$tmp/hook-context-plain-set.err"
     grep -Fq "plain-set-stderr" "$tmp/hook-context-plain-set.err"
@@ -2446,7 +2447,7 @@ PY
     set -e
     printf "%s" "$json_unset_status" >"$tmp/hook-context-json-unset.status"
     test "$json_unset_status" -ne 0
-    test ! -s "$tmp/hook-context-json-unset.out"
+    grep -Fq '"status":"updated"' "$tmp/hook-context-json-unset.out"
     grep -Fq "Store mutation already committed" "$tmp/hook-context-json-unset.err"
     grep -Fq "exit status 33" "$tmp/hook-context-json-unset.err"
     grep -Fq "json-unset-field-stderr" "$tmp/hook-context-json-unset.err"
@@ -2457,7 +2458,7 @@ PY
     set -e
     printf "%s" "$plain_multi_set_status" >"$tmp/hook-context-plain-set-multi.status"
     test "$plain_multi_set_status" -ne 0
-    test ! -s "$tmp/hook-context-plain-set-multi.out"
+    test "$(cat "$tmp/hook-context-plain-set-multi.out")" = "Updated $plain_multi_set_id"
     grep -Fq "Store mutation already committed" "$tmp/hook-context-plain-set-multi.err"
     grep -Fq "exit status 33" "$tmp/hook-context-plain-set-multi.err"
     grep -Fq "plain-set-multi-stderr" "$tmp/hook-context-plain-set-multi.err"
@@ -2468,7 +2469,7 @@ PY
     set -e
     printf "%s" "$json_multi_unset_status" >"$tmp/hook-context-json-unset-multi.status"
     test "$json_multi_unset_status" -ne 0
-    test ! -s "$tmp/hook-context-json-unset-multi.out"
+    grep -Fq '"status":"updated"' "$tmp/hook-context-json-unset-multi.out"
     grep -Fq "Store mutation already committed" "$tmp/hook-context-json-unset-multi.err"
     grep -Fq "exit status 33" "$tmp/hook-context-json-unset-multi.err"
     grep -Fq "json-unset-multi-stderr" "$tmp/hook-context-json-unset-multi.err"
@@ -2479,7 +2480,7 @@ PY
     set -e
     printf "%s" "$plain_special_set_status" >"$tmp/hook-context-plain-set-special.status"
     test "$plain_special_set_status" -ne 0
-    test ! -s "$tmp/hook-context-plain-set-special.out"
+    test "$(cat "$tmp/hook-context-plain-set-special.out")" = "Updated $plain_special_set_id"
     grep -Fq "Store mutation already committed" "$tmp/hook-context-plain-set-special.err"
     grep -Fq "exit status 33" "$tmp/hook-context-plain-set-special.err"
     grep -Fq "plain-set-special-stderr" "$tmp/hook-context-plain-set-special.err"
@@ -2490,7 +2491,7 @@ PY
     set -e
     printf "%s" "$json_special_unset_status" >"$tmp/hook-context-json-unset-special.status"
     test "$json_special_unset_status" -ne 0
-    test ! -s "$tmp/hook-context-json-unset-special.out"
+    grep -Fq '"status":"updated"' "$tmp/hook-context-json-unset-special.out"
     grep -Fq "Store mutation already committed" "$tmp/hook-context-json-unset-special.err"
     grep -Fq "exit status 33" "$tmp/hook-context-json-unset-special.err"
     grep -Fq "json-unset-special-stderr" "$tmp/hook-context-json-unset-special.err"
@@ -2501,7 +2502,7 @@ PY
     set -e
     printf "%s" "$plain_multi_context_set_status" >"$tmp/hook-context-plain-multi-context-set.status"
     test "$plain_multi_context_set_status" -ne 0
-    test ! -s "$tmp/hook-context-plain-multi-context-set.out"
+    test "$(cat "$tmp/hook-context-plain-multi-context-set.out")" = "Updated $plain_multi_context_set_id"
     grep -Fq "Store mutation already committed" "$tmp/hook-context-plain-multi-context-set.err"
     grep -Fq "exit status 37" "$tmp/hook-context-plain-multi-context-set.err"
     grep -Fq "plain-multi-context-set-failure-stderr" "$tmp/hook-context-plain-multi-context-set.err"
@@ -2512,7 +2513,7 @@ PY
     set -e
     printf "%s" "$json_multi_context_link_status" >"$tmp/hook-context-json-multi-context-link.status"
     test "$json_multi_context_link_status" -ne 0
-    test ! -s "$tmp/hook-context-json-multi-context-link.out"
+    grep -Fq '"status":"linked"' "$tmp/hook-context-json-multi-context-link.out"
     grep -Fq "Store mutation already committed" "$tmp/hook-context-json-multi-context-link.err"
     grep -Fq "exit status 37" "$tmp/hook-context-json-multi-context-link.err"
     grep -Fq "json-multi-context-link-failure-stderr" "$tmp/hook-context-json-multi-context-link.err"
@@ -3024,7 +3025,7 @@ EOF
   hook_output_capture_caps_and_help)
     cd "$tmp"
     run_agent_store --help >"$tmp"/agent-store-hook-caps-lc1-help.out
-    grep -Fq "Hook stdout and stderr captures are capped at 8192 bytes each." "$tmp"/agent-store-hook-caps-lc1-help.out
+    grep -Fq "Hook and schedule stdout and stderr captures are capped at 8192 bytes each." "$tmp"/agent-store-hook-caps-lc1-help.out
 
     run_agent_store init >"$tmp"/agent-store-hook-caps-lc1-init.out
 
@@ -3072,7 +3073,7 @@ PY
     if run_agent_store set "$plain_record_id" status=large-failure >"$plain_out" 2>"$plain_err"; then
       exit 1
     fi
-    test ! -s "$plain_out"
+    test "$(cat "$plain_out")" = "Updated $plain_record_id"
     grep -Fq "Store mutation already committed" "$plain_err"
     grep -Fq "exit status 37" "$plain_err"
     grep -Fq "plain-fail-stderr" "$plain_err"
@@ -3086,7 +3087,7 @@ PY
     if run_agent_store --json link "$json_source_id" relates "$json_target_id" >"$json_out" 2>"$json_err"; then
       exit 1
     fi
-    test ! -s "$json_out"
+    grep -Fq '"status":"linked"' "$json_out"
     grep -Fq "Store mutation already committed" "$json_err"
     grep -Fq "timed out after 30 seconds" "$json_err"
     grep -Fq "json-timeout-stderr" "$json_err"
@@ -3099,7 +3100,7 @@ PY
     if run_agent_store set "$plain_invalid_record_id" status=invalid-utf8 >"$plain_invalid_out" 2>"$plain_invalid_err"; then
       exit 1
     fi
-    test ! -s "$plain_invalid_out"
+    test "$(cat "$plain_invalid_out")" = "Updated $plain_invalid_record_id"
     grep -Fq "Store mutation already committed" "$plain_invalid_err"
     grep -Fq "exit status 41" "$plain_invalid_err"
     grep -Fq "plain-invalid-stderr:" "$plain_invalid_err"
@@ -3112,7 +3113,7 @@ PY
     if run_agent_store --json set "$json_invalid_record_id" status=invalid-utf8 >"$json_invalid_out" 2>"$json_invalid_err"; then
       exit 1
     fi
-    test ! -s "$json_invalid_out"
+    grep -Fq '"status":"updated"' "$json_invalid_out"
     grep -Fq "Store mutation already committed" "$json_invalid_err"
     grep -Fq "exit status 41" "$json_invalid_err"
     grep -Fq "json-invalid-stderr:" "$json_invalid_err"
@@ -3265,10 +3266,10 @@ PY
 - json_invalid_utf8_hook_id: $json_invalid_hook_id
 - substantial_output_bytes_per_stream: 131072
 - persisted_capture_limit_bytes: 8192
-- plain_failure_stdout_empty: yes
-- json_timeout_stdout_empty: yes
-- plain_invalid_utf8_stdout_empty: yes
-- json_invalid_utf8_stdout_empty: yes
+- plain_failure_stdout_committed: yes
+- json_timeout_stdout_committed: yes
+- plain_invalid_utf8_stdout_committed: yes
+- json_invalid_utf8_stdout_committed: yes
 - non_utf8_cli_stderr_valid_utf8: yes
 - committed_records: $record_id $plain_record_id $json_source_id $plain_invalid_record_id $json_invalid_record_id
 EOF
@@ -3308,7 +3309,7 @@ SH
       status="$(cat "$tmp/hook-signal-$name.status")"
 
       test "$status" -ne 0
-      test ! -s "$tmp/hook-signal-$name.out"
+      test "$(wc -l <"$tmp/hook-signal-$name.out")" -eq 1
       grep -Fq "Store mutation already committed" "$tmp/hook-signal-$name.err"
       grep -Fq "terminated by signal $signal_number" "$tmp/hook-signal-$name.err"
       grep -Fq "$signal_name" "$tmp/hook-signal-$name.err"
@@ -3469,7 +3470,7 @@ for name, expected in [
     stdout = (tmp / f"hook-signal-{name}.out").read_text(encoding="utf-8")
     stderr = (tmp / f"hook-signal-{name}.err").read_text(encoding="utf-8")
     status = int((tmp / f"hook-signal-{name}.status").read_text(encoding="utf-8"))
-    assert stdout == "", (name, stdout)
+    assert len(stdout.splitlines()) == 1 and stdout.strip(), (name, stdout)
     assert status != 0, (name, status)
     assert "Store mutation already committed" in stderr, (name, stderr)
     assert "terminated by signal 15" in stderr, (name, stderr)
@@ -3702,7 +3703,7 @@ for name, expected in [
     stdout = (tmp / f"hook-signal-{name}.out").read_text(encoding="utf-8")
     stderr = (tmp / f"hook-signal-{name}.err").read_text(encoding="utf-8")
     status = int((tmp / f"hook-signal-{name}.status").read_text(encoding="utf-8"))
-    assert stdout == "", (name, stdout)
+    assert len(stdout.splitlines()) == 1 and stdout.strip(), (name, stdout)
     assert status != 0, (name, status)
     assert "Store mutation already committed" in stderr, (name, stderr)
     assert "terminated by signal 9" in stderr, (name, stderr)
@@ -3853,7 +3854,7 @@ SH
 
     test "$timeout_status" -ne 0
     test "$timeout_status" -ne 124
-    test ! -s "$tmp/hook-timeout-pgrp.out"
+    test "$(wc -l <"$tmp/hook-timeout-pgrp.out")" -eq 1
     grep -Fq "Store mutation already committed" "$tmp/hook-timeout-pgrp.err"
     grep -Fq "timed out after 30 seconds" "$tmp/hook-timeout-pgrp.err"
     grep -Fq "timeout-hook-started" "$tmp/hook-timeout-pgrp.err"
@@ -4076,8 +4077,66 @@ PY
     grep -q "hook run 99 was not found" missing.err
     ;;
 
+  hook_recursion_depth_capped)
+    cd "$tmp"
+    run_agent_store init >"$tmp"/agent-store-hook-recursion-init.out
+    agent_store_bin="$target_dir/debug/agent-store"
+
+    # A hook that mutates a kind matched by its own query recurses; dispatch
+    # is skipped once the mutation happens at hook depth 3, so the chain
+    # terminates with exactly 4 records and 3 hook runs.
+    hook_id="$("$agent_store_bin" hook add create kind=recur -- "$agent_store_bin create recur depth=next")"
+
+    timeout 30s "$agent_store_bin" create recur depth=0 >"$tmp/hook-recursion.out" 2>"$tmp/hook-recursion.err"
+
+    test "$(wc -l <"$tmp/hook-recursion.out")" -eq 1
+    test "$("$agent_store_bin" find --count)" = 4
+    test "$("$agent_store_bin" --json hook runs | python3 -c 'import json,sys; print(len(json.load(sys.stdin)["hook_runs"]))')" = 3
+    "$agent_store_bin" --json hook runs | grep -Fq "hook depth 3 reached the recursion cap of 3"
+    "$agent_store_bin" hook --help | grep -Fq "capped at depth 3"
+
+    # Each spawned hook command sees its own nesting depth.
+    depth_hook_id="$("$agent_store_bin" hook add create kind=depth-probe -- 'printf "depth=%s" "$AGENT_STORE_HOOK_DEPTH"')"
+    probe_id="$("$agent_store_bin" create depth-probe a=1)"
+    "$agent_store_bin" --json hook runs | grep -Fq "depth=1"
+    printf "hook_recursion_depth_capped hook=%s depth_hook=%s probe=%s\n" "$hook_id" "$depth_hook_id" "$probe_id"
+    ;;
+
+  hook_failure_prints_mutation_output)
+    cd "$tmp"
+    run_agent_store init >"$tmp"/agent-store-hook-failure-stdout-init.out
+    agent_store_bin="$target_dir/debug/agent-store"
+
+    hook_id="$("$agent_store_bin" hook add create kind=fail -- 'printf "err msg" >&2; exit 3')"
+
+    # Plain mode: the committed record ID is on stdout even though the hook
+    # failed; the failure is reported on stderr and the exit status is 1.
+    set +e
+    "$agent_store_bin" create fail name=x >"$tmp/hook-failure-plain.out" 2>"$tmp/hook-failure-plain.err"
+    plain_status="$?"
+    set -e
+    test "$plain_status" -eq 1
+    plain_id="$(cat "$tmp/hook-failure-plain.out")"
+    printf "%s\n" "$plain_id" | grep -Eq "^[a-z0-9]{6,8}$"
+    "$agent_store_bin" get "$plain_id" | grep -Fq "name=x"
+    grep -Fq "Store mutation already committed" "$tmp/hook-failure-plain.err"
+    grep -Fq "err msg" "$tmp/hook-failure-plain.err"
+
+    # JSON mode: the normal mutation envelope is on stdout; the error
+    # envelope goes to stderr.
+    set +e
+    "$agent_store_bin" --json create fail name=y >"$tmp/hook-failure-json.out" 2>"$tmp/hook-failure-json.err"
+    json_status="$?"
+    set -e
+    test "$json_status" -eq 1
+    grep -Fq '"status":"created"' "$tmp/hook-failure-json.out"
+    python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "$tmp/hook-failure-json.out"
+    grep -Fq "Store mutation already committed" "$tmp/hook-failure-json.err"
+    printf "hook_failure_prints_mutation_output hook=%s record=%s\n" "$hook_id" "$plain_id"
+    ;;
+
   *)
-    echo "usage: $0 {hook_json_output|hook_add_stores_metadata|hook_ls_deterministic|hook_rm_deletes_metadata|hooks_run_after_commit|hook_query_filters_records|hook_query_uses_mutation_snapshot|hook_stdin_receives_record_snapshot|hook_failure_reports_details|hook_failure_or_timeout_reports_committed_mutation|hook_command_launch_or_execution_failure_reports_committed_mutation|json_mutation_hook_failure_or_timeout_reports_committed_without_success_json|json_multiple_matching_hooks_stop_after_failure_or_timeout|hooks_run_sequentially_from_project_root_with_timeout|hook_env_vars_for_record_events|link_hook_query_source_and_relation_env|hook_failure_preserves_link_context_env|hook_output_capture_caps_and_help|hook_signal_termination_reports_committed_mutation|hook_timeout_terminates_process_group|hook_runs_command}" >&2
+    echo "usage: $0 {hook_json_output|hook_add_stores_metadata|hook_ls_deterministic|hook_rm_deletes_metadata|hooks_run_after_commit|hook_query_filters_records|hook_query_uses_mutation_snapshot|hook_stdin_receives_record_snapshot|hook_failure_reports_details|hook_failure_or_timeout_reports_committed_mutation|hook_command_launch_or_execution_failure_reports_committed_mutation|json_mutation_hook_failure_or_timeout_reports_committed_without_success_json|json_multiple_matching_hooks_stop_after_failure_or_timeout|hooks_run_sequentially_from_project_root_with_timeout|hook_env_vars_for_record_events|link_hook_query_source_and_relation_env|hook_failure_preserves_link_context_env|hook_output_capture_caps_and_help|hook_signal_termination_reports_committed_mutation|hook_timeout_terminates_process_group|hook_runs_command|hook_recursion_depth_capped|hook_failure_prints_mutation_output}" >&2
     exit 2
     ;;
 esac

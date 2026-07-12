@@ -175,6 +175,8 @@ const HOOK_USAGE: &str = "\
 Usage: agent-store hook <COMMAND>
 
 Manage stored hooks. Hook bash commands are killed after a 30-second timeout.
+Nested Hook dispatch is capped at depth 3: a mutation made at that depth still
+commits but skips Hooks, with a note on stderr.
 
 Commands:
   add           Add a Hook

@@ -51,6 +51,7 @@ line, plus these environment variables:
 | `AGENT_STORE_VALUE` | set/unset of exactly one field | the new value (the old value on unset) |
 | `AGENT_STORE_OLD_VALUE` | set/unset of exactly one field | the previous value (empty when the field did not exist) |
 | `AGENT_STORE_NEW_VALUE` | set/unset of exactly one field | the new value (empty on unset) |
+| `AGENT_STORE_HOOK_DEPTH` | always | hook nesting depth (`1` for a hook fired by a top-level command) |
 
 Example — log field transitions:
 
@@ -62,6 +63,22 @@ agent-store hook add set kind=task -- 'echo "$AGENT_STORE_FIELD: $AGENT_STORE_OL
 
 - Each hook command is killed after a **30-second timeout**.
 - Captured stdout and stderr are each capped at **8192 bytes**.
+- Hook nesting is capped at a **depth of 3**. Every hook (and schedule)
+  command runs with `AGENT_STORE_HOOK_DEPTH` set to its nesting depth
+  (`1` for a hook fired by a top-level command). A mutation performed at
+  depth 3 or deeper still commits, but skips hook dispatch and prints a
+  note on stderr (which lands in the parent hook's captured output), so a
+  hook that mutates records matched by its own query cannot recurse
+  without bound.
+
+## Hook failure
+
+The mutation commits before hooks run, so a failing or timed-out hook
+never undoes it. The triggering command still prints its normal stdout
+output (the record ID, or the JSON envelope in `--json` mode), then
+reports the hook failure on stderr and exits non-zero (`1`). Scripts that
+capture stdout always get the ID; check the exit status and stderr to
+detect hook failures.
 
 ## Inspecting runs
 
