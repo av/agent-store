@@ -394,7 +394,7 @@
 - label: agent-store --json schedule tick returns {"ticked":N,"schedule_runs":[...]} with run details for each executed schedule
   command: bash tests/facts/cli_schedules.sh schedule_tick_json
   tags: [implemented]
-- label: schedules with a query run their command once per matching record, passing AGENT_STORE_RECORD_ID and the record on stdin
+- label: schedules with a query run their command once per matching record, passing AGENT_STORE_ID and AGENT_STORE_KIND in the environment and the record on stdin
   command: bash tests/facts/cli_schedules.sh schedule_with_query
   tags: [implemented]
 - label: agent-store schedule runs lists recent runs newest first with summary; schedule runs <run-id> shows full detail including captured stdout/stderr

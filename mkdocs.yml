@@ -23,6 +23,7 @@ nav:
   - Concepts: docs/concepts.md
   - Query language: docs/queries.md
   - Hooks: docs/hooks.md
+  - Schedules: docs/schedules.md
   - JSON output and import: docs/json.md
   - Skills and agent integration: docs/skills.md
   - Examples: examples/README.md

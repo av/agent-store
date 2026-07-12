@@ -58,6 +58,13 @@ emits. Extra keys (`id`, `created_at`, `updated_at`) are ignored, so exports
 round-trip. Number, boolean, and null field values are stored as their raw
 text, just like argv `key=value` input. Empty lines are skipped.
 
+The round-trip covers **records only**. Record JSON contains no links, and
+`create --stdin` has no way to ingest them — importing a linked graph this
+way silently drops every edge. Imported records also get fresh IDs (the
+exported `id` is ignored). To carry links across, recreate them manually
+after the import: read each edge from `links <id> --json` on the source
+store, map old IDs to the new ones, and replay them with `link`.
+
 ```sh
 $ printf '%s\n' \
     '{"kind":"task","fields":{"title":"imported","status":"pending"}}' \
@@ -84,6 +91,10 @@ Copy records between stores (round-trip export/import):
 ```sh
 agent-store find kind=task --json | jq -c '.records[]' | (cd ../other-project && agent-store create --stdin)
 ```
+
+This copies records only — links are not part of record JSON and are lost
+(see the caveat above); recreate them with `links <id> --json` + `link`
+against the new IDs.
 
 Extract IDs for scripting:
 

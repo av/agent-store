@@ -26,6 +26,11 @@ error: no agent-store found; run 'agent-store init' first
 One project, one store. The store is working memory, not a committed
 artifact — that's why `init` gitignores it. To move records between
 stores, export and import JSONL (see [JSON output and import](json.md)).
+Note that record JSON carries no links: moving a store this way keeps
+every record but silently drops every edge, and imported records get
+fresh IDs. Links must be recreated manually on the destination
+(`links <id> --json` to read each edge, `link` to replay it against the
+new IDs).
 
 ## Records
 
@@ -209,11 +214,16 @@ It shows record counts by kind, each kind's field inventory (with value
 breakdowns for low-cardinality fields like `status`), link and hook
 counts, and the most recently updated records.
 
-The output has a hard **8192-byte budget**. When the store outgrows it,
-`ctx` drops the oldest recent-records lines first — the summary stays
-prompt-sized no matter how large the store gets. That's the intended
-division of labor: `ctx` for orientation, `find` for anything specific
-the summary doesn't surface.
+The text output has a hard **8192-byte budget**. When the store outgrows
+it, `ctx` drops the oldest recent-records lines first; if the summary is
+still over budget with no recent-records lines left, it is hard-cut
+(possibly mid-line) and ends with an explicit
+`... truncated at 8192 bytes` notice, keeping the total within the
+budget. Either way the summary stays prompt-sized no matter how large
+the store gets. The cap applies to the text output only — `ctx --json`
+always emits the complete, uncapped summary for machine consumers.
+That's the intended division of labor: `ctx` for orientation, `find`
+(or `ctx --json`) for anything specific the summary doesn't surface.
 
 ## How the pieces fit
 

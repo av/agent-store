@@ -127,9 +127,10 @@ exactly what's registered.
 
 There is no application-level cap on record count, field count, or value
 size; the practical limits are SQLite's (a text value can be up to ~1 GB,
-databases scale to terabytes). Two deliberate caps exist: `ctx` output is
-truncated at 8192 bytes, and hook stdout/stderr capture is truncated at 8192
-bytes per stream (hooks also have a 30-second timeout).
+databases scale to terabytes). Two deliberate caps exist: `ctx` text output
+is truncated at 8192 bytes (`ctx --json` is uncapped), and hook and schedule
+stdout/stderr capture is truncated at 8192 bytes per stream (hook and
+schedule commands also have a 30-second timeout).
 
 Ballpark on an ordinary dev machine (release build, warm cache): importing
 1,000 records via `create --stdin` takes ~40 ms; `find` with a typed

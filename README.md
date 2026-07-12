@@ -167,6 +167,7 @@ Every record is a `kind` plus free-form `key=value` fields. IDs are short and pr
 | `link` / `unlink` / `links` | Manage directional, named links between records |
 | `ctx` (`context`) | Compact Quick Context summary, capped at 8192 bytes |
 | `hook add/ls/rm/runs` | Manage shell hooks on store mutations |
+| `schedule add/ls/rm/tick/runs/enable/disable` | Time-based commands: one-shot and recurring, plus crontab integration |
 
 Run `agent-store <command> --help` for full details on any of them.
 
@@ -176,6 +177,7 @@ Run `agent-store <command> --help` for full details on any of them.
 - [Concepts](docs/concepts.md) — the mental model: stores, records, links, queries, hooks, and the `ctx` budget, each with a verified example
 - [Query language](docs/queries.md) — operators, value types, combinators, quoting, timestamps, links, sorting
 - [Hooks](docs/hooks.md) — events, environment variables, limits, inspecting runs
+- [Schedules](docs/schedules.md) — one-shot and recurring commands, ticking, crontab integration
 - [JSON output and import](docs/json.md) — `--json` shapes, `create --stdin`, pipeline recipes
 - [Skills and agent integration](docs/skills.md) — what `init` installs and the conventions agents pick up
 - [FAQ](docs/faq.md) — why not markdown/jq/a vector DB, data format and inspection, concurrency, privacy, limits
@@ -213,6 +215,21 @@ agent-store hook runs <RUN-ID>   # one run's captured stdout/stderr
 - The command receives the affected record on stdin plus environment variables: `AGENT_STORE_EVENT`, `AGENT_STORE_ID`, `AGENT_STORE_KIND` (always), `AGENT_STORE_REL` and `AGENT_STORE_TARGET_ID` (link/unlink), and `AGENT_STORE_FIELD`/`AGENT_STORE_KEY`, `AGENT_STORE_VALUE`, `AGENT_STORE_OLD_VALUE`, `AGENT_STORE_NEW_VALUE` (set/unset of exactly one field).
 - Commands are killed after 30 seconds; captured stdout and stderr are capped at 8192 bytes each.
 
+## Schedules
+
+Schedules run a bash command on a time basis — one-shot reminders or recurring maintenance — with the same execution model and limits as hooks.
+
+```sh
+agent-store schedule add at 2026-07-10T15:00:00Z -- 'echo reminder'   # one-shot (also relative: `at 5m`)
+agent-store schedule add every 1h kind=task -- 'notify.sh'            # recurring, once per matching record
+agent-store schedule ls
+agent-store schedule tick        # run all due schedules (the heartbeat)
+agent-store schedule enable      # crontab entry that ticks every minute
+agent-store schedule runs        # recent runs; `schedule runs <RUN-ID>` for detail
+```
+
+Nothing runs in the background on its own: `schedule tick` executes what's due, and `schedule enable`/`disable` manage a per-project crontab entry that ticks every minute. Full details — semantics, environment variables, limits — in [Schedules](docs/schedules.md).
+
 ## JSON output
 
 Every command supports `--json` for structured output:
@@ -222,7 +239,7 @@ $ agent-store --json find kind=task
 {"records":[{"created_at":"2026-07-03T09:16:49.608Z","fields":{"status":"done","title":"ship v0.1"},"id":"7f0owa","kind":"task","updated_at":"2026-07-03T09:16:49.612Z"}]}
 ```
 
-Exports round-trip: `create --stdin` accepts JSONL of the same record shape `find --json` emits (extra keys like `id` and timestamps are ignored), validating every line before importing anything. This makes the store easy to pipe through `jq`, sync between projects, or seed from scripts.
+Exports round-trip: `create --stdin` accepts JSONL of the same record shape `find --json` emits (extra keys like `id` and timestamps are ignored), validating every line before importing anything. This makes the store easy to pipe through `jq`, sync between projects, or seed from scripts. Record JSON does not include links, though — see [docs/json.md](docs/json.md) for the caveat when moving a linked store.
 
 ## Skills
 
