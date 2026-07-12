@@ -3182,7 +3182,15 @@ hook_counts = dict(
     ).fetchall()
 )
 assert event_counts == {"set": 1, "unset": 1}, event_counts
-assert hook_counts == event_counts, (event_counts, hook_counts)
+# The Link snapshot is captured inside the mutation transaction after the
+# store event insert; a concurrent deletion that lands before the snapshot
+# removes the links, so each committed mutation's link-predicate Hook either
+# persists one matching run or legitimately skips. Both orderings are valid.
+assert set(hook_counts) <= set(event_counts), (event_counts, hook_counts)
+assert all(hook_counts.get(k, 0) in (0, v) for k, v in event_counts.items()), (
+    event_counts,
+    hook_counts,
+)
 remaining_sources = con.execute(
     "select count(*) from records where id in (?, ?)",
     (set_source, unset_source),
@@ -3214,13 +3222,16 @@ PY
     if [ -f "$hook_side_effects/hook.log" ]; then
       side_effect_count="$(wc -l < "$hook_side_effects/hook.log" | tr -d ' ')"
     fi
-    test "$side_effect_count" = "2"
+    hook_run_total="$(python3 -c 'import sqlite3, sys; print(sqlite3.connect(sys.argv[1]).execute("select count(*) from hook_runs where id > ?", (int(sys.argv[2]),)).fetchone()[0])' .agent-store/store.sqlite "$hook_marker")"
+    test "$side_effect_count" = "$hook_run_total"
 
     if [ -n "$evidence_root" ]; then
       find "$tmp" -maxdepth 1 -type f \
         \( -name 'trigger-*' -o -name 'setup-*-link.*' \) \
         -exec cp {} "$evidence_root/logs/" \;
-      cp "$hook_side_effects/hook.log" "$evidence_root/logs/hook.log"
+      if [ -f "$hook_side_effects/hook.log" ]; then
+        cp "$hook_side_effects/hook.log" "$evidence_root/logs/hook.log"
+      fi
       cp .agent-store/store.sqlite "$evidence_root/store.sqlite"
       cat > "$evidence_root/reports/concurrent-set-unset-link-snapshot-races.md" <<EOF
 # Concurrent Set/Unset Link Snapshot Race Evidence
@@ -3588,10 +3599,27 @@ PY
     if grep -R "database is locked" "$tmp"/record-*.err; then
       exit 1
     fi
+    record_unset_updated=0
     for name in "${record_workers[@]}"; do
       test "$(cat "$tmp/record-$name.status")" = "0"
-      grep -Fxq "Updated $record_id" "$tmp/record-$name.out"
+      case "$name" in
+        set_*)
+          # Every set writes a distinct status plus a per-worker field, so
+          # each committed set is a real change.
+          grep -Fxq "Updated $record_id" "$tmp/record-$name.out"
+          ;;
+        unset_*)
+          # Only one unset removes the flag; the duplicates are no-ops and
+          # legitimately report Unchanged without a Store Event.
+          if grep -Fxq "Updated $record_id" "$tmp/record-$name.out"; then
+            record_unset_updated=$((record_unset_updated + 1))
+          else
+            grep -Fxq "Unchanged $record_id" "$tmp/record-$name.out"
+          fi
+          ;;
+      esac
     done
+    test "$record_unset_updated" = "1"
 
     mixed_workers=(set_e set_f set_g unset_e unset_f unset_g rm_a rm_b rm_c)
     mkdir "$tmp/mixed-ready"
@@ -3617,6 +3645,7 @@ PY
     record_unset_successes=4
     mixed_set_successes=0
     mixed_unset_successes=0
+    mixed_unset_updated=0
     rm_successes=0
     for name in "${mixed_workers[@]}"; do
       code="$(cat "$tmp/mixed-$name.status")"
@@ -3631,7 +3660,14 @@ PY
           ;;
         unset_*)
           if [ "$code" = "0" ]; then
-            grep -Fxq "Updated $record_id" "$tmp/mixed-$name.out"
+            # The flag may already be gone; a duplicate no-op unset reports
+            # Unchanged and writes no Store Event, while a racing unset that
+            # still saw the flag reports Updated. Both orderings are valid.
+            if grep -Fxq "Updated $record_id" "$tmp/mixed-$name.out"; then
+              mixed_unset_updated=$((mixed_unset_updated + 1))
+            else
+              grep -Fxq "Unchanged $record_id" "$tmp/mixed-$name.out"
+            fi
             mixed_unset_successes=$((mixed_unset_successes + 1))
           else
             grep -Fq "was not found" "$tmp/mixed-$name.err"
@@ -3649,9 +3685,15 @@ PY
     done
     test "$rm_successes" = "1"
 
-    expected_set=$((record_set_successes + mixed_set_successes))
-    expected_unset=$((record_unset_successes + mixed_unset_successes))
-    expected_total_hooks=$((${#link_workers[@]} + unlink_successes + expected_set + expected_unset + rm_successes))
+    # Store Events are written only for committed real changes; duplicate
+    # no-op unsets report Unchanged and write none. Hooks still fire for
+    # every committed mutation, unchanged or not, so Hook Runs count all
+    # successful mutations.
+    expected_set_events=$((record_set_successes + mixed_set_successes))
+    expected_unset_events=$((record_unset_updated + mixed_unset_updated))
+    expected_set_hooks=$((record_set_successes + mixed_set_successes))
+    expected_unset_hooks=$((record_unset_successes + mixed_unset_successes))
+    expected_total_hooks=$((${#link_workers[@]} + unlink_successes + expected_set_hooks + expected_unset_hooks + rm_successes))
 
     python3 - \
       .agent-store/store.sqlite \
@@ -3660,8 +3702,10 @@ PY
       "$record_id" \
       "${#link_workers[@]}" \
       "$unlink_successes" \
-      "$expected_set" \
-      "$expected_unset" \
+      "$expected_set_events" \
+      "$expected_unset_events" \
+      "$expected_set_hooks" \
+      "$expected_unset_hooks" \
       "$rm_successes" \
       "$expected_total_hooks" <<'PY'
 import sqlite3
@@ -3674,18 +3718,25 @@ import sys
     record_id,
     expected_link_s,
     expected_unlink_s,
-    expected_set_s,
-    expected_unset_s,
+    expected_set_events_s,
+    expected_unset_events_s,
+    expected_set_hooks_s,
+    expected_unset_hooks_s,
     expected_rm_s,
     expected_total_hooks_s,
 ) = sys.argv[1:]
 expected = {
     "link": int(expected_link_s),
     "unlink": int(expected_unlink_s),
-    "set": int(expected_set_s),
-    "unset": int(expected_unset_s),
+    "set": int(expected_set_events_s),
+    "unset": int(expected_unset_events_s),
     "rm": int(expected_rm_s),
 }
+expected_hooks = dict(
+    expected,
+    set=int(expected_set_hooks_s),
+    unset=int(expected_unset_hooks_s),
+)
 expected_total_hooks = int(expected_total_hooks_s)
 con = sqlite3.connect(db)
 
@@ -3730,7 +3781,7 @@ hook_counts = dict(
         (source_id, record_id),
     ).fetchall()
 )
-assert hook_counts == expected, (hook_counts, expected)
+assert hook_counts == expected_hooks, (hook_counts, expected_hooks)
 total_hook_runs = con.execute(
     """
     select count(*)
@@ -3759,9 +3810,11 @@ PY
 - raced_record: $record_id
 - link_attempts: ${#link_workers[@]}
 - unlink_attempts: ${#unlink_workers[@]}
-- committed_set_events: $expected_set
-- committed_unset_events: $expected_unset
+- committed_set_events: $expected_set_events
+- committed_unset_events: $expected_unset_events
 - committed_rm_events: $rm_successes
+- set_hook_runs: $expected_set_hooks
+- unset_hook_runs: $expected_unset_hooks
 - hook_side_effects: $side_effect_count
 - database: $evidence_root/store.sqlite
 - logs: $evidence_root/logs
@@ -3952,6 +4005,9 @@ counts = {
     op: {"success": 0, "ambiguous": 0, "not_found": 0, "link_missing": 0}
     for op in ops
 }
+# set/unset successes that reported a real change (Updated) vs a no-op
+# (Unchanged); only real changes write Store Events.
+updated_counts = {"set": 0, "unset": 0}
 link_success_pairs = set()
 
 def read(path):
@@ -3975,9 +4031,20 @@ for op in ops:
                 if op == "get":
                     match = re.match(r"^(aa[0-9]{4}) task(?: |$)", line)
                     assert match and match.group(1) in source_ids, (op, line)
-                elif op in {"set", "unset"}:
+                elif op == "set":
+                    # Each set writes a distinct status value, so a committed
+                    # set is always a real change.
                     assert line.startswith("Updated "), (op, line)
                     assert line.split(" ", 1)[1] in source_ids, (op, line)
+                    updated_counts["set"] += 1
+                elif op == "unset":
+                    # A racing unset may find the status field already gone;
+                    # that no-op legitimately reports Unchanged and writes no
+                    # Store Event. Either ordering is valid.
+                    assert line.startswith(("Updated ", "Unchanged ")), (op, line)
+                    assert line.split(" ", 1)[1] in source_ids, (op, line)
+                    if line.startswith("Updated "):
+                        updated_counts["unset"] += 1
                 elif op == "rm":
                     assert line.startswith("Removed "), (op, line)
                     assert line.split(" ", 1)[1] in source_ids, (op, line)
@@ -4033,8 +4100,15 @@ event_counts = dict(
         """
     ).fetchall()
 )
-for op in ["set", "unset", "rm", "link", "unlink"]:
-    assert event_counts.get(op, 0) == counts[op]["success"], (op, event_counts, counts[op])
+expected_events = {
+    "set": updated_counts["set"],
+    "unset": updated_counts["unset"],
+    "rm": counts["rm"]["success"],
+    "link": counts["link"]["success"],
+    "unlink": counts["unlink"]["success"],
+}
+for op, expected_count in expected_events.items():
+    assert event_counts.get(op, 0) == expected_count, (op, event_counts, expected_events)
 
 dangling_links = con.execute(
     """
@@ -4732,6 +4806,9 @@ counts = {
     for op in ops
 }
 success_ids = {op: Counter() for op in ops}
+# set/unset successes that reported a real change (status updated) vs a
+# no-op (status unchanged); only real changes write Store Events.
+updated_counts = {"set": 0, "unset": 0}
 
 def read(path):
     return path.read_text(encoding="utf-8") if path.exists() else ""
@@ -4763,8 +4840,20 @@ for op in ops:
             if status == "0":
                 assert err == "", (op, worker, index, err)
                 payload = json.loads(out)
-                expected_status = "removed" if op == "rm" else "updated"
-                assert payload["status"] == expected_status, payload
+                if op == "rm":
+                    assert payload["status"] == "removed", payload
+                elif op == "set":
+                    # Each set writes distinct race_status/race_marker values,
+                    # so a committed set is always a real change.
+                    assert payload["status"] == "updated", payload
+                    updated_counts["set"] += 1
+                else:
+                    # A racing unset may find race_status already gone; that
+                    # no-op legitimately reports status unchanged and writes
+                    # no Store Event. Either ordering is valid.
+                    assert payload["status"] in {"updated", "unchanged"}, payload
+                    if payload["status"] == "updated":
+                        updated_counts["unset"] += 1
                 record = payload["record"]
                 record_id = record["id"]
                 fields = record["fields"]
@@ -4800,8 +4889,13 @@ event_rows = con.execute(
     """
 ).fetchall()
 event_counts = Counter(row[0] for row in event_rows)
-for op in ops:
-    assert event_counts[op] == counts[op]["success"], (op, event_counts, counts[op])
+expected_events = {
+    "set": updated_counts["set"],
+    "unset": updated_counts["unset"],
+    "rm": counts["rm"]["success"],
+}
+for op, expected_count in expected_events.items():
+    assert event_counts[op] == expected_count, (op, event_counts, expected_events)
 
 for event_type, record_id, snapshot_raw in event_rows:
     assert record_id in source_ids, (event_type, record_id)

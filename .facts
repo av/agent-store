@@ -283,7 +283,7 @@
 - label: simultaneous agent-store set, link, unlink, and rm processes with matching Hooks all finish without database lock errors, persist each committed mutation, and persist one Hook Run per mutation
   command: bash tests/facts/store_schema_migrations.sh concurrent_process_mutations_with_hooks
   tags: [implemented]
-- label: simultaneous agent-store set, unset, and rm processes targeting the same Record and simultaneous link and unlink processes targeting the same Link pair finish without database lock errors, leave one final link state per pair, allow only one successful rm and one successful unlink per existing Link (later unlinks fail with a no such link error), and persist Hook Runs only for committed mutations
+- label: simultaneous agent-store set, unset, and rm processes targeting the same Record and simultaneous link and unlink processes targeting the same Link pair finish without database lock errors, leave one final link state per pair, allow only one successful rm and one successful unlink per existing Link (later unlinks fail with a no such link error), report duplicate no-op set and unset mutations as Unchanged with no Store Event while their matching Hooks still run and record Hook Runs, and persist Store Events only for committed real changes
   command: bash tests/facts/store_schema_migrations.sh concurrent_same_record_and_link_races
   tags: [implemented]
 

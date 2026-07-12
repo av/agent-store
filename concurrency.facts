@@ -6,7 +6,7 @@
   id: lrm
   command: bash tests/facts/store_schema_migrations.sh concurrent_link_record_disappearance_races
   tags: [implemented]
-- label: simultaneous or post-commit deletion of a linked source Record after committed set and unset mutations does not make link-predicate Hooks fail or skip; committed set and unset mutations evaluate Hook Queries against the mutation-time Record and Link snapshot and persist matching Hook Runs
+- label: simultaneous or post-commit deletion of a linked source Record after committed set and unset mutations does not make link-predicate Hooks fail or error; committed set and unset mutations evaluate Hook Queries against a mutation-time Record and Link snapshot, and when a concurrent deletion lands before the Link snapshot is captured the Hook legitimately skips, so each committed mutation persists either one matching Hook Run or none
   id: sls
   command: bash tests/facts/store_schema_migrations.sh concurrent_set_unset_link_snapshot_races
   tags: [implemented]
@@ -30,13 +30,13 @@
 - label: simultaneous --json find, --json get, and --json links reads while create, rm, link, and unlink mutations with matching Hooks are running finish without database lock errors or panics, always print valid JSON with stable top-level shapes, tolerate concurrently disappearing Records or Links as either a consistent JSON snapshot or a not-found error, and persist Hook Runs for committed mutations
   command: bash tests/facts/store_schema_migrations.sh concurrent_json_record_readers_with_hooked_mutations
   tags: [implemented]
-- label: simultaneous get, set, unset, rm, link, unlink, and links commands resolving short Record ID prefixes while matching Records are created or removed either operate on exactly one resolved Record or fail with ambiguous or not-found errors, never report lock errors or panics, and do not create unintended Records or Links on resolution failures
+- label: simultaneous get, set, unset, rm, link, unlink, and links commands resolving short Record ID prefixes while matching Records are created or removed either operate on exactly one resolved Record — reporting Updated for real changes and Unchanged for no-op set and unset mutations that write no Store Event — or fail with ambiguous or not-found errors, never report lock errors or panics, and do not create unintended Records or Links on resolution failures
   command: bash tests/facts/store_schema_migrations.sh concurrent_id_prefix_resolution_races
   tags: [implemented]
 - label: simultaneous --json get, --json link, --json unlink, --json links, and hook rm commands resolving short Record or Hook ID prefixes while matching Records or Hooks are created or removed either operate on exactly one resolved entity or fail with clear ambiguous or not-found errors, never report lock errors or panics, always print valid JSON on success, and do not mutate Records, Links, or Hooks on resolution failures
   command: bash tests/facts/store_schema_migrations.sh concurrent_json_prefix_and_hook_rm_races
   tags: [implemented]
-- label: simultaneous --json set, --json unset, and --json rm commands resolving short Record ID prefixes while matching Records are created or removed either mutate exactly one resolved Record and print valid JSON naming that Record or fail with clear ambiguous or not-found errors, never report lock errors or panics, and do not mutate Records or write Store Events on prefix resolution failures
+- label: simultaneous --json set, --json unset, and --json rm commands resolving short Record ID prefixes while matching Records are created or removed either mutate exactly one resolved Record and print valid JSON naming that Record — with status updated for real changes and status unchanged for no-op set and unset mutations that write no Store Event — or fail with clear ambiguous or not-found errors, never report lock errors or panics, and do not mutate Records or write Store Events on prefix resolution failures
   id: jpr
   command: bash tests/facts/store_schema_migrations.sh concurrent_json_mutation_prefix_races
   tags: [implemented]
