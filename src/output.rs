@@ -833,8 +833,9 @@ fn append_recent_records_section(output: &mut String, summary: &QuickContextSumm
     let mut section = String::new();
     for record in &summary.recent_records {
         let line = format!("\n  {}", format_recent_record(record));
+        // Reserve one byte for the trailing newline the printer appends.
         if output.len() + header.len() + section.len() + line.len()
-            > QUICK_CONTEXT_OUTPUT_LIMIT_BYTES
+            > QUICK_CONTEXT_OUTPUT_LIMIT_BYTES - 1
         {
             break;
         }
@@ -856,12 +857,16 @@ fn format_status_counts(status_counts: &BTreeMap<String, i64>) -> String {
 }
 
 fn cap_quick_context_output(mut output: String) -> String {
-    if output.len() <= QUICK_CONTEXT_OUTPUT_LIMIT_BYTES {
+    // The printed output always gains a trailing newline, so cap the summary
+    // content one byte short of the limit to keep total stdout (content,
+    // truncation marker, and trailing newline) within the cap.
+    let content_budget = QUICK_CONTEXT_OUTPUT_LIMIT_BYTES - 1;
+    if output.len() <= content_budget {
         return output;
     }
 
     let marker = format!("\n... truncated at {QUICK_CONTEXT_OUTPUT_LIMIT_BYTES} bytes");
-    let mut truncate_at = QUICK_CONTEXT_OUTPUT_LIMIT_BYTES.saturating_sub(marker.len());
+    let mut truncate_at = content_budget.saturating_sub(marker.len());
     while !output.is_char_boundary(truncate_at) {
         truncate_at -= 1;
     }
@@ -1110,7 +1115,8 @@ mod tests {
         };
 
         let output = format_quick_context(&summary);
-        assert!(output.len() <= QUICK_CONTEXT_OUTPUT_LIMIT_BYTES);
+        // Content plus the trailing newline added on print stays in budget.
+        assert!(output.len() < QUICK_CONTEXT_OUTPUT_LIMIT_BYTES);
         assert!(output.contains("Recent records:"));
         assert!(output.contains("record0000"));
         assert!(!output.contains("... truncated at"));
@@ -1145,7 +1151,8 @@ mod tests {
 
         let output = format_quick_context(&summary);
 
-        assert!(output.len() <= QUICK_CONTEXT_OUTPUT_LIMIT_BYTES);
+        // Content plus the trailing newline added on print stays in budget.
+        assert!(output.len() < QUICK_CONTEXT_OUTPUT_LIMIT_BYTES);
         assert!(output.ends_with("... truncated at 8192 bytes"));
     }
 }

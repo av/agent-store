@@ -831,6 +831,9 @@ fn has_unsupported_identifier_chars(value: &str) -> bool {
 }
 
 fn validate_kind(kind: &str) -> Result<(), CliParseError> {
+    if kind.is_empty() {
+        return Err(CliParseError::new("kind cannot be empty"));
+    }
     if has_unsupported_identifier_chars(kind) {
         return Err(CliParseError::new(format!(
             "kind contains unsupported characters \
@@ -898,9 +901,6 @@ pub fn parse_jsonl_record(line: &str) -> Result<(String, BTreeMap<String, String
         .ok_or_else(|| CliParseError::new("missing 'kind' key"))?
         .as_str()
         .ok_or_else(|| CliParseError::new("'kind' must be a JSON string"))?;
-    if kind.is_empty() {
-        return Err(CliParseError::new("'kind' cannot be empty"));
-    }
     validate_kind(kind)?;
 
     let mut fields = BTreeMap::new();

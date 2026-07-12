@@ -521,14 +521,17 @@ fn main() {
                     } else if desc {
                         records.reverse();
                     }
+                    // --count reports the total number of matches; --limit
+                    // only caps how many records are printed.
+                    let match_count = records.len();
                     if let Some(limit) = limit {
                         records.truncate(limit);
                     }
                     if count {
                         if cli.json_output {
-                            print_json(count_json(records.len()));
+                            print_json(count_json(match_count));
                         } else {
-                            outln!("{}", records.len());
+                            outln!("{match_count}");
                         }
                     } else if cli.json_output {
                         print_json(records_json(&records));
@@ -555,10 +558,17 @@ fn main() {
             let mut store = open_store_or_exit(cli.json_output);
             match store.set_record_with_snapshot(&id, fields) {
                 Ok(mutation) => {
-                    if cli.json_output {
-                        print_json(mutation_json("updated", &mutation.record));
+                    let status = if mutation.changed {
+                        "updated"
                     } else {
+                        "unchanged"
+                    };
+                    if cli.json_output {
+                        print_json(mutation_json(status, &mutation.record));
+                    } else if mutation.changed {
                         outln!("Updated {}", mutation.record.id);
+                    } else {
+                        outln!("Unchanged {}", mutation.record.id);
                     }
                     run_hooks_or_exit(
                         cli.json_output,
@@ -578,10 +588,17 @@ fn main() {
             let mut store = open_store_or_exit(cli.json_output);
             match store.unset_record_with_snapshot(&id, keys) {
                 Ok(mutation) => {
-                    if cli.json_output {
-                        print_json(mutation_json("updated", &mutation.record));
+                    let status = if mutation.changed {
+                        "updated"
                     } else {
+                        "unchanged"
+                    };
+                    if cli.json_output {
+                        print_json(mutation_json(status, &mutation.record));
+                    } else if mutation.changed {
                         outln!("Updated {}", mutation.record.id);
+                    } else {
+                        outln!("Unchanged {}", mutation.record.id);
                     }
                     run_hooks_or_exit(
                         cli.json_output,
@@ -1240,7 +1257,7 @@ fn enable_schedule_cron(store: &Store) -> Result<(), String> {
         .map_err(|e| format!("failed to resolve agent-store binary path: {e}"))?;
     let binary_path_str = binary_path.display().to_string();
 
-    let existing = read_crontab();
+    let existing = read_crontab()?;
     let marker = format!("{CRON_MARKER_PREFIX}{project_root_str}");
 
     let mut new_lines = Vec::new();
@@ -1272,7 +1289,7 @@ fn disable_schedule_cron(store: &Store) -> Result<bool, String> {
         .map_err(|e| format!("failed to resolve project root: {e}"))?;
     let project_root_str = project_root.display().to_string();
 
-    let existing = read_crontab();
+    let existing = read_crontab()?;
     let marker = format!("{CRON_MARKER_PREFIX}{project_root_str}");
 
     let mut new_lines = Vec::new();
@@ -1299,16 +1316,21 @@ fn disable_schedule_cron(store: &Store) -> Result<bool, String> {
     Ok(removed)
 }
 
-fn read_crontab() -> String {
+/// Reads the current user's crontab. A crontab binary that cannot be
+/// executed is an error; a working crontab with no entries for this user
+/// (non-zero exit from `crontab -l`) reads as empty.
+fn read_crontab() -> Result<String, String> {
     let output = Command::new("crontab")
         .arg("-l")
         .stdout(process::Stdio::piped())
         .stderr(process::Stdio::piped())
-        .output();
+        .output()
+        .map_err(|e| format!("failed to run crontab: {e}"))?;
 
-    match output {
-        Ok(out) if out.status.success() => String::from_utf8_lossy(&out.stdout).into_owned(),
-        _ => String::new(),
+    if output.status.success() {
+        Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+    } else {
+        Ok(String::new())
     }
 }
 

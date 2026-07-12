@@ -271,11 +271,11 @@ Recent records:
     run_agent_store create massive "${fields[@]}" >"$tmp"/agent-store-ctx-uha-record.out
 
     run_agent_store ctx >ctx.out
+    # Total stdout, including the truncation notice and the trailing
+    # newline, stays within the documented 8192-byte cap.
     byte_count="$(wc -c <ctx.out | tr -d ' ')"
-    test "$byte_count" -le 8193
+    test "$byte_count" -le 8192
     test "$(tail -c1 ctx.out)" = ""
-    content_byte_count="$(head -c -1 ctx.out | wc -c | tr -d ' ')"
-    test "$content_byte_count" -le 8192
     grep -Fq "... truncated at 8192 bytes" ctx.out
     ;;
 

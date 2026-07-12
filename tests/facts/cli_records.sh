@@ -174,6 +174,33 @@ PY
     test "$got" = "$id task empty='' note=keep title=Write zzz_fail_after_note=bad"
     ;;
 
+  set_noop_leaves_updated_at)
+    cd "$tmp"
+    run_agent_store init >"$tmp"/agent-store-noop-9fq-init.out
+    id="$(run_agent_store create task title=Write status=open)"
+    before="$(run_agent_store get "$id" --json | jq -r .record.updated_at)"
+    sleep 1
+
+    # Setting a field to the value it already holds changes nothing.
+    out="$(run_agent_store set "$id" title=Write)"
+    test "$out" = "Unchanged $id"
+    test "$(run_agent_store get "$id" --json | jq -r .record.updated_at)" = "$before"
+
+    # Unsetting a field that does not exist changes nothing.
+    out="$(run_agent_store unset "$id" nonexistent)"
+    test "$out" = "Unchanged $id"
+    test "$(run_agent_store get "$id" --json | jq -r .record.updated_at)" = "$before"
+
+    # JSON output reports the no-op status.
+    test "$(run_agent_store set "$id" title=Write --json | jq -r .status)" = unchanged
+
+    # A mixed set with at least one real change still updates and bumps.
+    out="$(run_agent_store set "$id" title=Write status=done)"
+    test "$out" = "Updated $id"
+    after="$(run_agent_store get "$id" --json | jq -r .record.updated_at)"
+    test "$after" != "$before"
+    ;;
+
   find_filters_records)
     cd "$tmp"
     run_agent_store init >"$tmp"/agent-store-find-m2b-init.out
@@ -871,6 +898,18 @@ PY
       grep -Fq "error: $expected" "$tmp"/agent-store-ident-6vl.err
       test ! -s "$tmp"/agent-store-ident-6vl.out
     }
+
+    # Empty kinds are rejected on argv and JSONL create.
+    expected="kind cannot be empty"
+    reject create "" title=x
+    set +e
+    printf '%s\n' '{"kind":"","fields":{"title":"x"}}' \
+      | run_agent_store create --stdin >"$tmp"/agent-store-ident-6vl.out 2>"$tmp"/agent-store-ident-6vl.err
+    stdin_status=$?
+    set -e
+    test "$stdin_status" -ne 0
+    grep -Fq "stdin line 1: kind cannot be empty" "$tmp"/agent-store-ident-6vl.err
+    test ! -s "$tmp"/agent-store-ident-6vl.out
 
     # Kinds with newline, whitespace, '=', control chars, or quotes are rejected.
     expected="kind contains unsupported characters"

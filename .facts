@@ -40,18 +40,18 @@
 - label: agent-store find and ls without a Query list every stored Record in the default record format and return the same records object shape under --json
   command: bash tests/facts/cli_records.sh find_lists_all_records
   tags: [implemented]
-- label: agent-store create and set reject with exit code 2 and an error: message any kind or field name containing whitespace, control characters, quotes, or =, reject the reserved field names kind, id, and not, and reject not as a kind, while field values stay unrestricted and previously valid unicode/dot/dash/underscore identifiers keep working
+- label: agent-store create and set reject with exit code 2 and an error: message an empty kind, any kind or field name containing whitespace, control characters, quotes, or =, reject the reserved field names kind, id, and not, and reject not as a kind, while field values stay unrestricted and previously valid unicode/dot/dash/underscore identifiers keep working
   id: ol0
   command: bash tests/facts/cli_records.sh identifier_validation_rejects_unsafe_names
   tags: [implemented]
-- label: get and find --json include created_at and updated_at as UTC RFC3339 strings on every record object; create sets both, set and unset bump updated_at, and records from pre-existing stores still print valid timestamps
+- label: get and find --json include created_at and updated_at as UTC RFC3339 strings on every record object; create sets both, set and unset bump updated_at only when they change data, and records from pre-existing stores still print valid timestamps
   command: repo=$PWD && CARGO_TARGET_DIR="$repo/target/facts-bin" cargo build --quiet --manifest-path "$repo/Cargo.toml" && export PATH="$repo/target/facts-bin/debug:$PATH" && d=$(mktemp -d) && cd $d && agent-store init >/dev/null && id=$(agent-store create note k=v) && agent-store get $id --json | jq -e ".record.created_at and .record.updated_at" && sleep 1 && agent-store set $id k=w >/dev/null && test "$(agent-store get $id --json | jq -r .record.created_at)" != "$(agent-store get $id --json | jq -r .record.updated_at)"
   tags: [implemented]
 - label: find Queries can compare the built-in created_at and updated_at timestamps with the existing comparison operators alongside Field predicates
   command: repo=$PWD && CARGO_TARGET_DIR="$repo/target/facts-bin" cargo build --quiet --manifest-path "$repo/Cargo.toml" && export PATH="$repo/target/facts-bin/debug:$PATH" && d=$(mktemp -d) && cd $d && agent-store init >/dev/null && agent-store create note k=v >/dev/null && test "$(agent-store find "created_at>2020-01-01" --json | jq ".records | length")" = 1 && test "$(agent-store find "created_at>2999-01-01" --json | jq ".records | length")" = 0
   tags: [implemented]
-- label: find and ls accept --sort <field> including created_at/updated_at/kind/id and Field names, --desc to reverse, --limit N to cap results, and --count to print only the match count, composing with Queries in plain and --json output
-  command: repo=$PWD && CARGO_TARGET_DIR="$repo/target/facts-bin" cargo build --quiet --manifest-path "$repo/Cargo.toml" && export PATH="$repo/target/facts-bin/debug:$PATH" && d=$(mktemp -d) && cd $d && agent-store init >/dev/null && agent-store create t n=2 >/dev/null && agent-store create t n=1 >/dev/null && agent-store create t n=3 >/dev/null && test "$(agent-store find --sort n --json | jq -r ".records[0].fields.n")" = 1 && test "$(agent-store find --sort n --desc --limit 1 --json | jq -r ".records[0].fields.n")" = 3 && test "$(agent-store find --count)" = 3
+- label: find and ls accept --sort <field> including created_at/updated_at/kind/id and Field names, --desc to reverse, --limit N to cap printed results, and --count to print the total match count ignoring --limit, composing with Queries in plain and --json output
+  command: repo=$PWD && CARGO_TARGET_DIR="$repo/target/facts-bin" cargo build --quiet --manifest-path "$repo/Cargo.toml" && export PATH="$repo/target/facts-bin/debug:$PATH" && d=$(mktemp -d) && cd $d && agent-store init >/dev/null && agent-store create t n=2 >/dev/null && agent-store create t n=1 >/dev/null && agent-store create t n=3 >/dev/null && test "$(agent-store find --sort n --json | jq -r ".records[0].fields.n")" = 1 && test "$(agent-store find --sort n --desc --limit 1 --json | jq -r ".records[0].fields.n")" = 3 && test "$(agent-store find --count)" = 3 && test "$(agent-store find --limit 1 --count)" = 3 && test "$(agent-store find --limit 1 --count --json | jq -r .count)" = 3
   tags: [implemented]
 - label: find and ls without --sort list Records in creation order oldest first instead of ID order
   command: repo=$PWD && CARGO_TARGET_DIR="$repo/target/facts-bin" cargo build --quiet --manifest-path "$repo/Cargo.toml" && export PATH="$repo/target/facts-bin/debug:$PATH" && d=$(mktemp -d) && cd $d && agent-store init >/dev/null && a=$(agent-store create t seq=first) && sleep 1.1 && b=$(agent-store create t seq=second) && test "$(agent-store find --json | jq -r ".records[0].id")" = "$a"
@@ -61,6 +61,9 @@
   tags: [implemented]
 - label: agent-store create --stdin reads JSONL from stdin (one {"kind":...,"fields":{...}} object per line, the find --json record shape, ignoring extra keys like id and timestamps so exports round-trip), creates one Record per line firing Hooks per record, prints each created ID on its own line (a {"records":[...]} envelope under --json), and fails with a non-zero exit and no partial silent skip on an invalid line
   command: repo=$PWD && CARGO_TARGET_DIR="$repo/target/facts-bin" cargo build --quiet --manifest-path "$repo/Cargo.toml" && export PATH="$repo/target/facts-bin/debug:$PATH" && d=$(mktemp -d) && cd $d && agent-store init >/dev/null && printf "%s\n%s\n" "{\"kind\":\"task\",\"fields\":{\"title\":\"a\"}}" "{\"kind\":\"task\",\"fields\":{\"title\":\"b\"}}" | agent-store create --stdin | wc -l | grep -qx 2 && agent-store find --json | jq ".records" > exp.json && agent-store find --json | jq -c ".records[]" | (mkdir d2 && cd d2 && agent-store init >/dev/null && agent-store create --stdin >/dev/null && test "$(agent-store find --count)" = 2) && ! echo "not json" | agent-store create --stdin 2>/dev/null
+  tags: [implemented]
+- label: agent-store set with values the Record already holds and unset of Fields it does not have leave updated_at untouched, print Unchanged <ID> (status unchanged under --json), and exit 0, while a mutation with at least one real change still prints Updated <ID> and bumps updated_at
+  command: bash tests/facts/cli_records.sh set_noop_leaves_updated_at
   tags: [implemented]
 
 ## output
@@ -365,7 +368,7 @@
   id: iln
   command: bash tests/facts/cli_context.sh ctx_status_date_summaries
   tags: [implemented]
-- label: agent-store ctx documents an 8192-byte Quick Context output cap in help, caps summary content before the trailing newline at 8192 bytes even when Store metadata exceeds that size, and always ends stdout with a trailing newline including in the truncated case
+- label: agent-store ctx documents an 8192-byte Quick Context output cap in help, keeps total stdout including the truncation notice and trailing newline at or under 8192 bytes even when Store metadata exceeds that size, and always ends stdout with a trailing newline including in the truncated case
   id: uha
   command: bash tests/facts/cli_context.sh ctx_output_byte_limit
   tags: [implemented]
@@ -408,6 +411,9 @@
   tags: [implemented]
 - label: a Schedule is a stored time-triggered rule with a generated ID, kind (at or every), expression, optional interval_seconds, optional query, bash command, next_run_at, status, and created_at; a ScheduleRun persists one execution result
   command: cargo test --quiet schedule_add_list_delete_lifecycle && cargo test --quiet schedule_runs_are_recorded_and_retrieved
+  tags: [implemented]
+- label: agent-store schedule enable and disable exit 1 with a clear error when the crontab binary cannot be executed, while disable with a working crontab and no entry for the project still reports no entry and exits 0
+  command: bash tests/facts/cli_schedules.sh schedule_disable_missing_crontab
   tags: [implemented]
 
 # query

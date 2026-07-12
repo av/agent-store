@@ -128,6 +128,32 @@ case "$case_name" in
     if crontab -l 2>/dev/null | grep -q "agent-store:tick:$tmp"; then exit 1; fi
     ;;
 
+  schedule_disable_missing_crontab)
+    CARGO_TARGET_DIR="$target_dir" cargo build --quiet --manifest-path "$repo/Cargo.toml"
+    bin="$target_dir/debug/agent-store"
+    cd "$tmp"
+    "$bin" init >"$tmp"/init.out
+
+    # A PATH with no crontab binary must fail enable and disable alike.
+    mkdir "$tmp/emptybin"
+    set +e
+    env PATH="$tmp/emptybin" "$bin" schedule enable \
+      >"$tmp"/enable.out 2>"$tmp"/enable.err
+    enable_status=$?
+    env PATH="$tmp/emptybin" "$bin" schedule disable \
+      >"$tmp"/disable.out 2>"$tmp"/disable.err
+    disable_status=$?
+    set -e
+    test "$enable_status" -eq 1
+    test "$disable_status" -eq 1
+    grep -Fq "failed to run crontab" "$tmp"/disable.err
+    test ! -s "$tmp"/disable.out
+
+    # With a working crontab and no entry for this project, disable stays rc=0.
+    disable_out=$("$bin" schedule disable)
+    echo "$disable_out" | grep -q "No crontab entry found for this project"
+    ;;
+
   schedule_ctx_integration)
     cd "$tmp"
     run_agent_store init >"$tmp"/init.out

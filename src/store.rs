@@ -209,6 +209,10 @@ pub struct RecordMutation {
     pub record: Record,
     pub record_links: Vec<LinkEdge>,
     pub field_changes: Vec<FieldChange>,
+    /// False when the mutation was a no-op (every field already held the
+    /// requested value, or none of the unset keys existed), in which case
+    /// `updated_at` was left untouched and no store event was recorded.
+    pub changed: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -929,22 +933,31 @@ impl Store {
             })
             .collect();
 
-        for (key, value) in &fields {
-            upsert_field(&tx, &id, key, value)?;
-        }
-        tx.execute(
-            "UPDATE records SET updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?1",
-            params![&id],
-        )?;
-        let record = get_record_by_id(&tx, &id)?;
+        let changed = fields
+            .iter()
+            .any(|(key, value)| before.fields.get(key) != Some(value));
+        let record = if changed {
+            for (key, value) in &fields {
+                upsert_field(&tx, &id, key, value)?;
+            }
+            tx.execute(
+                "UPDATE records SET updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?1",
+                params![&id],
+            )?;
+            let record = get_record_by_id(&tx, &id)?;
+            insert_store_event(&tx, "set", &record)?;
+            record
+        } else {
+            before
+        };
         let record_links = links_for_record_id(&tx, &id)?;
-        insert_store_event(&tx, "set", &record)?;
         tx.commit()?;
 
         Ok(RecordMutation {
             record,
             record_links,
             field_changes,
+            changed,
         })
     }
 
@@ -972,25 +985,32 @@ impl Store {
             })
             .collect();
 
-        for key in &keys {
+        let changed = keys.iter().any(|key| before.fields.contains_key(key));
+        let record = if changed {
+            for key in &keys {
+                tx.execute(
+                    "DELETE FROM record_fields WHERE record_id = ?1 AND key = ?2",
+                    params![&id, key],
+                )?;
+            }
             tx.execute(
-                "DELETE FROM record_fields WHERE record_id = ?1 AND key = ?2",
-                params![&id, key],
+                "UPDATE records SET updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?1",
+                params![&id],
             )?;
-        }
-        tx.execute(
-            "UPDATE records SET updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?1",
-            params![&id],
-        )?;
-        let record = get_record_by_id(&tx, &id)?;
+            let record = get_record_by_id(&tx, &id)?;
+            insert_store_event(&tx, "unset", &record)?;
+            record
+        } else {
+            before
+        };
         let record_links = links_for_record_id(&tx, &id)?;
-        insert_store_event(&tx, "unset", &record)?;
         tx.commit()?;
 
         Ok(RecordMutation {
             record,
             record_links,
             field_changes,
+            changed,
         })
     }
 
@@ -1015,6 +1035,7 @@ impl Store {
             record,
             record_links,
             field_changes: Vec::new(),
+            changed: true,
         })
     }
 
@@ -2178,6 +2199,46 @@ mod tests {
             .unwrap();
         assert_eq!(unset.created_at, created.created_at);
         assert!(unset.updated_at > updated.updated_at);
+
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn noop_set_and_unset_leave_updated_at_untouched() {
+        let dir = std::env::temp_dir().join(format!("agent-store-test-{}", generate_id()));
+        fs::create_dir_all(&dir).unwrap();
+        let db_path = dir.join("store.sqlite");
+        let mut store = Store::open(db_path).unwrap();
+
+        let created = store
+            .create_record("task", BTreeMap::from([("title".into(), "write".into())]))
+            .unwrap();
+
+        thread::sleep(Duration::from_millis(5));
+        let same_value = store
+            .set_record_with_snapshot(
+                &created.id,
+                BTreeMap::from([("title".into(), "write".into())]),
+            )
+            .unwrap();
+        assert!(!same_value.changed);
+        assert_eq!(same_value.record.updated_at, created.updated_at);
+
+        let missing_key = store
+            .unset_record_with_snapshot(&created.id, vec!["nonexistent".to_owned()])
+            .unwrap();
+        assert!(!missing_key.changed);
+        assert_eq!(missing_key.record.updated_at, created.updated_at);
+
+        // A real change still bumps updated_at and reports changed.
+        let real_change = store
+            .set_record_with_snapshot(
+                &created.id,
+                BTreeMap::from([("title".into(), "ship".into())]),
+            )
+            .unwrap();
+        assert!(real_change.changed);
+        assert!(real_change.record.updated_at > created.updated_at);
 
         fs::remove_dir_all(dir).unwrap();
     }
