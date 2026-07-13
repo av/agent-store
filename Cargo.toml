@@ -1,6 +1,6 @@
 [package]
 name = "agent-store-cli"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 description = "A local-first memory and context store for AI coding agents, backed by SQLite"
 license = "MIT"

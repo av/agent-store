@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-07-13
+
+### Added
+
+- Docs: Schedules page (`docs/schedules.md`) covering `add at`/`add every`,
+  `tick`, crontab `enable`/`disable`, per-record execution, run capture,
+  timeouts, and the shared hook/schedule recursion cap — plus a README
+  Schedules section. The feature shipped in v0.1.1 with only `--help` docs.
+- Docs: the JSON import/export recipe now warns that record JSON carries no
+  links, so copying a store via `find --json | create --stdin` drops edges
+  (recreate them via `links <id> --json` + `link`).
+- Docs: the `ctx` 8192-byte cap is qualified — it applies to text output only
+  (`ctx --json` is uncapped) — and the truncation fallback is documented.
+
+### Changed
+
+- Hook dispatch is capped at recursion depth 3: hook and schedule commands
+  run with `AGENT_STORE_HOOK_DEPTH` set, and mutations made at the cap skip
+  hook dispatch (with a note on stderr) instead of recursing without bound.
+- When a post-commit hook fails, the mutation's normal stdout output (record
+  ID, or the full JSON envelope in `--json` mode) is still printed; the hook
+  failure goes to stderr and the exit code remains 1. Previously the new
+  record's ID was only visible embedded in the error text.
+- `set`/`unset` that change nothing now report `Unchanged <id>`
+  (`"status": "unchanged"` in `--json` mode) and no longer bump `updated_at`
+  or write a store event, so no-op mutations don't create false activity
+  signals. Hooks still fire.
+- `find --count` reports the total number of matching records, ignoring
+  `--limit`, as documented.
+
+### Fixed
+
+- `ctx` text output could exceed its own 8192-byte cap by one byte; the
+  truncation notice now fits within the budget.
+- `create` rejects an empty kind (exit 2) instead of storing a nameless
+  record kind.
+- `schedule disable` now fails with exit 1 when the `crontab` binary cannot
+  be run, instead of masking the error as "No crontab entry found".
+
 ## [0.1.1] - 2026-07-04
 
 ### Added
@@ -123,6 +162,7 @@ First public release.
   hook races covered by tests), graceful handling of broken stdout pipes, and
   an explicit error when commands run before `init`.
 
-[Unreleased]: https://github.com/av/agent-store/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/av/agent-store/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/av/agent-store/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/av/agent-store/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/av/agent-store/releases/tag/v0.1.0
