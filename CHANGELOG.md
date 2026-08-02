@@ -28,6 +28,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - README: "How agents use it" section walking the session-to-session memory
   loop, and a "Why not just...?" section answering MEMORY.md, grep, vector
   memory, and git history head-on.
+- README: notes for scripters and evaluators — the stdout/stderr/exit-code
+  contract for `--json` mode, a one-line concurrency/durability summary
+  (WAL, serialized writes), and a tested one-liner for importing an
+  existing `MEMORY.md` via `jq` + `create --stdin`.
 - Docs: `docs/install.md` — verification and attestations, shell
   completions and man page, upgrade/uninstall — split out of the README.
 - Docs: a Windows section in `docs/install.md` with a PowerShell
@@ -39,15 +43,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the v3 schema.
 - Cargo.toml: declared `rust-version = "1.78"` (minimum supported Rust for
   `cargo install`), and pointed `homepage`/`documentation` at the docs site.
-- README: notes for scripters and evaluators — the stdout/stderr/exit-code
-  contract for `--json` mode, a one-line concurrency/durability summary
-  (WAL, serialized writes), and a tested one-liner for importing an
-  existing `MEMORY.md` via `jq` + `create --stdin`.
 
 ### Changed
 
 - README demo GIF re-rendered with the brand terminal theme; the demo now
-  also shows `set`.
+  also shows `set`, and demo GIFs no longer open on a blank typing frame —
+  the first command is rendered instantly, so the payoff is visible from
+  frame 0.
 - One canonical tagline — "Persistent, queryable memory for coding agents
   — one binary, one SQLite file in your repo, no server" — now appears
   consistently across the README, `--help`, the man page, Cargo.toml /
@@ -61,8 +63,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `docs/install.md`.
 - README reordered for first-viewport clarity: tagline under the badges,
   the hook paragraph and create/find sample above the demo GIF.
-- Demo GIFs no longer open on a blank typing frame: the first command is
-  rendered instantly, so the payoff is visible from frame 0.
 - README back half condensed to teasers linking into the docs pages; the
   Commands table now fits a 375px phone screen (hook/schedule subcommands
   moved into the description column).
