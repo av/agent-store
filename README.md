@@ -100,6 +100,43 @@ Recent records:
 
 IDs are short and prefix-resolvable: any unambiguous prefix works in `get`, `set`, `unset`, `rm`, `link`, and friends.
 
+## How agents use it
+
+You run `init` once. From then on the agent finds everything itself: the installed skills teach it the commands and conventions, and the `AGENTS.md`/`CLAUDE.md` block tells it to start every session with `ctx`. As it works, it records what matters:
+
+```sh
+# Session 1 — the agent picks an HTTP client and leaves a trail:
+$ agent-store create decision area=http choice=reqwest reason="rustls default, no openssl build dep"
+9kuvgz
+$ agent-store create task title="Migrate HTTP client to reqwest" status=pending
+wau740
+$ agent-store link wau740 implements 9kuvgz
+Linked wau740 implements 9kuvgz
+```
+
+The session ends. The context window is gone; the records are not. Days later, the next session opens with `ctx`:
+
+```
+Quick Context
+Records: 2
+Record kinds:
+  decision: 1
+    fields: area, choice, reason
+  task: 1
+    fields: status, title
+    status: pending=1
+Links: 1
+  implements: 1
+...
+Recent records:
+  wau740 task status=pending title='Migrate HTTP client to reqwest'
+  9kuvgz decision area=http choice=reqwest reason='rustls default, no openssl build dep'
+```
+
+The agent sees the pending migration and the reasoning behind it without being told, finishes the work, and runs `agent-store set wau740 status=done`. No re-discovery, no contradicted decisions.
+
+For the full walkthrough — Claude Code setup, `SessionStart` hook that injects `ctx` automatically, CLAUDE.md conventions — see [Using agent-store with Claude Code](docs/claude-code.md); for what `init` installs and the conventions agents pick up, see [Skills and agent integration](docs/skills.md).
+
 ## Commands
 
 | Command | What it does |
