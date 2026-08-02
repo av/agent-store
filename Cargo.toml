@@ -10,7 +10,18 @@ documentation = "https://github.com/av/agent-store#readme"
 readme = "README.md"
 keywords = ["llm", "agent", "memory", "context", "sqlite"]
 categories = ["command-line-utilities", "database"]
-exclude = [".agents/", ".claude/", "AGENTS.md", ".github/", "CONTRIBUTING.md", "SECURITY.md", "flake.nix", "flake.lock"]
+# Allowlist: ship only what `cargo install` needs. Brand assets, docs site,
+# man/completions, tests, and examples live in the repo / release tarballs,
+# not in the crates.io package. README image links use absolute GitHub raw
+# URLs so they still render on crates.io.
+include = [
+    "/src/**",
+    "/Cargo.toml",
+    "/LICENSE",
+    "/THIRD-PARTY-LICENSES.md",
+    "/README.md",
+    "/CHANGELOG.md",
+]
 
 # cargo-binstall: fetch prebuilt release binaries instead of compiling.
 # Matches the release asset naming, e.g.

@@ -1,4 +1,4 @@
-<h1 align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/logo-dark.svg"><img src="assets/logo-light.svg" alt="agent-store" width="438"></picture></h1>
+<h1 align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/av/agent-store/master/assets/logo-dark.svg"><img src="https://raw.githubusercontent.com/av/agent-store/master/assets/logo-light.svg" alt="agent-store" width="438"></picture></h1>
 
 <p align="center">
   <a href="https://github.com/av/agent-store/actions/workflows/ci.yml"><img src="https://github.com/av/agent-store/actions/workflows/ci.yml/badge.svg?branch=master" alt="CI"></a>
@@ -6,7 +6,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
 </p>
 
-![agent-store demo: init, create records, query with the find language, update with set, ctx summary](assets/demo.gif)
+![agent-store demo: init, create records, query with the find language, update with set, ctx summary](https://raw.githubusercontent.com/av/agent-store/master/assets/demo.gif)
 
 Persistent memory and a project-local context store for AI coding agents — records, links, hooks, and compact context via one CLI.
 
@@ -204,7 +204,7 @@ agent-store find kind=task status=pending      # multiple args join with implici
 
 Hooks run a bash command whenever matching records mutate — useful for notifications, mirroring state into files, or nudging an agent.
 
-![agent-store demo: link a finding to a task, add a hook on task updates that creates an event record, trigger it with set, then see the event in find, links, and ctx](assets/demo-hooks.gif)
+![agent-store demo: link a finding to a task, add a hook on task updates that creates an event record, trigger it with set, then see the event in find, links, and ctx](https://raw.githubusercontent.com/av/agent-store/master/assets/demo-hooks.gif)
 
 ```sh
 agent-store hook add set kind=task -- 'notify-send "task $AGENT_STORE_ID: $AGENT_STORE_NEW_VALUE"'
