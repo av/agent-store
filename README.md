@@ -59,69 +59,9 @@ The Nix package includes the man page and bash/zsh/fish completions; `nix develo
 
 Or download a prebuilt binary for Linux (x86_64 gnu/musl), macOS (x86_64/arm64), or Windows (x86_64) from [GitHub Releases](https://github.com/av/agent-store/releases) — each archive comes with a SHA-256 checksum. Linux/macOS assets are `.tar.gz`; the Windows asset is a `.zip`. [cargo-binstall](https://github.com/cargo-bins/cargo-binstall) users can fetch the prebuilt binary without compiling: `cargo binstall --git https://github.com/av/agent-store agent-store-cli` (the crate is named `agent-store-cli`; the installed binary is still `agent-store`).
 
-**Windows:** the install script is unix-only — download `agent-store-<tag>-x86_64-pc-windows-msvc.zip` from Releases, unzip, and put `agent-store.exe` on your `PATH` (or use `cargo install` / `cargo binstall` above). The core CLI works natively; [hooks](docs/hooks.md) run their commands via `bash -c`, so hooks require a `bash` on `PATH` (Git Bash or WSL) — everything else works without one. The bundled shell completions and man page below are for unix shells.
+**Windows:** the install script is unix-only — download `agent-store-<tag>-x86_64-pc-windows-msvc.zip` from Releases, unzip, and put `agent-store.exe` on your `PATH` (or use `cargo install` / `cargo binstall` above). The core CLI works natively; [hooks](docs/hooks.md) run their commands via `bash -c`, so hooks require a `bash` on `PATH` (Git Bash or WSL) — everything else works without one. The bundled shell completions and man page (see [Install details](#install-details)) are for unix shells.
 
-### Verifying release downloads
-
-Each release asset has a matching `.sha256` file. Download both into the same directory and check:
-
-```sh
-tag=v0.1.1
-asset=agent-store-$tag-x86_64-unknown-linux-gnu.tar.gz
-curl -fsSLO "https://github.com/av/agent-store/releases/download/$tag/$asset"
-curl -fsSLO "https://github.com/av/agent-store/releases/download/$tag/$asset.sha256"
-sha256sum -c "$asset.sha256"   # macOS: shasum -a 256 -c "$asset.sha256"
-```
-
-Releases after v0.1.0 also carry signed [build provenance attestations](https://docs.github.com/en/actions/how-tos/secure-your-work/use-artifact-attestations) proving each archive was built by this repository's release workflow. Verify with the [GitHub CLI](https://cli.github.com):
-
-```sh
-gh attestation verify "$asset" --repo av/agent-store
-```
-
-The `curl | sh` installer above performs the checksum verification automatically.
-
-### Shell completions and man page
-
-Completion scripts for bash, zsh, and fish live in [`completions/`](https://github.com/av/agent-store/tree/master/completions):
-
-```sh
-# bash
-mkdir -p ~/.local/share/bash-completion/completions
-cp completions/agent-store.bash ~/.local/share/bash-completion/completions/agent-store
-# zsh (any directory on your $fpath works; this one usually needs sudo)
-sudo cp completions/_agent-store /usr/share/zsh/site-functions/
-# fish
-mkdir -p ~/.config/fish/completions
-cp completions/agent-store.fish ~/.config/fish/completions/
-```
-
-A man page ships in [`man/agent-store.1`](man/agent-store.1):
-
-```sh
-mkdir -p ~/.local/share/man/man1 && cp man/agent-store.1 ~/.local/share/man/man1/
-man agent-store
-```
-
-### Upgrading and uninstalling
-
-Upgrade with whatever installed it:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/av/agent-store/master/install.sh | sh   # installer: re-run, replaces the binary
-brew upgrade av/tap/agent-store                                                      # Homebrew
-nix profile upgrade agent-store                                                      # Nix
-cargo install --force --git https://github.com/av/agent-store                        # cargo (source or binstall)
-```
-
-`agent-store --version` tells you what you're on. On Windows, replace `agent-store.exe` with the new release zip's copy.
-
-What lives where, for a clean uninstall:
-
-- **Binary** — the installer puts it at `~/.local/bin/agent-store` (or `$AGENT_STORE_INSTALL_DIR`); `rm` it. Otherwise `brew uninstall av/tap/agent-store`, `nix profile remove agent-store`, or `cargo uninstall agent-store`.
-- **Man page and completions** — only present if you copied them per the section above (or via Homebrew/Nix, which remove them with the package). Delete the copied files from `~/.local/share/man/man1/` and your completion directories.
-- **Your data** — stores are per-project in each project's `.agent-store/` directory (gitignored by `init`); there is no global state, config, or cache. Removing the binary loses no data, and deleting a project's `.agent-store/` deletes that project's records — export first with `agent-store find --json | jq -c '.records[]'` if you want a backup (see [docs/json.md](docs/json.md)).
-- **`init` artifacts** — in projects where you ran `init`: skill files under `.agents/skills/` and `.claude/skills/`, and a managed block in `AGENTS.md`/`CLAUDE.md` between `<!-- agent-store:start -->` and `<!-- agent-store:end -->` markers. Delete the skill directories and the marked block to fully remove them.
+Verification, shell completions, the man page, and upgrade/uninstall paths are covered in [Install details](#install-details) below.
 
 ## Quickstart
 
@@ -139,34 +79,26 @@ No AGENTS.md or CLAUDE.md found; create one and re-run `agent-store init` to add
 $ agent-store create task title="ship v0.1" status=pending
 7f0owa
 
-$ agent-store create note text="prefer rustls over openssl"
-x3arry
-
-$ agent-store find kind=task status=pending
-7f0owa task status=pending title='ship v0.1'
-
 $ agent-store set 7f0owa status=done
 Updated 7f0owa
 
 $ agent-store ctx
 Quick Context
-Records: 2
+Records: 1
 Record kinds:
-  note: 1
-    fields: text
   task: 1
     fields: status, title
     status: done=1
 Hooks: 0
-Latest activity: 2026-07-03T09:16:49.612Z
+Schedules: none
+Latest activity: 2026-08-02T19:10:30.437Z
 Recent records:
   7f0owa task status=done title='ship v0.1'
-  x3arry note text='prefer rustls over openssl'
 ```
 
-`init` creates `.agent-store/` (and gitignores it), installs the builtin skills into `.agents/skills/` and `.claude/skills/`, and adds managed agent-store instructions to existing `AGENTS.md` and `CLAUDE.md` files — so agents in the project discover the store on their own.
+`init` creates `.agent-store/` (and gitignores it), installs the builtin skills into `.agents/skills/` and `.claude/skills/`, and adds managed agent-store instructions to existing `AGENTS.md` and `CLAUDE.md` files — so agents in the project discover the store on their own. `ctx` is what an agent runs at session start: the whole store, summarized, in one byte-capped block.
 
-Every record is a `kind` plus free-form `key=value` fields. IDs are short and prefix-resolvable: any unambiguous prefix works in `get`, `set`, `unset`, `rm`, `link`, and friends.
+IDs are short and prefix-resolvable: any unambiguous prefix works in `get`, `set`, `unset`, `rm`, `link`, and friends.
 
 ## Commands
 
@@ -266,6 +198,70 @@ Exports round-trip: `create --stdin` accepts JSONL of the same record shape `fin
 - `agent-store-pipelines` — shell composition: importing, exporting, transforming records
 
 They land in `.agents/skills/` and `.claude/skills/`, and are the deepest documentation in the repo — worth a read even for human use.
+
+## Install details
+
+### Verifying release downloads
+
+Each release asset has a matching `.sha256` file. Download both into the same directory and check:
+
+```sh
+tag=v0.1.1
+asset=agent-store-$tag-x86_64-unknown-linux-gnu.tar.gz
+curl -fsSLO "https://github.com/av/agent-store/releases/download/$tag/$asset"
+curl -fsSLO "https://github.com/av/agent-store/releases/download/$tag/$asset.sha256"
+sha256sum -c "$asset.sha256"   # macOS: shasum -a 256 -c "$asset.sha256"
+```
+
+Releases after v0.1.0 also carry signed [build provenance attestations](https://docs.github.com/en/actions/how-tos/secure-your-work/use-artifact-attestations) proving each archive was built by this repository's release workflow. Verify with the [GitHub CLI](https://cli.github.com):
+
+```sh
+gh attestation verify "$asset" --repo av/agent-store
+```
+
+The `curl | sh` installer performs the checksum verification automatically.
+
+### Shell completions and man page
+
+Completion scripts for bash, zsh, and fish live in [`completions/`](https://github.com/av/agent-store/tree/master/completions):
+
+```sh
+# bash
+mkdir -p ~/.local/share/bash-completion/completions
+cp completions/agent-store.bash ~/.local/share/bash-completion/completions/agent-store
+# zsh (any directory on your $fpath works; this one usually needs sudo)
+sudo cp completions/_agent-store /usr/share/zsh/site-functions/
+# fish
+mkdir -p ~/.config/fish/completions
+cp completions/agent-store.fish ~/.config/fish/completions/
+```
+
+A man page ships in [`man/agent-store.1`](man/agent-store.1):
+
+```sh
+mkdir -p ~/.local/share/man/man1 && cp man/agent-store.1 ~/.local/share/man/man1/
+man agent-store
+```
+
+### Upgrading and uninstalling
+
+Upgrade with whatever installed it:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/av/agent-store/master/install.sh | sh   # installer: re-run, replaces the binary
+brew upgrade av/tap/agent-store                                                      # Homebrew
+nix profile upgrade agent-store                                                      # Nix
+cargo install --force --git https://github.com/av/agent-store                        # cargo (source or binstall)
+```
+
+`agent-store --version` tells you what you're on. On Windows, replace `agent-store.exe` with the new release zip's copy.
+
+What lives where, for a clean uninstall:
+
+- **Binary** — the installer puts it at `~/.local/bin/agent-store` (or `$AGENT_STORE_INSTALL_DIR`); `rm` it. Otherwise `brew uninstall av/tap/agent-store`, `nix profile remove agent-store`, or `cargo uninstall agent-store`.
+- **Man page and completions** — only present if you copied them per the section above (or via Homebrew/Nix, which remove them with the package). Delete the copied files from `~/.local/share/man/man1/` and your completion directories.
+- **Your data** — stores are per-project in each project's `.agent-store/` directory (gitignored by `init`); there is no global state, config, or cache. Removing the binary loses no data, and deleting a project's `.agent-store/` deletes that project's records — export first with `agent-store find --json | jq -c '.records[]'` if you want a backup (see [docs/json.md](docs/json.md)).
+- **`init` artifacts** — in projects where you ran `init`: skill files under `.agents/skills/` and `.claude/skills/`, and a managed block in `AGENTS.md`/`CLAUDE.md` between `<!-- agent-store:start -->` and `<!-- agent-store:end -->` markers. Delete the skill directories and the marked block to fully remove them.
 
 ## Contributing
 
