@@ -1,4 +1,4 @@
-<h1 align="center"><img src="assets/logo.svg" alt="agent-store" width="470"></h1>
+<h1 align="center"><img src="assets/logo.svg" alt="agent-store" width="452"></h1>
 
 <p align="center">
   <a href="https://github.com/av/agent-store/actions/workflows/ci.yml"><img src="https://github.com/av/agent-store/actions/workflows/ci.yml/badge.svg?branch=master" alt="CI"></a>

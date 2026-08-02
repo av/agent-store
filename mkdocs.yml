@@ -34,6 +34,8 @@ nav:
 
 theme:
   name: material
+  logo: assets/logo-mark-white.svg
+  favicon: assets/favicon.png
   icon:
     repo: fontawesome/brands/github
   palette:

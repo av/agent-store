@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="-0.75 4 64 64" role="img" aria-label="agent-store mark">
+  <!-- monochrome white variant for use on colored backgrounds (docs site header) -->
+  <g>
+    <rect fill="#ffffff" x="6" y="12" width="34" height="10" rx="5"/>
+    <rect fill="#ffffff" x="6" y="31" width="26" height="10" rx="5"/>
+    <rect fill="#ffffff" x="6" y="50" width="34" height="10" rx="5"/>
+    <path stroke="#ffffff" d="M52 17 C52 26.5 44 26.5 44 36 C44 45.5 52 45.5 52 55" fill="none" stroke-width="3"/>
+    <circle fill="#ffffff" cx="52" cy="17" r="4.5"/>
+    <circle fill="#ffffff" cx="44" cy="36" r="4.5"/>
+    <circle fill="#ffffff" cx="52" cy="55" r="4.5"/>
+  </g>
+</svg>
