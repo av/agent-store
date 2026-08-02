@@ -7,7 +7,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
 </p>
 
-![agent-store demo: init, create records, query with the find language, update with set, ctx summary](https://raw.githubusercontent.com/av/agent-store/master/assets/demo.gif)
+<p align="center"><b>Persistent, queryable memory for coding agents</b> — one binary, one SQLite file in your repo, no server.</p>
 
 **Your coding agent forgets everything when the session ends.** Decisions made, dead ends explored, conventions discovered — all re-derived (or contradicted) next time, burning context on rediscovery. `agent-store` gives agents persistent memory that lives inside the repo, as a CLI any agent can already use:
 
@@ -19,6 +19,8 @@ $ agent-store create decision area=http choice=reqwest reason="rustls default, n
 $ agent-store find kind=decision area=http
 9kuvgz decision area=http choice=reqwest reason='rustls default, no openssl build dep'
 ```
+
+![agent-store demo: init, create records, query with the find language, update with set, ctx summary](https://raw.githubusercontent.com/av/agent-store/master/assets/demo.gif)
 
 It is deliberately not a "memory platform":
 
