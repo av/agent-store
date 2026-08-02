@@ -33,7 +33,16 @@ run() {
   sleep "${2:-0.8}"
 }
 
-run 'agent-store init'
+# First command appears instantly: the GIF's opening frame must show content,
+# not a blank screen with a typing lead-in (GIFs autoplay in the README).
+run_instant() {
+  printf '%b%s\n' "$PROMPT" "$1"
+  sleep 0.35
+  eval "$1"
+  sleep "${2:-0.8}"
+}
+
+run_instant 'agent-store init'
 run 'agent-store create decision topic=tls choice=rustls reason="no openssl system dep"' 0.6
 run 'agent-store create finding area=auth severity=high text="session tokens never expire"' 0.6
 tid=$(agent-store create task title="add token expiry" status=pending priority=1)

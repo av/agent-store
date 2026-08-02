@@ -64,8 +64,13 @@ magick -density 96 assets/social-preview.svg assets/social-preview.png
 # Verify: view full card, a 1224x640 center crop (~1.91:1 unfurl crop), and
 # a 600px-wide resize for small-preview legibility.
 
-# demo.gif — recipe (asciinema + agg with the custom GitHub-dark theme)
-# is documented in the header of assets/demo.sh
+# demo.gif / demo-hooks.gif — recipe (asciinema + agg with the custom
+# GitHub-dark theme) is documented in the headers of assets/demo.sh and
+# assets/demo-hooks.sh. Record with the repo's current binary on PATH
+# (cargo build --release; PATH="target/release:$PATH") — a stale installed
+# agent-store silently changes the output. Both scripts print their first
+# command instantly (no typing lead-in) so the GIF's opening frame shows
+# content; keep that when editing, since README GIFs autoplay from frame 0.
 ```
 
 Note on minification: `svgo` inlines the theme classes and drops the dark-mode

@@ -34,8 +34,11 @@ run() {
   sleep "${2:-0.8}"
 }
 
+# First command appears instantly: the GIF's opening frame must show content,
+# not a blank screen with a typing lead-in (GIFs autoplay in the README).
 fid=$(agent-store create finding area=auth severity=high text="tokens never expire")
-type_cmd 'agent-store create finding area=auth severity=high text="tokens never expire"'
+printf '%b%s\n' "$PROMPT" 'agent-store create finding area=auth severity=high text="tokens never expire"'
+sleep 0.35
 echo "$fid"
 sleep 0.6
 
