@@ -59,6 +59,9 @@ theme:
     - content.code.copy
     - search.suggest
 
+extra_css:
+  - docs/extra.css
+
 markdown_extensions:
   - admonition
   - pymdownx.superfences

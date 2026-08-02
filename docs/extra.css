@@ -1,0 +1,9 @@
+/* Docs-site tweaks (loaded via mkdocs.yml extra_css). */
+
+/* Material's default header logo height (1.2rem) renders the bracket mark
+   noticeably smaller than the site title; bump it for better balance. */
+.md-header__button.md-logo img,
+.md-header__button.md-logo svg {
+  height: 1.6rem;
+  width: auto;
+}
