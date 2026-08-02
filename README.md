@@ -13,11 +13,11 @@
 
 ```sh
 $ agent-store create decision area=http choice=reqwest reason="rustls default, no openssl build dep"
-q2n3rt
+9kuvgz
 
 # ...weeks and many sessions later, before touching HTTP code:
 $ agent-store find kind=decision area=http
-q2n3rt decision area=http choice=reqwest reason='rustls default, no openssl build dep'
+9kuvgz decision area=http choice=reqwest reason='rustls default, no openssl build dep'
 ```
 
 It is deliberately not a "memory platform":
@@ -60,7 +60,7 @@ The Nix package includes the man page and bash/zsh/fish completions; `nix develo
 
 Or download a prebuilt binary for Linux (x86_64 gnu/musl), macOS (x86_64/arm64), or Windows (x86_64) from [GitHub Releases](https://github.com/av/agent-store/releases) — each archive comes with a SHA-256 checksum. Linux/macOS assets are `.tar.gz`; the Windows asset is a `.zip`. [cargo-binstall](https://github.com/cargo-bins/cargo-binstall) users can fetch the prebuilt binary without compiling: `cargo binstall --git https://github.com/av/agent-store agent-store-cli` (the crate is named `agent-store-cli`; the installed binary is still `agent-store`).
 
-**Windows:** the install script is unix-only — download `agent-store-<tag>-x86_64-pc-windows-msvc.zip` from Releases, unzip, and put `agent-store.exe` on your `PATH` (or use `cargo install` / `cargo binstall` above). The core CLI works natively; [hooks](docs/hooks.md) run their commands via `bash -c`, so hooks require a `bash` on `PATH` (Git Bash or WSL) — everything else works without one. The bundled shell completions and man page (see [Install details](docs/install.md)) are for unix shells.
+**Windows:** the install script is unix-only — download `agent-store-<tag>-x86_64-pc-windows-msvc.zip` from Releases, unzip, and put `agent-store.exe` on your `PATH` (or use `cargo install` / `cargo binstall` above). The core CLI works natively; [hooks](docs/hooks.md) run their commands via `bash -c`, so hooks require a `bash` on `PATH` (Git Bash or WSL) — everything else works without one. The bundled shell completions and man page are for unix shells.
 
 Verification, shell completions, the man page, and upgrade/uninstall paths are covered in [Install details](docs/install.md).
 
@@ -97,7 +97,7 @@ Recent records:
   7f0owa task status=done title='ship v0.1'
 ```
 
-`init` creates `.agent-store/` (and gitignores it), installs the builtin skills into `.agents/skills/` and `.claude/skills/`, and adds managed agent-store instructions to existing `AGENTS.md` and `CLAUDE.md` files — so agents in the project discover the store on their own. `ctx` is what an agent runs at session start: the whole store, summarized, in one byte-capped block.
+`init` creates `.agent-store/` (and gitignores it), installs the builtin skills into `.agents/skills/` and `.claude/skills/`, and adds managed agent-store instructions to existing `AGENTS.md` and `CLAUDE.md` files. `ctx` is what an agent runs at session start: the whole store, summarized, in one byte-capped block.
 
 IDs are short and prefix-resolvable: any unambiguous prefix works wherever a command takes an ID (`get`, `set`, `unset`, `rm`, `link`, ...).
 
@@ -106,7 +106,7 @@ IDs are short and prefix-resolvable: any unambiguous prefix works wherever a com
 You run `init` once. From then on the agent finds everything itself: the installed skills teach it the commands and conventions, and the `AGENTS.md`/`CLAUDE.md` block tells it to start every session with `ctx`. As it works, it records what matters:
 
 ```sh
-# Session 1 — the agent picks an HTTP client and leaves a trail:
+# Session 1 — the reqwest decision from the top of this page, plus the follow-up work:
 $ agent-store create decision area=http choice=reqwest reason="rustls default, no openssl build dep"
 9kuvgz
 $ agent-store create task title="Migrate HTTP client to reqwest" status=pending
@@ -136,13 +136,13 @@ Recent records:
 
 The agent sees the pending migration and the reasoning behind it without being told, finishes the work, and runs `agent-store set wau740 status=done`. No re-discovery, no contradicted decisions.
 
-For the full walkthrough — Claude Code setup, `SessionStart` hook that injects `ctx` automatically, CLAUDE.md conventions — see [Using agent-store with Claude Code](docs/claude-code.md); for what `init` installs and the conventions agents pick up, see [Skills and agent integration](docs/skills.md).
+For the full walkthrough — Claude Code setup, `SessionStart` hook that injects `ctx` automatically, CLAUDE.md conventions — see [Using agent-store with Claude Code](docs/claude-code.md).
 
 ## Why not just...?
 
 You already have something that sort of works. Here's an honest comparison:
 
-- **...a `MEMORY.md` / `TODO.md`?** Genuinely the better tool while the list is short and a human co-edits it. It stops working when the agent has to re-read and re-parse a growing file on every turn: notes files can't answer `find kind=task status=pending --sort created_at --limit 5`, carry no timestamps or links, and grow without a cap — while `ctx` stays a byte-capped summary no matter how many records accumulate.
+- **...a `MEMORY.md` / `TODO.md`?** Genuinely the better tool while the list is short and a human co-edits it. It stops working when the agent has to re-read and re-parse a growing file on every turn: notes files can't answer `find kind=task status=pending --sort created_at --limit 5`, carry no timestamps or links, and grow without a cap — while `ctx` stays the same fixed size no matter how many records accumulate.
 - **..."my agent greps the repo"?** Grep finds what the code *says*, not what you *decided* — the rejected alternative, the dead end that cost an afternoon, the convention that isn't written anywhere. Those live only in the transcript, and the transcript is gone. (The store itself is grep-friendly: one record per line.)
 - **...a vector-memory MCP server?** Different problem. That's semantic similarity — "notes vaguely about auth" — with embeddings, ranking, and a server to integrate per harness. This is exact, deterministic recall (`find kind=decision area=auth`) from a plain CLI, so the same query returns the same records every time, with no protocol integration and nothing running in the background. If you need fuzzy semantic search, a vector store is the right tool; most agent memory turns out to be "what's pending and what did we decide," which isn't.
 - **...git history?** Commits record what changed, not the decisions, findings, and open tasks around the change — and querying prose with `git log --grep` is archaeology, not recall. The store is a gitignored file next to the repo, so it's untouched by branch switches; note that a separate `git worktree` is a separate directory and gets its own store.
@@ -165,19 +165,6 @@ The [FAQ](docs/faq.md) has the longer versions, including why not raw `sqlite3` 
 | `schedule add/ls/rm/tick/runs/enable/disable` | Time-based commands: one-shot and recurring, plus crontab integration |
 
 Run `agent-store <command> --help` for full details on any of them.
-
-## Documentation
-
-- [Install details](docs/install.md) — verifying downloads, completions and man page, upgrade/uninstall
-- [Using agent-store with Claude Code](docs/claude-code.md) — setup, CLAUDE.md conventions, session-start context injection, a worked two-session example
-- [Concepts](docs/concepts.md) — the mental model: stores, records, links, queries, hooks, and the `ctx` budget, each with a verified example
-- [Query language](docs/queries.md) — operators, value types, combinators, quoting, timestamps, links, sorting
-- [Hooks](docs/hooks.md) — events, environment variables, limits, inspecting runs
-- [Schedules](docs/schedules.md) — one-shot and recurring commands, ticking, crontab integration
-- [JSON output and import](docs/json.md) — `--json` shapes, `create --stdin`, pipeline recipes
-- [Skills and agent integration](docs/skills.md) — what `init` installs and the conventions agents pick up
-- [FAQ](docs/faq.md) — why not markdown/jq/a vector DB, data format and inspection, concurrency, privacy, limits
-- [Examples](examples/README.md) — runnable scripts: task tracker, decision log, session handoff, JSONL pipelines, audit hooks
 
 ## Query language
 
@@ -229,9 +216,18 @@ Envelope shapes, import validation, and the linked-store caveat: [JSON output an
 
 `init` installs three agent-facing skill docs (`agent-store`, `agent-store-patterns`, `agent-store-pipelines`) into `.agents/skills/` and `.claude/skills/`, so coding agents pick up the store without prompting. They're written for agents but double as concise usage docs — worth a read even for human use. What each covers: [Skills and agent integration](docs/skills.md).
 
-## Install details
+## Documentation
 
-Verifying release checksums and build provenance attestations, installing shell completions and the man page, upgrading, and a clean uninstall (including what `init` put where) are covered in [Install details](docs/install.md).
+- [Install details](docs/install.md) — verifying downloads, completions and man page, upgrade/uninstall
+- [Using agent-store with Claude Code](docs/claude-code.md) — setup, CLAUDE.md conventions, session-start context injection, a worked two-session example
+- [Concepts](docs/concepts.md) — the mental model: stores, records, links, queries, hooks, and the `ctx` budget, each with a verified example
+- [Query language](docs/queries.md) — operators, value types, combinators, quoting, timestamps, links, sorting
+- [Hooks](docs/hooks.md) — events, environment variables, limits, inspecting runs
+- [Schedules](docs/schedules.md) — one-shot and recurring commands, ticking, crontab integration
+- [JSON output and import](docs/json.md) — `--json` shapes, `create --stdin`, pipeline recipes
+- [Skills and agent integration](docs/skills.md) — what `init` installs and the conventions agents pick up
+- [FAQ](docs/faq.md) — why not markdown/jq/a vector DB, data format and inspection, concurrency, privacy, limits
+- [Examples](examples/README.md) — runnable scripts: task tracker, decision log, session handoff, JSONL pipelines, audit hooks
 
 ## Contributing
 
