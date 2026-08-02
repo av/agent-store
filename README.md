@@ -33,38 +33,34 @@ It's just as usable by humans as a terse project notebook: task tracker, decisio
 
 ## Install
 
+Most installs are done by a coding agent, not a human. Tell yours:
+
+> Install agent-store from https://github.com/av/agent-store and initialize it in this repo.
+
+Or hand it (or run yourself) this block — non-interactive, from the project root, no sudo needed:
+
 ```sh
 curl -fsSL https://raw.githubusercontent.com/av/agent-store/master/install.sh | sh
+export PATH="$HOME/.local/bin:$PATH"
+agent-store --version
+agent-store init
 ```
 
-The installer detects your OS/arch, downloads the latest release binary, verifies its SHA-256 checksum, and installs to `~/.local/bin` (set `AGENT_STORE_INSTALL_DIR` to override, `AGENT_STORE_VERSION` to pin a tag).
+The installer detects OS/arch (Linux x86_64, macOS x86_64/arm64), downloads the latest release binary, **verifies its SHA-256 checksum**, and installs to `~/.local/bin` — no root, no prompts, nonzero exit on any failure (set `AGENT_STORE_INSTALL_DIR` to override the directory, `AGENT_STORE_VERSION` to pin a tag; only the `/usr/local/bin` fallback, used when `~/.local/bin` isn't writable, needs sudo). `agent-store --version` confirms the binary works; `agent-store init` sets up the current project — store, agent skills, `AGENTS.md`/`CLAUDE.md` block (see [Quickstart](#quickstart)).
 
-Or build from source (needs a [Rust toolchain](https://rustup.rs) and a C compiler — the bundled SQLite is compiled from source, so on a fresh machine install `gcc` or `clang` first, e.g. `apt install gcc`):
+### Other ways to install
 
-```sh
-cargo install --git https://github.com/av/agent-store
-```
+For humans installing by hand, or platforms the script doesn't cover:
 
-Or, with Homebrew (macOS and Linux; installs the man page and shell completions too):
-
-```sh
-brew install av/tap/agent-store
-```
-
-Or, with Nix (flakes required):
-
-```sh
-nix run github:av/agent-store    # try it without installing
-nix profile install github:av/agent-store
-```
-
-The Nix package includes the man page and bash/zsh/fish completions; `nix develop` gives a dev shell with the Rust toolchain, clippy, and rustfmt.
-
-Or download a prebuilt binary for Linux (x86_64 gnu/musl), macOS (x86_64/arm64), or Windows (x86_64) from [GitHub Releases](https://github.com/av/agent-store/releases) — each archive comes with a SHA-256 checksum. Linux/macOS assets are `.tar.gz`; the Windows asset is a `.zip`. [cargo-binstall](https://github.com/cargo-bins/cargo-binstall) users can fetch the prebuilt binary without compiling: `cargo binstall --git https://github.com/av/agent-store agent-store-cli` (the crate is named `agent-store-cli`; the installed binary is still `agent-store`).
+- **Homebrew** (macOS and Linux; includes man page and completions): `brew install av/tap/agent-store`
+- **Nix** (flakes; includes man page and completions): `nix profile install github:av/agent-store`, or `nix run github:av/agent-store` to try it without installing. `nix develop` gives a dev shell with the Rust toolchain, clippy, and rustfmt.
+- **cargo-binstall** (prebuilt, no compile): `cargo binstall --git https://github.com/av/agent-store agent-store-cli` (the crate is `agent-store-cli`; the binary is still `agent-store`)
+- **Build from source** (needs [Rust](https://rustup.rs) and a C compiler — the bundled SQLite compiles from source, so `apt install gcc` first on a fresh machine): `cargo install --git https://github.com/av/agent-store`
+- **Prebuilt binaries** for Linux (x86_64 gnu/musl), macOS (x86_64/arm64), and Windows (x86_64) from [GitHub Releases](https://github.com/av/agent-store/releases) — each with a SHA-256 checksum and a signed build-provenance attestation
 
 **Windows:** the install script is unix-only — download `agent-store-<tag>-x86_64-pc-windows-msvc.zip` from Releases, unzip, and put `agent-store.exe` on your `PATH` (or use `cargo install` / `cargo binstall` above). The core CLI works natively; [hooks](docs/hooks.md) run their commands via `bash -c`, so hooks require a `bash` on `PATH` (Git Bash or WSL) — everything else works without one. The bundled shell completions and man page are for unix shells.
 
-Verification, shell completions, the man page, and upgrade/uninstall paths are covered in [Install details](docs/install.md).
+Manual checksum/attestation verification, shell completions, the man page, and upgrade/uninstall paths: [Install details](docs/install.md).
 
 ## Quickstart
 
