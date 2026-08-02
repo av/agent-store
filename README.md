@@ -231,6 +231,10 @@ Scripting behaves the way a shell expects: results on stdout, errors on stderr, 
 - [FAQ](docs/faq.md) — why not markdown/jq/a vector DB, data format and inspection, concurrency, privacy, limits
 - [Examples](examples/README.md) — runnable scripts: task tracker, decision log, session handoff, JSONL pipelines, audit hooks
 
+## Stability
+
+agent-store is v0.1.x — early, but the data layer is the part treated as stable. The store is a plain SQLite file with a versioned, checksummed schema; upgrades apply migrations automatically on open, so existing records, links, and hook history survive new releases (covered by tests that open old-schema stores). Pre-1.0, CLI flags, output wording, and `--json` shapes may still change between minor versions — pin a version if you script against exact output, and check the [CHANGELOG](CHANGELOG.md) before upgrading. Worst case, nothing is locked in: `find --json` exports every record (one `jq -c '.records[]'` away from JSONL that `create --stdin` re-imports), and `.agent-store/store.sqlite` is a normal SQLite file readable by stock `sqlite3` or any SQLite tool.
+
 ## Contributing
 
 Issues and PRs welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for dev setup and workflow.

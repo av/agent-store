@@ -17,11 +17,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   creating an event record, plus `links` and `ctx` reflecting it.
 - Social preview card (`assets/social-preview.{svg,png}`, 1280x640 dark
   card with tagline), and Open Graph/Twitter card meta on the docs site.
+- README: a Stability section stating what is stable at v0.1.x (on-disk
+  data survives upgrades via automatic, checksummed schema migrations),
+  what may still change pre-1.0 (CLI flags, output wording, `--json`
+  shapes), and the escape hatches (`find --json` export, plain SQLite
+  file).
+- README: notes for scripters and evaluators — the stdout/stderr/exit-code
+  contract for `--json` mode, a one-line concurrency/durability summary
+  (WAL, serialized writes), and a tested one-liner for importing an
+  existing `MEMORY.md` via `jq` + `create --stdin`.
 
 ### Changed
 
 - README demo GIF re-rendered with the brand terminal theme; the demo now
   also shows `set`.
+- One canonical tagline — "Persistent, queryable memory for coding agents
+  — one binary, one SQLite file in your repo, no server" — now appears
+  consistently across the README, `--help`, the man page, Cargo.toml /
+  crates.io, docs.rs, the docs site description, `install.sh`, and the
+  social preview card.
+- README reordered for first-viewport clarity: tagline under the badges,
+  the hook paragraph and create/find sample above the demo GIF.
+- Demo GIFs no longer open on a blank typing frame: the first command is
+  rendered instantly, so the payoff is visible from frame 0.
 - README logo switches between light/dark variants via a GitHub-native
   `<picture>` element; the docs site keys the hero logo and header/favicon
   off its own color scheme.
