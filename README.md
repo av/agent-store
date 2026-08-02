@@ -163,10 +163,10 @@ The [FAQ](docs/faq.md) has the longer versions, including why not raw `sqlite3` 
 | `rm` | Delete a record |
 | `link` / `unlink` / `links` | Manage directional, named links between records |
 | `ctx` (`context`) | Compact Quick Context summary, capped at 8192 bytes |
-| `hook add/ls/rm/runs` | Manage shell hooks on store mutations |
-| `schedule add/ls/rm/tick/runs/enable/disable` | Time-based commands: one-shot and recurring, plus crontab integration |
+| `hook add/ls/rm/runs` | Run a bash command on matching mutations; inspect captured runs |
+| `schedule add/ls/rm/tick/runs/enable/disable` | One-shot (`at`) and recurring (`every`) commands, plus crontab integration |
 
-Run `agent-store <command> --help` for full details on any of them.
+Everywhere: `--json` gives structured output on any command, any unambiguous ID prefix resolves, and `agent-store <command> --help` has the full details.
 
 ## Query language
 
