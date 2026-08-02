@@ -10,7 +10,8 @@ The three SVGs are the source of truth; every raster asset is generated from the
 | `favicon.png` | 128x128 raster of `logo-mark.svg`. | `mkdocs.yml` `favicon:` |
 | `favicon.ico` | Multi-size 16/32/48 for older browsers. | Served at `/assets/favicon.ico` on the docs site |
 | `social-preview.png` | 1280x640, logo centered on white. | GitHub Settings > General > Social preview (manual upload — not read from the repo) |
-| `demo.sh` / `demo.gif` | Scripted README demo recording. | `README.md` |
+| `demo.sh` / `demo.gif` | Scripted README demo recording (init/create/find/set/ctx basics). | `README.md` header |
+| `demo-hooks.sh` / `demo-hooks.gif` | Scripted demo of links, hooks firing on `set`, and `ctx`. Recipe in the script header (same asciinema + agg theme as `demo.sh`). | `README.md` Hooks section |
 
 ## Design notes
 

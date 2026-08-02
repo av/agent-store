@@ -204,6 +204,8 @@ agent-store find kind=task status=pending      # multiple args join with implici
 
 Hooks run a bash command whenever matching records mutate — useful for notifications, mirroring state into files, or nudging an agent.
 
+![agent-store demo: link a finding to a task, add a hook on task updates that creates an event record, trigger it with set, then see the event in find, links, and ctx](assets/demo-hooks.gif)
+
 ```sh
 agent-store hook add set kind=task -- 'notify-send "task $AGENT_STORE_ID: $AGENT_STORE_NEW_VALUE"'
 agent-store hook ls
