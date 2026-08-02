@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Example `examples/import-memory-md.sh`: migrating an existing MEMORY.md
+  into the store — the README one-liner plus a structured pass that turns
+  headings into a queryable `topic` field.
 - Brand: redesigned logo — a bracketed store enclosing a green link — with
   a full variant set in `assets/` (light/dark lockups, mark-only, white-on-
   green mark, favicon PNG/ICO) and an `assets/README.md` documenting the

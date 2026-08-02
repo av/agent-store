@@ -144,7 +144,7 @@ For the full walkthrough — Claude Code setup, `SessionStart` hook that injects
 
 You already have something that sort of works. Here's an honest comparison:
 
-- **...a `MEMORY.md` / `TODO.md`?** Genuinely the better tool while the list is short and a human co-edits it. It stops working when the agent has to re-read and re-parse a growing file on every turn: notes files can't answer `find kind=task status=pending --sort created_at --limit 5`, carry no timestamps or links, and grow without a cap — while `ctx` stays the same fixed size no matter how many records accumulate. And you don't have to start over: `jq -R -c '{kind:"note",fields:{text:.}}' MEMORY.md | agent-store create --stdin` imports the file you already have, one record per line.
+- **...a `MEMORY.md` / `TODO.md`?** Genuinely the better tool while the list is short and a human co-edits it. It stops working when the agent has to re-read and re-parse a growing file on every turn: notes files can't answer `find kind=task status=pending --sort created_at --limit 5`, carry no timestamps or links, and grow without a cap — while `ctx` stays the same fixed size no matter how many records accumulate. And you don't have to start over: `jq -R -c '{kind:"note",fields:{text:.}}' MEMORY.md | agent-store create --stdin` imports the file you already have, one record per line ([examples/import-memory-md.sh](examples/import-memory-md.sh) also shows a structured variant that keeps your headings queryable).
 - **..."my agent greps the repo"?** Grep finds what the code *says*, not what you *decided* — the rejected alternative, the dead end that cost an afternoon, the convention that isn't written anywhere. Those live only in the transcript, and the transcript is gone. (The store itself is grep-friendly: one record per line.)
 - **...a vector-memory MCP server?** Different problem. That's semantic similarity — "notes vaguely about auth" — with embeddings, ranking, and a server to integrate per harness. This is exact, deterministic recall (`find kind=decision area=auth`) from a plain CLI, so the same query returns the same records every time, with no protocol integration and nothing running in the background. If you need fuzzy semantic search, a vector store is the right tool; most agent memory turns out to be "what's pending and what did we decide," which isn't.
 - **...git history?** Commits record what changed, not the decisions, findings, and open tasks around the change — and querying prose with `git log --grep` is archaeology, not recall. The store is a gitignored file next to the repo, so it's untouched by branch switches; note that a separate `git worktree` is a separate directory and gets its own store.
@@ -229,7 +229,7 @@ Scripting behaves the way a shell expects: results on stdout, errors on stderr, 
 - [JSON output and import](docs/json.md) — `--json` shapes, `create --stdin`, pipeline recipes
 - [Skills and agent integration](docs/skills.md) — what `init` installs and the conventions agents pick up
 - [FAQ](docs/faq.md) — why not markdown/jq/a vector DB, data format and inspection, concurrency, privacy, limits
-- [Examples](examples/README.md) — runnable scripts: task tracker, decision log, session handoff, JSONL pipelines, audit hooks
+- [Examples](examples/README.md) — runnable scripts: task tracker, decision log, session handoff, MEMORY.md import, JSONL pipelines, audit hooks, linked memory graph
 
 ## Stability
 
