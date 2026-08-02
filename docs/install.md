@@ -15,11 +15,15 @@ same directory and check:
 
 ```sh
 tag=v0.1.2
-asset=agent-store-$tag-x86_64-unknown-linux-gnu.tar.gz
-curl -fsSLO "https://github.com/av/agent-store/releases/download/$tag/$asset"
-curl -fsSLO "https://github.com/av/agent-store/releases/download/$tag/$asset.sha256"
-sha256sum -c "$asset.sha256"   # macOS: shasum -a 256 -c "$asset.sha256"
+target=x86_64-unknown-linux-gnu
+curl -fsSLO "https://github.com/av/agent-store/releases/download/$tag/agent-store-$tag-$target.tar.gz"
+curl -fsSLO "https://github.com/av/agent-store/releases/download/$tag/agent-store-$tag-$target.sha256"
+sha256sum -c "agent-store-$tag-$target.sha256"   # macOS: shasum -a 256 -c ...
 ```
+
+The `.sha256` asset is named after the target, not the archive — there
+is no `.tar.gz.sha256`/`.zip.sha256`. Its content is
+`<hash> *<archive-name>`, which `sha256sum -c` reads directly.
 
 Releases after v0.1.0 also carry signed [build provenance attestations](https://docs.github.com/en/actions/how-tos/secure-your-work/use-artifact-attestations)
 proving each archive was built by this repository's release workflow.
@@ -31,6 +35,36 @@ gh attestation verify "$asset" --repo av/agent-store
 
 The `curl | sh` installer performs the checksum verification
 automatically.
+
+## Windows
+
+The simplest Windows installs are `cargo binstall` (prebuilt) or
+`cargo install` from the README's install section — both work natively.
+To install from the release zip instead, this PowerShell block
+downloads, verifies the SHA-256 checksum, and extracts (the zip has
+`agent-store.exe` at its root, plus `LICENSE`, `THIRD-PARTY-LICENSES.md`,
+`README.md`, and unix-only `completions/` and `man/`):
+
+```powershell
+$tag = "v0.1.2"; $base = "agent-store-$tag-x86_64-pc-windows-msvc"
+$url = "https://github.com/av/agent-store/releases/download/$tag"
+Invoke-WebRequest "$url/$base.zip" -OutFile "$base.zip"
+Invoke-WebRequest "$url/$base.sha256" -OutFile "$base.sha256"
+# .sha256 content is "<hash> *<zip-name>"; PowerShell -ne is case-insensitive
+$expected = ((Get-Content "$base.sha256") -split '\s+')[0]
+if ((Get-FileHash "$base.zip" -Algorithm SHA256).Hash -ne $expected) { throw "checksum mismatch" }
+Expand-Archive "$base.zip" -DestinationPath "$env:LOCALAPPDATA\Programs\agent-store"
+```
+
+Then add that directory to your user `PATH` (new terminals pick it up):
+
+```powershell
+[Environment]::SetEnvironmentVariable("Path", "$env:LOCALAPPDATA\Programs\agent-store;" + [Environment]::GetEnvironmentVariable("Path", "User"), "User")
+```
+
+The core CLI works natively; [hooks](hooks.md) run their commands via
+`bash -c`, so hooks need a `bash` on `PATH` (Git Bash or WSL) —
+everything else works without one.
 
 ## Shell completions and man page
 
