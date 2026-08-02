@@ -15,7 +15,19 @@ If your project's memory needs are "a short list a human also edits," a
 markdown file is genuinely the better tool. agent-store earns its keep when
 records accumulate past what an agent should re-read wholesale, when several
 kinds of memory coexist (tasks, decisions, findings, handoffs), or when you
-want machine-checkable state instead of prose.
+want machine-checkable state instead of prose. There is also a `ctx` payoff:
+the summary stays the same byte-capped size no matter how many records
+accumulate, where a notes file only grows.
+
+You don't have to start over, either — one line imports the file you already
+have:
+
+```sh
+jq -R -c '{kind:"note",fields:{text:.}}' MEMORY.md | agent-store create --stdin
+```
+
+[examples/import-memory-md.sh](https://github.com/av/agent-store/blob/master/examples/import-memory-md.sh)
+shows a structured variant that keeps your headings queryable.
 
 ## Why not raw sqlite3 + jq?
 
@@ -47,6 +59,21 @@ integration, no per-harness plugin. The trade-off is real: there's no push
 notification to the agent and no semantic layer. Discovery happens through
 installed skills and instruction blocks (see below), not tool schemas.
 
+## Why not just git history?
+
+Commits record what *changed*; most of what an agent needs to remember is
+what happened *around* the change — the rejected alternative, the finding
+that cost an afternoon, the task that's still open. Some of that belongs in
+a commit message, and you should keep writing good ones, but querying prose
+with `git log --grep` is archaeology, not recall: no fields, no typed
+comparisons, no "what's still pending."
+
+The two also don't interfere: `init` gitignores `.agent-store/`, so the
+store sits next to the repo and is untouched by branch switches, rebases,
+and resets. One consequence to know: a `git worktree` is a separate
+directory, so it gets (and finds) its own store — the store discovery walks
+up directories, not git metadata.
+
 ## Where is my data? Can I inspect it?
 
 In `.agent-store/store.sqlite` at your project root — one ordinary SQLite
@@ -54,13 +81,14 @@ database file in WAL mode. It is yours:
 
 ```sh
 sqlite3 .agent-store/store.sqlite '.tables'
-# hook_runs  hooks  record_fields  record_links  records  schema_migrations  store_events
+# hook_runs  hooks  record_fields  record_links  records  schedule_runs  schedules  schema_migrations  store_events
 sqlite3 .agent-store/store.sqlite 'SELECT * FROM records LIMIT 5;'
 ```
 
 The schema is straightforward: `records` (id, kind, timestamps),
 `record_fields` (key, raw value, plus typed columns for text/number/
-timestamp/boolean), `record_links`, `hooks`, `hook_runs`. Nothing is encoded
+timestamp/boolean), `record_links`, `hooks`/`hook_runs`, and
+`schedules`/`schedule_runs`. Nothing is encoded
 or compressed; field values are stored as the text you typed.
 
 Greppable: the default output is one line per record (`id kind key=value ...`),
@@ -132,13 +160,15 @@ is truncated at 8192 bytes (`ctx --json` is uncapped), and hook and schedule
 stdout/stderr capture is truncated at 8192 bytes per stream (hook and
 schedule commands also have a 30-second timeout).
 
-Ballpark on an ordinary dev machine (release build, warm cache): importing
-1,000 records via `create --stdin` takes ~40 ms; `find` with a typed
-comparison over those 1,000 records returns in under 10 ms; `ctx` is a few
-milliseconds; the store file for ~1,000 small records is ~0.5 MB. Field
-lookups are index-backed (per-type indexes on `record_fields`), so queries
-stay fast well past the record counts an agent memory store realistically
-sees (thousands to tens of thousands of records). It is not built or
+Measured on an ordinary dev machine (release build, warm cache). At 1,000
+records: importing them via `create --stdin` takes ~40 ms, a typed `find`
+returns in under 10 ms, `ctx` is a few milliseconds, and the store file is
+~0.5 MB. At 10,000 records: the bulk import takes ~1.6 s, a typed
+three-clause `find` (`kind=task and priority<3 and status=pending`) returns
+in ~200 ms, `ctx` stays ~50 ms (its output is byte-capped regardless of
+store size), and the file is ~7 MB. Field lookups are index-backed
+(per-type indexes on `record_fields`), so queries stay fast well past the
+record counts an agent memory store realistically sees. It is not built or
 benchmarked for millions of records — if that's your workload, use a real
 database.
 
@@ -165,5 +195,6 @@ is the entire build process.
 - [Concepts](concepts.md)
 - [Query language](queries.md)
 - [Hooks](hooks.md)
+- [Schedules](schedules.md)
 - [JSON output and import](json.md)
 - [Skills and agent integration](skills.md)

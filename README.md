@@ -228,7 +228,7 @@ Scripting behaves the way a shell expects: results on stdout, errors on stderr, 
 - [Schedules](docs/schedules.md) — one-shot and recurring commands, ticking, crontab integration
 - [JSON output and import](docs/json.md) — `--json` shapes, `create --stdin`, pipeline recipes
 - [Skills and agent integration](docs/skills.md) — what `init` installs and the conventions agents pick up
-- [FAQ](docs/faq.md) — why not markdown/jq/a vector DB, data format and inspection, concurrency, privacy, limits
+- [FAQ](docs/faq.md) — why not markdown/jq/a vector DB/git history, data format and inspection, concurrency, privacy, measured limits
 - [Examples](examples/README.md) — runnable scripts: task tracker, decision log, session handoff, MEMORY.md import, JSONL pipelines, audit hooks, linked memory graph
 
 ## Stability

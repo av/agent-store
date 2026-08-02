@@ -1,9 +1,11 @@
 # Concepts
 
-The mental model behind agent-store in one page: what a store is, what
-records, links, and hooks are, how queries address them, and what `ctx`
-summarizes. Read this after the README quickstart; for a hands-on
-workflow, see [Using agent-store with Claude Code](claude-code.md).
+agent-store is persistent, queryable memory for coding agents — one
+SQLite file in your repo, addressed through one CLI. This page is the
+mental model in one sitting: what a store is, what records, links, and
+hooks are, how queries address them, and what `ctx` summarizes. Read it
+after the README quickstart; for a hands-on workflow, see
+[Using agent-store with Claude Code](claude-code.md).
 
 Every output below is real, captured from a fresh store.
 
@@ -180,7 +182,9 @@ stderr:
 
 Hooks are bounded: a 30-second timeout, and captured stdout/stderr
 capped at 8192 bytes each. Full details — environment variables, Windows
-caveats, security — in [Hooks](hooks.md).
+caveats, security — in [Hooks](hooks.md). Their time-based sibling,
+[schedules](schedules.md), runs commands at a moment (`at`) or on an
+interval (`every`) with the same execution model and limits.
 
 ## Quick Context (`ctx`)
 
@@ -203,6 +207,7 @@ Record kinds:
 Links: 1
   implements: 1
 Hooks: 1
+Schedules: none
 Latest activity: 2026-07-03T22:07:09.952Z
 Recent records:
   ovlkqa task priority=2 status=done title='Migrate HTTP client to reqwest'
@@ -211,8 +216,8 @@ Recent records:
 ```
 
 It shows record counts by kind, each kind's field inventory (with value
-breakdowns for low-cardinality fields like `status`), link and hook
-counts, and the most recently updated records.
+breakdowns for low-cardinality fields like `status`), link, hook, and
+schedule counts, and the most recently updated records.
 
 The text output has a hard **8192-byte budget**. When the store outgrows
 it, `ctx` drops the oldest recent-records lines first; if the summary is
@@ -229,7 +234,8 @@ That's the intended division of labor: `ctx` for orientation, `find`
 
 The store is the container; records are the memory; links give records
 structure without a schema; queries are how agents (and you) get exact,
-deterministic recall; hooks make mutations observable; and `ctx`
+deterministic recall; hooks (and schedules) make mutations and time
+observable; and `ctx`
 compresses the whole thing into a prompt-sized snapshot. An agent's loop
 is typically: read `ctx`, `find` what's relevant, do the work, `create`
 and `set` what was learned.
