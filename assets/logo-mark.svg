@@ -1,22 +1,20 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="-0.75 4 64 64" role="img" aria-label="agent-store mark">
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 64 64" role="img" aria-label="agent-store mark">
   <style>
-    .soft { fill: #59636e; }
+    .soft { stroke: #59636e; }
     .accent { fill: #1a7f37; }
     .link { stroke: #1a7f37; }
     @media (prefers-color-scheme: dark) {
-      .soft { fill: #9198a1; }
+      .soft { stroke: #9198a1; }
       .accent { fill: #3fb950; }
       .link { stroke: #3fb950; }
     }
   </style>
-  <!-- mark: record rows + link graph -->
+  <!-- mark: bracketed store enclosing a link between two records -->
   <g>
-    <rect class="soft" x="6" y="12" width="34" height="10" rx="5"/>
-    <rect class="soft" x="6" y="31" width="26" height="10" rx="5"/>
-    <rect class="soft" x="6" y="50" width="34" height="10" rx="5"/>
-    <path class="link" d="M52 17 C52 26.5 44 26.5 44 36 C44 45.5 52 45.5 52 55" fill="none" stroke-width="3"/>
-    <circle class="accent" cx="52" cy="17" r="4.5"/>
-    <circle class="accent" cx="44" cy="36" r="4.5"/>
-    <circle class="accent" cx="52" cy="55" r="4.5"/>
+    <path class="soft" d="M23 9 H12 V55 H23" fill="none" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+    <path class="soft" d="M41 9 H52 V55 H41" fill="none" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+    <line class="link" x1="25" y1="43" x2="39" y2="21" stroke-width="5"/>
+    <circle class="accent" cx="25" cy="43" r="7"/>
+    <circle class="accent" cx="39" cy="21" r="7"/>
   </g>
 </svg>
