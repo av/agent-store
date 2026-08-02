@@ -1,0 +1,29 @@
+{#
+  Theme override (mkdocs.yml theme.custom_dir): adds Open Graph / Twitter
+  card meta so links to the docs site unfurl with the brand card
+  (assets/social-preview.png — same tagline as the card art).
+#}
+{% extends "base.html" %}
+
+{% block extrahead %}
+  {%- set image = config.site_url ~ "assets/social-preview.png" -%}
+  {%- if page and page.meta and page.meta.title -%}
+    {%- set og_title = page.meta.title ~ " - " ~ config.site_name -%}
+  {%- elif page and page.title and not page.is_homepage -%}
+    {%- set og_title = page.title | striptags ~ " - " ~ config.site_name -%}
+  {%- else -%}
+    {%- set og_title = config.site_name -%}
+  {%- endif -%}
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="{{ config.site_name }}">
+  <meta property="og:title" content="{{ og_title }}">
+  <meta property="og:description" content="{{ config.site_description }}">
+  <meta property="og:url" content="{{ page.canonical_url }}">
+  <meta property="og:image" content="{{ image }}">
+  <meta property="og:image:width" content="1280">
+  <meta property="og:image:height" content="640">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="{{ og_title }}">
+  <meta name="twitter:description" content="{{ config.site_description }}">
+  <meta name="twitter:image" content="{{ image }}">
+{% endblock %}

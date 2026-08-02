@@ -34,6 +34,9 @@ nav:
 
 theme:
   name: material
+  # overrides/main.html adds og:/twitter: meta so links unfurl with the
+  # brand card (assets/social-preview.png).
+  custom_dir: overrides
   logo: assets/logo-mark-white.svg
   favicon: assets/favicon.png
   icon:
