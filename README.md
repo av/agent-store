@@ -3,6 +3,7 @@
 <p align="center">
   <a href="https://github.com/av/agent-store/actions/workflows/ci.yml"><img src="https://github.com/av/agent-store/actions/workflows/ci.yml/badge.svg?branch=master" alt="CI"></a>
   <a href="https://github.com/av/agent-store/releases/latest"><img src="https://img.shields.io/github/v/release/av/agent-store" alt="Latest release"></a>
+  <a href="https://av.github.io/agent-store/"><img src="https://img.shields.io/badge/docs-av.github.io-1a7f37" alt="Documentation"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
 </p>
 
@@ -98,7 +99,7 @@ Recent records:
 
 `init` creates `.agent-store/` (and gitignores it), installs the builtin skills into `.agents/skills/` and `.claude/skills/`, and adds managed agent-store instructions to existing `AGENTS.md` and `CLAUDE.md` files — so agents in the project discover the store on their own. `ctx` is what an agent runs at session start: the whole store, summarized, in one byte-capped block.
 
-IDs are short and prefix-resolvable: any unambiguous prefix works in `get`, `set`, `unset`, `rm`, `link`, and friends.
+IDs are short and prefix-resolvable: any unambiguous prefix works wherever a command takes an ID (`get`, `set`, `unset`, `rm`, `link`, ...).
 
 ## How agents use it
 
@@ -234,7 +235,7 @@ Exports round-trip: `create --stdin` accepts JSONL of the same record shape `fin
 - `agent-store-patterns` — workflow recipes: scratchpad, task tracker, decision log, handoff memory
 - `agent-store-pipelines` — shell composition: importing, exporting, transforming records
 
-They land in `.agents/skills/` and `.claude/skills/`, and are the deepest documentation in the repo — worth a read even for human use.
+They land in `.agents/skills/` and `.claude/skills/`. They're written for agents but double as concise usage docs — worth a read even for human use.
 
 ## Install details
 
@@ -243,7 +244,7 @@ They land in `.agents/skills/` and `.claude/skills/`, and are the deepest docume
 Each release asset has a matching `.sha256` file. Download both into the same directory and check:
 
 ```sh
-tag=v0.1.1
+tag=v0.1.2
 asset=agent-store-$tag-x86_64-unknown-linux-gnu.tar.gz
 curl -fsSLO "https://github.com/av/agent-store/releases/download/$tag/$asset"
 curl -fsSLO "https://github.com/av/agent-store/releases/download/$tag/$asset.sha256"
