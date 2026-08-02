@@ -37,6 +37,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Docs: FAQ gained a "Why not just git history?" answer and measured
   10k-record performance numbers; FAQ and Concepts now cover schedules and
   the v3 schema.
+- Cargo.toml: declared `rust-version = "1.78"` (minimum supported Rust for
+  `cargo install`), and pointed `homepage`/`documentation` at the docs site.
 - README: notes for scripters and evaluators — the stdout/stderr/exit-code
   contract for `--json` mode, a one-line concurrency/durability summary
   (WAL, serialized writes), and a tested one-liner for importing an

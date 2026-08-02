@@ -4,7 +4,7 @@ Thanks for helping improve agent-store. Issues and PRs welcome.
 
 ## Dev setup
 
-You need a stable Rust toolchain with `rustfmt` and `clippy` (via [rustup](https://rustup.rs)). No other dependencies — SQLite is bundled.
+You need a stable Rust toolchain (1.78 or newer) with `rustfmt` and `clippy` (via [rustup](https://rustup.rs)). No other dependencies — SQLite is bundled.
 
 ```sh
 cargo build
