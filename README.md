@@ -6,7 +6,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
 </p>
 
-![agent-store demo: init, create records, query with the find language, ctx summary](assets/demo.gif)
+![agent-store demo: init, create records, query with the find language, update with set, ctx summary](assets/demo.gif)
 
 Persistent memory and a project-local context store for AI coding agents — records, links, hooks, and compact context via one CLI.
 

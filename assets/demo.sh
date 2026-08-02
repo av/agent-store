@@ -3,7 +3,9 @@
 #
 # Render with:
 #   asciinema rec --overwrite --cols 96 --rows 32 -c "bash assets/demo.sh" demo.cast
-#   agg --font-size 17 --theme monokai --last-frame-duration 4 demo.cast assets/demo.gif
+#   agg --font-size 17 --last-frame-duration 4 \
+#     --theme 0d1117,f0f6fc,484f58,ff7b72,3fb950,d29922,58a6ff,bc8cff,39c5cf,b1bac4,6e7681,ffa198,56d364,e3b341,79c0ff,d2a8ff,56d4dd,f0f6fc \
+#     demo.cast assets/demo.gif
 #
 # Requires `agent-store` on PATH. Runs in a temp directory.
 set -euo pipefail
@@ -34,7 +36,11 @@ run() {
 run 'agent-store init'
 run 'agent-store create decision topic=tls choice=rustls reason="no openssl system dep"' 0.6
 run 'agent-store create finding area=auth severity=high text="session tokens never expire"' 0.6
-run 'agent-store create task title="add token expiry" status=pending priority=1' 0.9
+tid=$(agent-store create task title="add token expiry" status=pending priority=1)
+type_cmd 'agent-store create task title="add token expiry" status=pending priority=1'
+echo "$tid"
+sleep 0.9
 run 'agent-store find kind=task and status=pending' 1.4
 run "agent-store find 'severity=high or priority<2'" 1.6
+run "agent-store set $tid status=in-progress" 1.2
 run 'agent-store ctx' 3
