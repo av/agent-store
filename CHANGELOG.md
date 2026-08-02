@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Brand: redesigned logo — a bracketed store enclosing a green link — with
+  a full variant set in `assets/` (light/dark lockups, mark-only, white-on-
+  green mark, favicon PNG/ICO) and an `assets/README.md` documenting the
+  palette, variants, and regeneration commands.
+- README: hooks/links demo GIF (`assets/demo-hooks.gif`) showing a hook
+  creating an event record, plus `links` and `ctx` reflecting it.
+- Social preview card (`assets/social-preview.{svg,png}`, 1280x640 dark
+  card with tagline), and Open Graph/Twitter card meta on the docs site.
+
+### Changed
+
+- README demo GIF re-rendered with the brand terminal theme; the demo now
+  also shows `set`.
+- README logo switches between light/dark variants via a GitHub-native
+  `<picture>` element; the docs site keys the hero logo and header/favicon
+  off its own color scheme.
+- The crates.io package now ships only an allowlist of files (`src/`,
+  `Cargo.toml`, licenses, `README.md`, `CHANGELOG.md`) instead of the full
+  repo tree; README image links use absolute URLs so they render on
+  crates.io.
+
+### Fixed
+
+- Favicon was nearly invisible on dark browser tab bars: the docs site now
+  serves the dual-theme SVG mark, and the PNG/ICO fallbacks use a
+  theme-neutral palette legible on both light and dark.
+
 ## [0.1.2] - 2026-07-13
 
 ### Added
