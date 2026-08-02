@@ -4,7 +4,8 @@ The three SVGs are the source of truth; every raster asset is generated from the
 
 | Asset | What it is | Used by |
 |---|---|---|
-| `logo.svg` | Full lockup: bracket mark + "agent-store" wordmark. 438x90 px (viewBox `0 0 350.4 72`). Dual-theme via `prefers-color-scheme`. | `README.md` header (`width="438"`) |
+| `logo.svg` | Full lockup: bracket mark + "agent-store" wordmark. 438x90 px (viewBox `0 0 350.4 72`). Dual-theme via `prefers-color-scheme`. | Docs / general use; source of the fixed-palette variants |
+| `logo-light.svg` / `logo-dark.svg` | Same lockup with the light/dark palette baked in (no media query). GitHub ignores in-SVG `prefers-color-scheme` when the site theme is set explicitly and in the mobile apps, so the README uses the GitHub-native `<picture>` pattern with these. Regenerate both whenever `logo.svg` changes. | `README.md` header (`<picture>`, `width="438"`) |
 | `logo-mark.svg` | Mark only, square. 128x128 px (viewBox `0 0 64 64`). Dual-theme. | Source for `favicon.png`, `favicon.ico` |
 | `logo-mark-white.svg` | All-white mark for colored backgrounds. | `mkdocs.yml` docs-site header (renders on green) |
 | `favicon.png` | 128x128 raster of `logo-mark.svg`. | `mkdocs.yml` `favicon:` |
