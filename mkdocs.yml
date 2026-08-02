@@ -62,6 +62,11 @@ theme:
     - content.code.copy
     - search.suggest
 
+# Rewrites README's raw.githubusercontent img src/srcset URLs to the locally
+# staged assets/ copies (path relative to this file, not docs_dir).
+hooks:
+  - docs_hooks.py
+
 extra_css:
   - docs/extra.css
 
