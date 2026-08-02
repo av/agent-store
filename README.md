@@ -101,7 +101,7 @@ IDs are short and prefix-resolvable: any unambiguous prefix works wherever a com
 
 ## How agents use it
 
-You run `init` once. From then on the agent finds everything itself: the installed skills teach it the commands and conventions, and the `AGENTS.md`/`CLAUDE.md` block tells it to start every session with `ctx`. As it works, it records what matters:
+You run `init` once. From then on the agent finds everything itself: the installed skills teach it the commands and conventions, and the `AGENTS.md`/`CLAUDE.md` block points it at `ctx` and the skills (a one-line convention of your own, or a `SessionStart` hook, makes `ctx` automatic every session — see the link below). As it works, it records what matters:
 
 ```sh
 # Session 1 — the reqwest decision from the top of this page, plus the follow-up work:
