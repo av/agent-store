@@ -8,11 +8,25 @@
 
 ![agent-store demo: init, create records, query with the find language, update with set, ctx summary](https://raw.githubusercontent.com/av/agent-store/master/assets/demo.gif)
 
-Persistent memory and a project-local context store for AI coding agents — records, links, hooks, and compact context via one CLI.
+**Your coding agent forgets everything when the session ends.** Decisions made, dead ends explored, conventions discovered — all re-derived (or contradicted) next time, burning context on rediscovery. `agent-store` gives agents persistent memory that lives inside the repo, as a CLI any agent can already use:
 
-AI coding agents lose state between sessions and burn context re-discovering the same facts. `agent-store` gives them persistent memory that lives inside the repo: a SQLite-backed store of typed records, with directional links between them, shell hooks on mutations, and a byte-capped context summary designed to be pasted into a prompt. One static binary, no daemon, no configuration.
+```sh
+$ agent-store create decision area=http choice=reqwest reason="rustls default, no openssl build dep"
+q2n3rt
 
-It is built for AI agents (Claude Code, Codex, and anything else that can run a CLI), but it's just as usable by humans as a terse project notebook: task tracker, decision log, handoff memory.
+# ...weeks and many sessions later, before touching HTTP code:
+$ agent-store find kind=decision area=http
+q2n3rt decision area=http choice=reqwest reason='rustls default, no openssl build dep'
+```
+
+It is deliberately not a "memory platform":
+
+- **No server, no daemon, no config** — one static binary; state is one SQLite file in your project's `.agent-store/` (gitignored, yours to `sqlite3` open).
+- **No embeddings, no API keys, no LLM in the binary** — exact, structured recall (`find kind=task status=pending`), not similarity search.
+- **No schema** — a record is a `kind` plus free-form `key=value` fields; links, mutation hooks, and schedules on top when you want them.
+- **Agent-native without a protocol** — works with Claude Code, Codex, Cursor, and anything that can run a shell command. `init` installs skills and an `AGENTS.md`/`CLAUDE.md` block so agents discover the store on their own, and `agent-store ctx` prints a byte-capped summary that starts the next session from memory instead of a blank slate.
+
+It's just as usable by humans as a terse project notebook: task tracker, decision log, handoff memory.
 
 ## Install
 
