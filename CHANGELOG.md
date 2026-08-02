@@ -25,6 +25,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   what may still change pre-1.0 (CLI flags, output wording, `--json`
   shapes), and the escape hatches (`find --json` export, plain SQLite
   file).
+- README: "How agents use it" section walking the session-to-session memory
+  loop, and a "Why not just...?" section answering MEMORY.md, grep, vector
+  memory, and git history head-on.
+- Docs: `docs/install.md` — verification and attestations, shell
+  completions and man page, upgrade/uninstall — split out of the README.
+- Docs: FAQ gained a "Why not just git history?" answer and measured
+  10k-record performance numbers; FAQ and Concepts now cover schedules and
+  the v3 schema.
 - README: notes for scripters and evaluators — the stdout/stderr/exit-code
   contract for `--json` mode, a one-line concurrency/durability summary
   (WAL, serialized writes), and a tested one-liner for importing an
@@ -49,6 +57,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the hook paragraph and create/find sample above the demo GIF.
 - Demo GIFs no longer open on a blank typing frame: the first command is
   rendered instantly, so the payoff is visible from frame 0.
+- README back half condensed to teasers linking into the docs pages; the
+  Commands table now fits a 375px phone screen (hook/schedule subcommands
+  moved into the description column).
 - README logo switches between light/dark variants via a GitHub-native
   `<picture>` element; the docs site keys the hero logo and header/favicon
   off its own color scheme.
