@@ -2,7 +2,7 @@
 name = "agent-store-cli"
 version = "0.1.2"
 edition = "2021"
-description = "A local-first memory and context store for AI coding agents, backed by SQLite"
+description = "Persistent, queryable memory for coding agents: one binary, one SQLite file in your repo, no server"
 license = "MIT"
 repository = "https://github.com/av/agent-store"
 homepage = "https://github.com/av/agent-store"

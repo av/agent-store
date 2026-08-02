@@ -1,5 +1,5 @@
 //! Core library behind the [`agent-store`](https://github.com/av/agent-store) CLI —
-//! a project-local, SQLite-backed memory and context store for AI coding agents.
+//! persistent, queryable memory for coding agents, backed by a single SQLite file in the repo.
 //!
 //! `agent-store` gives agents (and humans) a durable, queryable scratchpad inside a
 //! repository: typed records with arbitrary fields, directional links between records,

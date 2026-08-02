@@ -1,6 +1,6 @@
-.TH AGENT-STORE 1 "July 2026" "agent-store 0.1.1" "User Commands"
+.TH AGENT-STORE 1 "August 2026" "agent-store 0.1.2" "User Commands"
 .SH NAME
-agent-store \- project-local memory and context store for AI coding agents
+agent-store \- persistent, queryable memory for coding agents
 .SH SYNOPSIS
 .B agent-store
 [\fIOPTIONS\fR] \fICOMMAND\fR [\fIARGS\fR]
@@ -10,6 +10,7 @@ is a project-local store for agent-facing records, links, hooks, and
 context, backed by a single SQLite file in the
 .I .agent-store/
 directory of the current project.
+It is a single static binary and requires no server.
 Records are schemaless: each has a kind, an ID, and arbitrary
 key=value fields.
 Records can be connected with directional links, queried with a small

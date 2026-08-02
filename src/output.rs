@@ -14,7 +14,8 @@ const QUICK_CONTEXT_FIELD_VALUE_ELLIPSIS: &str = "...";
 pub const USAGE: &str = "\
 Usage: agent-store [OPTIONS] <COMMAND>
 
-A project-local store for agent-facing records, links, hooks, and context.
+Persistent, queryable memory for coding agents — records, links, hooks, and
+compact context in one SQLite file in your repo.
 
 Options:
   -h, --help    Print help

@@ -18,3 +18,4 @@
 # Docs site build (mkdocs, see .github/workflows/docs.yml)
 /.docs-build/
 /site/
+__pycache__/

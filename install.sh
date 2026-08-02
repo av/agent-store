@@ -1,5 +1,6 @@
 #!/bin/sh
-# agent-store installer
+# agent-store installer — persistent, queryable memory for coding agents:
+# one binary, one SQLite file in your repo, no server.
 #
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/av/agent-store/master/install.sh | sh
