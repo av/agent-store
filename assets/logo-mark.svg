@@ -1,19 +1,10 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 64 64" role="img" aria-label="agent-store mark">
   <style>
-    .soft { stroke: #59636e; }
-    .accent { fill: #1a7f37; }
-    .link { stroke: #1a7f37; }
-    @media (prefers-color-scheme: dark) {
-      .soft { stroke: #9198a1; }
-      .accent { fill: #3fb950; }
-      .link { stroke: #3fb950; }
-    }
+    .soft{stroke:#59636e}.accent{fill:#1a7f37}.link{stroke:#1a7f37}
+    @media (prefers-color-scheme:dark){.soft{stroke:#9198a1}.accent{fill:#3fb950}.link{stroke:#3fb950}}
   </style>
-  <g>
-    <path class="soft" d="M23 9 H12 V55 H23" fill="none" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
-    <path class="soft" d="M41 9 H52 V55 H41" fill="none" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
-    <line class="link" x1="25" y1="43" x2="39" y2="21" stroke-width="5"/>
-    <circle class="accent" cx="25" cy="43" r="7"/>
-    <circle class="accent" cx="39" cy="21" r="7"/>
-  </g>
+  <path class="soft" fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="7" d="M23 9H12v46h11M41 9h11v46H41"/>
+  <path class="link" stroke-width="5" d="m25 43 14-22"/>
+  <circle class="accent" cx="25" cy="43" r="7"/>
+  <circle class="accent" cx="39" cy="21" r="7"/>
 </svg>
