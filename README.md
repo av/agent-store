@@ -60,9 +60,9 @@ The Nix package includes the man page and bash/zsh/fish completions; `nix develo
 
 Or download a prebuilt binary for Linux (x86_64 gnu/musl), macOS (x86_64/arm64), or Windows (x86_64) from [GitHub Releases](https://github.com/av/agent-store/releases) — each archive comes with a SHA-256 checksum. Linux/macOS assets are `.tar.gz`; the Windows asset is a `.zip`. [cargo-binstall](https://github.com/cargo-bins/cargo-binstall) users can fetch the prebuilt binary without compiling: `cargo binstall --git https://github.com/av/agent-store agent-store-cli` (the crate is named `agent-store-cli`; the installed binary is still `agent-store`).
 
-**Windows:** the install script is unix-only — download `agent-store-<tag>-x86_64-pc-windows-msvc.zip` from Releases, unzip, and put `agent-store.exe` on your `PATH` (or use `cargo install` / `cargo binstall` above). The core CLI works natively; [hooks](docs/hooks.md) run their commands via `bash -c`, so hooks require a `bash` on `PATH` (Git Bash or WSL) — everything else works without one. The bundled shell completions and man page (see [Install details](#install-details)) are for unix shells.
+**Windows:** the install script is unix-only — download `agent-store-<tag>-x86_64-pc-windows-msvc.zip` from Releases, unzip, and put `agent-store.exe` on your `PATH` (or use `cargo install` / `cargo binstall` above). The core CLI works natively; [hooks](docs/hooks.md) run their commands via `bash -c`, so hooks require a `bash` on `PATH` (Git Bash or WSL) — everything else works without one. The bundled shell completions and man page (see [Install details](docs/install.md)) are for unix shells.
 
-Verification, shell completions, the man page, and upgrade/uninstall paths are covered in [Install details](#install-details) below.
+Verification, shell completions, the man page, and upgrade/uninstall paths are covered in [Install details](docs/install.md).
 
 ## Quickstart
 
@@ -168,6 +168,7 @@ Run `agent-store <command> --help` for full details on any of them.
 
 ## Documentation
 
+- [Install details](docs/install.md) — verifying downloads, completions and man page, upgrade/uninstall
 - [Using agent-store with Claude Code](docs/claude-code.md) — setup, CLAUDE.md conventions, session-start context injection, a worked two-session example
 - [Concepts](docs/concepts.md) — the mental model: stores, records, links, queries, hooks, and the `ctx` budget, each with a verified example
 - [Query language](docs/queries.md) — operators, value types, combinators, quoting, timestamps, links, sorting
@@ -180,20 +181,14 @@ Run `agent-store <command> --help` for full details on any of them.
 
 ## Query language
 
-`find` and hook filters share a small query language:
+`find` and hook filters share a small query language — comparisons (`=`, `!=`, `<`, `<=`, `>`, `>=`, `~=` substring, `link.out`/`link.in`) joined with `and`, `or`, `not`, and parentheses:
 
 ```sh
 agent-store find 'kind=task and (status=pending or status=blocked) and not owner=bot'
-agent-store find 'title~=login'                # case-insensitive substring
 agent-store find 'created_at>2026-01-01'       # built-in timestamps
-agent-store find "note='hello world'"          # quoted values
-agent-store find kind=task status=pending      # multiple args join with implicit and
 ```
 
-- Comparisons: `=`, `!=`, `<`, `<=`, `>`, `>=`, and `~=` (substring) over `kind` and field values, plus `link.out`/`link.in` predicates.
-- Combinators: `and`, `or`, `not`, parentheses; `and` binds tighter than `or`.
-- `created_at` and `updated_at` compare like fields unless shadowed by a real field.
-- Values may be single- or double-quoted; backslash escapes inside quotes; `''` matches the empty string.
+Value types, quoting, precedence, and link predicates: [Query language](docs/queries.md).
 
 ## Hooks
 
@@ -203,114 +198,40 @@ Hooks run a bash command whenever matching records mutate — useful for notific
 
 ```sh
 agent-store hook add set kind=task -- 'notify-send "task $AGENT_STORE_ID: $AGENT_STORE_NEW_VALUE"'
-agent-store hook ls
-agent-store hook runs            # recent runs, newest first
-agent-store hook runs <RUN-ID>   # one run's captured stdout/stderr
+agent-store hook runs            # inspect recent runs and captured output
 ```
 
-- Events: `create`, `set`, `unset`, `rm`, `link`, `unlink`; an optional query scopes the hook to matching records.
-- The command receives the affected record on stdin plus environment variables: `AGENT_STORE_EVENT`, `AGENT_STORE_ID`, `AGENT_STORE_KIND` (always), `AGENT_STORE_REL` and `AGENT_STORE_TARGET_ID` (link/unlink), and `AGENT_STORE_FIELD`/`AGENT_STORE_KEY`, `AGENT_STORE_VALUE`, `AGENT_STORE_OLD_VALUE`, `AGENT_STORE_NEW_VALUE` (set/unset of exactly one field).
-- Commands are killed after 30 seconds; captured stdout and stderr are capped at 8192 bytes each.
+Hooks fire on `create`, `set`, `unset`, `rm`, `link`, and `unlink`; the command gets the affected record on stdin plus `AGENT_STORE_*` environment variables, with a 30-second timeout. Full event/variable reference and limits: [Hooks](docs/hooks.md).
 
 ## Schedules
 
-Schedules run a bash command on a time basis — one-shot reminders or recurring maintenance — with the same execution model and limits as hooks.
+Schedules run a bash command on a time basis — one-shot reminders or recurring maintenance — with the same execution model and limits as hooks:
 
 ```sh
-agent-store schedule add at 2026-07-10T15:00:00Z -- 'echo reminder'   # one-shot (also relative: `at 5m`)
-agent-store schedule add every 1h kind=task -- 'notify.sh'            # recurring, once per matching record
-agent-store schedule ls
-agent-store schedule tick        # run all due schedules (the heartbeat)
-agent-store schedule enable      # crontab entry that ticks every minute
-agent-store schedule runs        # recent runs; `schedule runs <RUN-ID>` for detail
+agent-store schedule add at 5m -- 'echo reminder'            # one-shot (also absolute timestamps)
+agent-store schedule add every 1h kind=task -- 'notify.sh'   # recurring, once per matching record
 ```
 
-Nothing runs in the background on its own: `schedule tick` executes what's due, and `schedule enable`/`disable` manage a per-project crontab entry that ticks every minute. Full details — semantics, environment variables, limits — in [Schedules](docs/schedules.md).
+Nothing runs in the background on its own: `schedule tick` executes what's due, and `schedule enable` sets up a crontab entry that ticks every minute. Details: [Schedules](docs/schedules.md).
 
 ## JSON output
 
-Every command supports `--json` for structured output:
+Every command supports `--json` for structured output, and exports round-trip — `create --stdin` bulk-imports the same JSONL that `find --json | jq -c '.records[]'` emits:
 
 ```sh
 $ agent-store --json find kind=task
 {"records":[{"created_at":"2026-07-03T09:16:49.608Z","fields":{"status":"done","title":"ship v0.1"},"id":"7f0owa","kind":"task","updated_at":"2026-07-03T09:16:49.612Z"}]}
 ```
 
-Exports round-trip: `create --stdin` accepts JSONL of the same record shape `find --json` emits (extra keys like `id` and timestamps are ignored), validating every line before importing anything. This makes the store easy to pipe through `jq`, sync between projects, or seed from scripts. Record JSON does not include links, though — see [docs/json.md](docs/json.md) for the caveat when moving a linked store.
+Envelope shapes, import validation, and the linked-store caveat: [JSON output and import](docs/json.md).
 
 ## Skills
 
-`init` installs three agent-facing skill docs so coding agents pick up the store without prompting:
-
-- `agent-store` — core guide: initializing, creating, querying, reading context
-- `agent-store-patterns` — workflow recipes: scratchpad, task tracker, decision log, handoff memory
-- `agent-store-pipelines` — shell composition: importing, exporting, transforming records
-
-They land in `.agents/skills/` and `.claude/skills/`. They're written for agents but double as concise usage docs — worth a read even for human use.
+`init` installs three agent-facing skill docs (`agent-store`, `agent-store-patterns`, `agent-store-pipelines`) into `.agents/skills/` and `.claude/skills/`, so coding agents pick up the store without prompting. They're written for agents but double as concise usage docs — worth a read even for human use. What each covers: [Skills and agent integration](docs/skills.md).
 
 ## Install details
 
-### Verifying release downloads
-
-Each release asset has a matching `.sha256` file. Download both into the same directory and check:
-
-```sh
-tag=v0.1.2
-asset=agent-store-$tag-x86_64-unknown-linux-gnu.tar.gz
-curl -fsSLO "https://github.com/av/agent-store/releases/download/$tag/$asset"
-curl -fsSLO "https://github.com/av/agent-store/releases/download/$tag/$asset.sha256"
-sha256sum -c "$asset.sha256"   # macOS: shasum -a 256 -c "$asset.sha256"
-```
-
-Releases after v0.1.0 also carry signed [build provenance attestations](https://docs.github.com/en/actions/how-tos/secure-your-work/use-artifact-attestations) proving each archive was built by this repository's release workflow. Verify with the [GitHub CLI](https://cli.github.com):
-
-```sh
-gh attestation verify "$asset" --repo av/agent-store
-```
-
-The `curl | sh` installer performs the checksum verification automatically.
-
-### Shell completions and man page
-
-Completion scripts for bash, zsh, and fish live in [`completions/`](https://github.com/av/agent-store/tree/master/completions):
-
-```sh
-# bash
-mkdir -p ~/.local/share/bash-completion/completions
-cp completions/agent-store.bash ~/.local/share/bash-completion/completions/agent-store
-# zsh (any directory on your $fpath works; this one usually needs sudo)
-sudo cp completions/_agent-store /usr/share/zsh/site-functions/
-# fish
-mkdir -p ~/.config/fish/completions
-cp completions/agent-store.fish ~/.config/fish/completions/
-```
-
-A man page ships in [`man/agent-store.1`](man/agent-store.1):
-
-```sh
-mkdir -p ~/.local/share/man/man1 && cp man/agent-store.1 ~/.local/share/man/man1/
-man agent-store
-```
-
-### Upgrading and uninstalling
-
-Upgrade with whatever installed it:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/av/agent-store/master/install.sh | sh   # installer: re-run, replaces the binary
-brew upgrade av/tap/agent-store                                                      # Homebrew
-nix profile upgrade agent-store                                                      # Nix
-cargo install --force --git https://github.com/av/agent-store                        # cargo (source or binstall)
-```
-
-`agent-store --version` tells you what you're on. On Windows, replace `agent-store.exe` with the new release zip's copy.
-
-What lives where, for a clean uninstall:
-
-- **Binary** — the installer puts it at `~/.local/bin/agent-store` (or `$AGENT_STORE_INSTALL_DIR`); `rm` it. Otherwise `brew uninstall av/tap/agent-store`, `nix profile remove agent-store`, or `cargo uninstall agent-store`.
-- **Man page and completions** — only present if you copied them per the section above (or via Homebrew/Nix, which remove them with the package). Delete the copied files from `~/.local/share/man/man1/` and your completion directories.
-- **Your data** — stores are per-project in each project's `.agent-store/` directory (gitignored by `init`); there is no global state, config, or cache. Removing the binary loses no data, and deleting a project's `.agent-store/` deletes that project's records — export first with `agent-store find --json | jq -c '.records[]'` if you want a backup (see [docs/json.md](docs/json.md)).
-- **`init` artifacts** — in projects where you ran `init`: skill files under `.agents/skills/` and `.claude/skills/`, and a managed block in `AGENTS.md`/`CLAUDE.md` between `<!-- agent-store:start -->` and `<!-- agent-store:end -->` markers. Delete the skill directories and the marked block to fully remove them.
+Verifying release checksums and build provenance attestations, installing shell completions and the man page, upgrading, and a clean uninstall (including what `init` put where) are covered in [Install details](docs/install.md).
 
 ## Contributing
 

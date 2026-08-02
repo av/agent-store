@@ -19,6 +19,7 @@ docs_dir: .docs-build
 
 nav:
   - Overview: README.md
+  - Install details: docs/install.md
   - Using with Claude Code: docs/claude-code.md
   - Concepts: docs/concepts.md
   - Query language: docs/queries.md
