@@ -30,6 +30,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   memory, and git history head-on.
 - Docs: `docs/install.md` — verification and attestations, shell
   completions and man page, upgrade/uninstall — split out of the README.
+- Docs: a Windows section in `docs/install.md` with a PowerShell
+  download-verify-install block (checksum compare, `Expand-Archive`, user
+  PATH), plus a README Windows paragraph that leads with `cargo binstall`
+  and names the real `.sha256` asset.
 - Docs: FAQ gained a "Why not just git history?" answer and measured
   10k-record performance numbers; FAQ and Concepts now cover schedules and
   the v3 schema.
@@ -73,6 +77,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Favicon was nearly invisible on dark browser tab bars: the docs site now
   serves the dual-theme SVG mark, and the PNG/ICO fallbacks use a
   theme-neutral palette legible on both light and dark.
+- The "Verifying release downloads" snippet in `docs/install.md` fetched a
+  nonexistent `<asset>.sha256` file (release checksums are named after the
+  target, e.g. `agent-store-v0.1.2-x86_64-unknown-linux-musl.sha256`, not
+  after the archive), so the documented verification always 404'd.
 
 ## [0.1.2] - 2026-07-13
 
