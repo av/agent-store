@@ -38,7 +38,7 @@ theme:
   # brand card (assets/social-preview.png).
   custom_dir: overrides
   logo: assets/logo-mark-white.svg
-  favicon: assets/favicon.png
+  favicon: assets/logo-mark.svg
   icon:
     repo: fontawesome/brands/github
   palette:
