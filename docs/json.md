@@ -124,4 +124,7 @@ agent-store find kind=log --sort updated_at --desc --limit 10
 agent-store find kind=note --count
 ```
 
-See also: [FAQ](faq.md) — data format, concurrency, privacy, and limits.
+See also: [jsonl-pipeline.sh](../examples/jsonl-pipeline.sh) — a runnable
+export/transform/import pipeline; [Skills and agent integration](skills.md)
+— what `init` installs for agents; [FAQ](faq.md) — data format,
+concurrency, privacy, and limits.

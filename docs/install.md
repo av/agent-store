@@ -94,3 +94,6 @@ What lives where, for a clean uninstall:
   `AGENTS.md`/`CLAUDE.md` between `<!-- agent-store:start -->` and
   `<!-- agent-store:end -->` markers. Delete the skill directories and
   the marked block to fully remove them.
+
+Installed? Next: [Using agent-store with Claude Code](claude-code.md) —
+the end-to-end workflow the install exists for.
