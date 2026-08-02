@@ -1,5 +1,26 @@
 # Brand assets
 
+## Brand
+
+The mark is square brackets enclosing two green nodes joined by a bar: a record
+(bracket syntax, how the CLI prints records) containing a *link* — the thing
+that makes agent-store a store of connected records rather than a flat log.
+The brackets carry the "store/record" idea; the green link carries the
+"connected" idea. The wordmark's hyphen is the same accent green so the lockup
+reads as one system: two words joined by a link, two records joined by a link.
+
+Distinctiveness notes (checked against common dev-tool marks): the two-node
+connector alone would read as a generic git-branch/commit glyph, and brackets
+alone as a generic "code" glyph — the enclosure of one inside the other is what
+makes it ownable. Do not use either half by itself.
+
+Which variant to use:
+
+- `logo.svg` — default lockup anywhere that honors `prefers-color-scheme` (docs, websites you control).
+- `logo-light.svg` / `logo-dark.svg` — contexts with an explicit theme toggle or no media-query support (GitHub README `<picture>`, embeds).
+- `logo-mark.svg` — square contexts smaller than ~200 px where the wordmark would be illegible (favicons, avatars, app icons).
+- `logo-mark-white.svg` — only on solid brand-green or other saturated backgrounds where the gray/green mark lacks contrast.
+
 The three SVGs are the source of truth; every raster asset is generated from them.
 
 | Asset | What it is | Used by |
@@ -17,7 +38,7 @@ The three SVGs are the source of truth; every raster asset is generated from the
 ## Design notes
 
 - Mark: square brackets (record syntax) enclosing a green two-node link.
-- Palette: GitHub light/dark — ink `#1f2328`/`#f0f6fc`, soft gray `#59636e`/`#9198a1`, accent green `#1a7f37`/`#3fb950`. The dark values live in a `@media (prefers-color-scheme: dark)` block inside each themed SVG; keep those classes when editing (generic SVG minifiers strip them — see below).
+- Palette: GitHub light/dark — ink `#1f2328`/`#f0f6fc`, soft gray `#59636e`/`#9198a1`, accent green `#1a7f37`/`#3fb950`; dark canvas `#0d1117` (social card, demo-GIF background) and muted `#6e7681` (social-card feature line). The dark values live in a `@media (prefers-color-scheme: dark)` block inside each themed SVG; keep those classes when editing (generic SVG minifiers strip them — see below).
 - Wordmark: Noto Sans Mono wght=600, converted to paths with fontTools (no font dependency). The hyphen is a separate accent-green path.
 
 ## Regeneration
