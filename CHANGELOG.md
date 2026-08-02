@@ -39,6 +39,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   consistently across the README, `--help`, the man page, Cargo.toml /
   crates.io, docs.rs, the docs site description, `install.sh`, and the
   social preview card.
+- README Install section is agent-first: it opens with a one-line prompt to
+  hand a coding agent, then a single non-interactive `curl | sh` block
+  (checksum-verified, no sudo, ends in `agent-store init`); Homebrew, Nix,
+  cargo, and prebuilt binaries are compacted into an "Other ways to
+  install" list, with verification/completions/upgrade depth in
+  `docs/install.md`.
 - README reordered for first-viewport clarity: tagline under the badges,
   the hook paragraph and create/find sample above the demo GIF.
 - Demo GIFs no longer open on a blank typing frame: the first command is

@@ -46,7 +46,7 @@ agent-store --version
 agent-store init
 ```
 
-The installer detects OS/arch (Linux x86_64, macOS x86_64/arm64), downloads the latest release binary, **verifies its SHA-256 checksum**, and installs to `~/.local/bin` — no root, no prompts, nonzero exit on any failure (set `AGENT_STORE_INSTALL_DIR` to override the directory, `AGENT_STORE_VERSION` to pin a tag; only the `/usr/local/bin` fallback, used when `~/.local/bin` isn't writable, needs sudo). `agent-store --version` confirms the binary works; `agent-store init` sets up the current project — store, agent skills, `AGENTS.md`/`CLAUDE.md` block (see [Quickstart](#quickstart)).
+The installer detects OS/arch (Linux x86_64, macOS x86_64/arm64), downloads the latest release binary, **verifies its SHA-256 checksum**, and installs to `~/.local/bin` — no root, no prompts, nonzero exit on any failure (set `AGENT_STORE_INSTALL_DIR` to override the directory, `AGENT_STORE_VERSION` to pin a tag; only the `/usr/local/bin` fallback, used when `~/.local/bin` isn't writable, needs sudo). The `export PATH` line covers the current shell if `~/.local/bin` isn't already on your `PATH` — add it to your shell profile to make it stick (the installer prints the exact line when it's needed). `agent-store --version` confirms the binary works; `agent-store init` sets up the current project — store, agent skills, `AGENTS.md`/`CLAUDE.md` block (see [Quickstart](#quickstart)).
 
 ### Other ways to install
 
