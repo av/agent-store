@@ -24,7 +24,7 @@ $ agent-store find kind=decision area=http
 
 It is deliberately not a "memory platform":
 
-- **No server, no daemon, no config** — one static binary; state is one SQLite file in your project's `.agent-store/` (gitignored, yours to `sqlite3` open). Concurrent agents are safe — WAL mode, serialized transactional writes — and everything exports as JSONL, so there's no lock-in.
+- **No server, no daemon, no config** — state is a single SQLite file in your project's `.agent-store/` (gitignored, yours to `sqlite3` open). Concurrent agents are safe — WAL mode, serialized transactional writes — and everything exports as JSONL, so there's no lock-in.
 - **No embeddings, no API keys, no LLM in the binary** — exact, structured recall (`find kind=task status=pending`), not similarity search.
 - **No schema** — a record is a `kind` plus free-form `key=value` fields; links, mutation hooks, and schedules on top when you want them.
 - **Agent-native without a protocol** — works with Claude Code, Codex, Cursor, and anything that can run a shell command. `init` installs skills and an `AGENTS.md`/`CLAUDE.md` block so agents discover the store on their own, and `agent-store ctx` prints a byte-capped summary that starts the next session from memory instead of a blank slate.
@@ -99,7 +99,7 @@ Recent records:
   7f0owa task status=done title='ship v0.1'
 ```
 
-`init` creates `.agent-store/` (and gitignores it), installs the builtin skills into `.agents/skills/` and `.claude/skills/`, and adds managed agent-store instructions to existing `AGENTS.md` and `CLAUDE.md` files. `ctx` is what an agent runs at session start: the whole store, summarized, in one byte-capped block.
+`init` creates `.agent-store/` (and gitignores it), installs the builtin skills into `.agents/skills/` and `.claude/skills/`, and adds managed agent-store instructions to existing `AGENTS.md` and `CLAUDE.md` files. `ctx` is what an agent runs at session start: the whole store, summarized, in one block that never outgrows its budget.
 
 IDs are short and prefix-resolvable: any unambiguous prefix works wherever a command takes an ID (`get`, `set`, `unset`, `rm`, `link`, ...).
 
@@ -144,7 +144,7 @@ For the full walkthrough — Claude Code setup, `SessionStart` hook that injects
 
 You already have something that sort of works. Here's an honest comparison:
 
-- **...a `MEMORY.md` / `TODO.md`?** Genuinely the better tool while the list is short and a human co-edits it. It stops working when the agent has to re-read and re-parse a growing file on every turn: notes files can't answer `find kind=task status=pending --sort created_at --limit 5`, carry no timestamps or links, and grow without a cap — while `ctx` stays the same fixed size no matter how many records accumulate. And you don't have to start over: `jq -R -c '{kind:"note",fields:{text:.}}' MEMORY.md | agent-store create --stdin` imports the file you already have, one record per line ([examples/import-memory-md.sh](examples/import-memory-md.sh) also shows a structured variant that keeps your headings queryable).
+- **...a `MEMORY.md` / `TODO.md`?** Genuinely the better tool while the list is short and a human co-edits it. It stops working when the agent has to re-read and re-parse a growing file on every turn: notes files can't answer `find kind=task status=pending --sort created_at --limit 5`, carry no timestamps or links, and grow without a cap — while `ctx` stays the same fixed size no matter how many records accumulate. And you don't have to start over: `jq -R -c '{kind:"note",fields:{text:.}}' MEMORY.md | agent-store create --stdin` imports the file you already have, turning each line into a record ([examples/import-memory-md.sh](examples/import-memory-md.sh) also shows a structured variant that keeps your headings queryable).
 - **..."my agent greps the repo"?** Grep finds what the code *says*, not what you *decided* — the rejected alternative, the dead end that cost an afternoon, the convention that isn't written anywhere. Those live only in the transcript, and the transcript is gone. (The store itself is grep-friendly: one record per line.)
 - **...a vector-memory MCP server?** Different problem. That's semantic similarity — "notes vaguely about auth" — with embeddings, ranking, and a server to integrate per harness. This is exact, deterministic recall (`find kind=decision area=auth`) from a plain CLI, so the same query returns the same records every time, with no protocol integration and nothing running in the background. If you need fuzzy semantic search, a vector store is the right tool; most agent memory turns out to be "what's pending and what did we decide," which isn't.
 - **...git history?** Commits record what changed, not the decisions, findings, and open tasks around the change — and querying prose with `git log --grep` is archaeology, not recall. The store is a gitignored file next to the repo, so it's untouched by branch switches; note that a separate `git worktree` is a separate directory and gets its own store.
