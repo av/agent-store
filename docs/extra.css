@@ -7,3 +7,19 @@
   height: 1.6rem;
   width: auto;
 }
+
+/* Homepage hero logo (README <picture> header).
+   Two fixes in one:
+   1. The README pins its logo srcsets to raw.githubusercontent.com (needed
+      for crates.io); on the docs site we prefer the locally staged copies.
+   2. The <picture> picks its source by the OS prefers-color-scheme, but
+      Material's palette toggle sets data-md-color-scheme independently of
+      the OS — CSS `content:` overrides the picked source so the logo always
+      matches the *site* scheme. (extra.css is served at docs/extra.css, so
+      ../assets/ resolves to the staged assets dir.) */
+.md-typeset h1 img[alt="agent-store"] {
+  content: url("../assets/logo-light.svg");
+}
+[data-md-color-scheme="slate"] .md-typeset h1 img[alt="agent-store"] {
+  content: url("../assets/logo-dark.svg");
+}
