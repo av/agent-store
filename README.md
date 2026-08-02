@@ -138,6 +138,17 @@ The agent sees the pending migration and the reasoning behind it without being t
 
 For the full walkthrough — Claude Code setup, `SessionStart` hook that injects `ctx` automatically, CLAUDE.md conventions — see [Using agent-store with Claude Code](docs/claude-code.md); for what `init` installs and the conventions agents pick up, see [Skills and agent integration](docs/skills.md).
 
+## Why not just...?
+
+You already have something that sort of works. Here's an honest comparison:
+
+- **...a `MEMORY.md` / `TODO.md`?** Genuinely the better tool while the list is short and a human co-edits it. It stops working when the agent has to re-read and re-parse a growing file on every turn: notes files can't answer `find kind=task status=pending --sort created_at --limit 5`, carry no timestamps or links, and grow without a cap — while `ctx` stays a byte-capped summary no matter how many records accumulate.
+- **..."my agent greps the repo"?** Grep finds what the code *says*, not what you *decided* — the rejected alternative, the dead end that cost an afternoon, the convention that isn't written anywhere. Those live only in the transcript, and the transcript is gone. (The store itself is grep-friendly: one record per line.)
+- **...a vector-memory MCP server?** Different problem. That's semantic similarity — "notes vaguely about auth" — with embeddings, ranking, and a server to integrate per harness. This is exact, deterministic recall (`find kind=decision area=auth`) from a plain CLI, so the same query returns the same records every time, with no protocol integration and nothing running in the background. If you need fuzzy semantic search, a vector store is the right tool; most agent memory turns out to be "what's pending and what did we decide," which isn't.
+- **...git history?** Commits record what changed, not the decisions, findings, and open tasks around the change — and querying prose with `git log --grep` is archaeology, not recall. The store is a gitignored file next to the repo, so it's untouched by branch switches; note that a separate `git worktree` is a separate directory and gets its own store.
+
+The [FAQ](docs/faq.md) has the longer versions, including why not raw `sqlite3` + `jq`.
+
 ## Commands
 
 | Command | What it does |
