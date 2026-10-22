@@ -267,6 +267,9 @@
 - label: applied migrations are recorded with version, name, checksum, and applied_at, and checksum mismatches stop the command with an actionable error
   command: bash tests/facts/store_schema_migrations.sh migration_checksum_mismatch
   tags: [implemented]
+- label: stores written by the released v0.1.0, v0.1.1 and v0.1.2 binaries open with the current binary with every record, multi-line value, link, hook, hook run and schedule intact, schema_migrations holding versions 1-3 with their names (v3 newly applied to the v0.1.0 store), and new writes succeeding
+  command: cargo test --quiet --test upgrade
+  tags: [implemented]
 
 ## concurrency
 - label: simultaneous agent-store create processes all finish without database lock errors and persist every record
