@@ -107,7 +107,8 @@ store is gone; there is no other state.
 skill files under both `.agents/skills/` and `.claude/skills/` (usage guide,
 workflow patterns, shell pipelines), and appends a short marked instruction
 block to `AGENTS.md`/`CLAUDE.md` telling agents to run `agent-store ctx` and
-read the skills. Re-running `init` is safe and refreshes the installed files.
+read the skills. Re-running `init` is safe: it adds whatever is missing and
+never touches your records or files you edited.
 
 At session start, `agent-store ctx` prints a compact summary (kinds, field
 inventory, recent records, last activity) capped at 8192 bytes, so an agent

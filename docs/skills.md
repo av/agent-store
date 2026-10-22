@@ -56,8 +56,18 @@ The skills use these by convention (kinds are free-form — anything goes):
 
 ## Updating
 
-Re-running `agent-store init` is safe: it refreshes the installed skills and
-the managed instruction blocks without touching your records.
+Re-running `agent-store init` is safe: it adds whatever is missing and never
+touches your records, a skill file you edited, or the rest of `AGENTS.md` /
+`CLAUDE.md`. To get the current skills after upgrading the binary, delete
+the installed ones and re-run `init`:
+
+```bash
+rm -r .agents/skills/agent-store* .claude/skills/agent-store*
+agent-store init
+```
+
+To get the current instructions block, delete it (markers included) and
+re-run `init`.
 
 See also: [Using agent-store with Claude Code](claude-code.md) — a full
 walkthrough of what these skills enable; [FAQ](faq.md) — data format,
