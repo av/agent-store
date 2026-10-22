@@ -1052,8 +1052,60 @@ PY
     grep -Fq "{\"path\":\"CLAUDE.md\",\"status\":\"missing\"}" "$tmp"/agent-store-init-sum-4.out
     ;;
 
+  init_refreshes_shipped_skills)
+    old_skill="$repo/tests/facts/fixtures/v0.1.0-skills/agent-store/SKILL.md"
+    mkdir "$tmp/fresh" "$tmp/text" "$tmp/json"
+    (cd "$tmp/fresh" && run_agent_store init >"$tmp"/agent-store-init-ref-fresh.out)
+    if cmp -s "$old_skill" "$tmp/fresh/.agents/skills/agent-store/SKILL.md"; then exit 1; fi
+
+    # A repo initialized by v0.1.0 (unmodified old skill files), where the
+    # user then edited one skill.
+    for dir in "$tmp/text" "$tmp/json"; do
+      for root in .agents/skills .claude/skills; do
+        mkdir -p "$dir/$root/agent-store" "$dir/$root/agent-store-patterns"
+        cp "$old_skill" "$dir/$root/agent-store/SKILL.md"
+        cp "$tmp/fresh/$root/agent-store-patterns/SKILL.md" "$dir/$root/agent-store-patterns/SKILL.md"
+      done
+      printf "user-edited patterns\n" > "$dir/.agents/skills/agent-store-patterns/SKILL.md"
+      printf "# project\n\n<!-- agent-store:start -->\nmy own wording\n<!-- agent-store:end -->\n" > "$dir/AGENTS.md"
+      cp "$dir/AGENTS.md" "$tmp/AGENTS.md.orig"
+    done
+
+    cd "$tmp/text"
+    run_agent_store init >"$tmp"/agent-store-init-ref-1.out
+    cmp -s "$tmp/AGENTS.md.orig" AGENTS.md
+    grep -Fq "Kept AGENTS.md instructions block: modified locally; delete the block and re-run \`agent-store init\`" "$tmp"/agent-store-init-ref-1.out
+    for root in .agents/skills .claude/skills; do
+      grep -Fxq "Refreshed $root/agent-store/SKILL.md" "$tmp"/agent-store-init-ref-1.out
+      grep -Fxq "Installed $root/agent-store-pipelines/SKILL.md" "$tmp"/agent-store-init-ref-1.out
+      cmp -s "$tmp/fresh/$root/agent-store/SKILL.md" "$root/agent-store/SKILL.md"
+    done
+    grep -Fxq "user-edited patterns" .agents/skills/agent-store-patterns/SKILL.md
+    grep -Fq "Kept .agents/skills/agent-store-patterns/SKILL.md: modified locally; delete it and re-run \`agent-store init\`" "$tmp"/agent-store-init-ref-1.out
+    if grep -Fq ".claude/skills/agent-store-patterns" "$tmp"/agent-store-init-ref-1.out; then exit 1; fi
+
+    # Second run: nothing left to refresh; the edited skill is still kept and reported.
+    run_agent_store init >"$tmp"/agent-store-init-ref-2.out
+    if grep -Fq "Refreshed" "$tmp"/agent-store-init-ref-2.out; then exit 1; fi
+    grep -Fxq "Skills already installed in .agents/skills/ and .claude/skills/" "$tmp"/agent-store-init-ref-2.out
+    grep -Fq "Kept .agents/skills/agent-store-patterns/SKILL.md: modified locally" "$tmp"/agent-store-init-ref-2.out
+    grep -Fxq "user-edited patterns" .agents/skills/agent-store-patterns/SKILL.md
+
+    # --json lists refreshed and locally modified skill files.
+    cd "$tmp/json"
+    run_agent_store --json init >"$tmp"/agent-store-init-ref-3.out
+    grep -Fq "\"skills_refreshed\":[\".agents/skills/agent-store/SKILL.md\",\".claude/skills/agent-store/SKILL.md\"]" "$tmp"/agent-store-init-ref-3.out
+    grep -Fq "\"skills_modified\":[\".agents/skills/agent-store-patterns/SKILL.md\"]" "$tmp"/agent-store-init-ref-3.out
+    grep -Fq "{\"path\":\"AGENTS.md\",\"status\":\"modified\"}" "$tmp"/agent-store-init-ref-3.out
+    cmp -s "$tmp/AGENTS.md.orig" AGENTS.md
+    cmp -s "$tmp/fresh/.claude/skills/agent-store/SKILL.md" .claude/skills/agent-store/SKILL.md
+    run_agent_store --json init >"$tmp"/agent-store-init-ref-4.out
+    grep -Fq "\"skills_installed\":[]" "$tmp"/agent-store-init-ref-4.out
+    grep -Fq "\"skills_refreshed\":[]" "$tmp"/agent-store-init-ref-4.out
+    ;;
+
   *)
-    echo "usage: $0 {create_alias_matches_create|find_alias_matches_find|set_updates_fields|unset_removes_fields|find_filters_records|arbitrary_field_queries|query_boolean_syntax|query_contains_operator|query_argument_parity|query_typed_values|field_empty_null_unset_semantics|record_id_generation_contract|record_id_resolution_errors|json_output|json_error_envelope|uninitialized_store_errors|broken_pipe_exits_quietly|identifier_validation_rejects_unsafe_names|create_stdin_imports_jsonl|init_output_summary}" >&2
+    echo "usage: $0 {create_alias_matches_create|find_alias_matches_find|set_updates_fields|unset_removes_fields|find_filters_records|arbitrary_field_queries|query_boolean_syntax|query_contains_operator|query_argument_parity|query_typed_values|field_empty_null_unset_semantics|record_id_generation_contract|record_id_resolution_errors|json_output|json_error_envelope|uninitialized_store_errors|broken_pipe_exits_quietly|identifier_validation_rejects_unsafe_names|create_stdin_imports_jsonl|init_output_summary|init_refreshes_shipped_skills}" >&2
     exit 2
     ;;
 esac

@@ -30,6 +30,7 @@ macro_rules! outln {
 
 mod cli;
 mod output;
+mod shipped_templates;
 
 use agent_store::query::{record_sort_value, Query};
 use agent_store::store::{
@@ -64,6 +65,7 @@ const AGENT_SKILLS_DIR: &str = ".agents/skills";
 const CLAUDE_SKILLS_DIR: &str = ".claude/skills";
 const INSTRUCTION_FILES: &[&str] = &["AGENTS.md", "CLAUDE.md"];
 const INSTRUCTIONS_START: &str = "<!-- agent-store:start -->";
+const INSTRUCTIONS_END: &str = "<!-- agent-store:end -->";
 const DEFAULT_HOOK_TIMEOUT: Duration = Duration::from_secs(30);
 /// Environment variable carrying the current hook/schedule nesting depth.
 /// Every spawned hook or schedule command receives `current depth + 1`.
@@ -350,7 +352,9 @@ fn main() {
             if cli.json_output {
                 print_json(init_json(
                     summary.already_initialized,
-                    &summary.skills_installed,
+                    &summary.skills.installed,
+                    &summary.skills.refreshed,
+                    &summary.skills.modified,
                     &summary
                         .instructions
                         .iter()
@@ -363,14 +367,21 @@ fn main() {
                 } else {
                     outln!("Initialized {STORE_DIR}/");
                 }
-                if summary.skills_installed.is_empty() {
+                for path in &summary.skills.installed {
+                    outln!("Installed {path}");
+                }
+                for path in &summary.skills.refreshed {
+                    outln!("Refreshed {path}");
+                }
+                if summary.skills.installed.is_empty() && summary.skills.refreshed.is_empty() {
                     outln!(
                         "Skills already installed in {AGENT_SKILLS_DIR}/ and {CLAUDE_SKILLS_DIR}/"
                     );
-                } else {
-                    for path in &summary.skills_installed {
-                        outln!("Installed {path}");
-                    }
+                }
+                for path in &summary.skills.modified {
+                    outln!(
+                        "Kept {path}: modified locally; delete it and re-run `agent-store init` to install the current version"
+                    );
                 }
                 let all_missing = summary
                     .instructions
@@ -388,6 +399,14 @@ fn main() {
                             }
                             InstructionStatus::Present => {
                                 outln!("Instructions block already present in {path}")
+                            }
+                            InstructionStatus::Refreshed => {
+                                outln!("Refreshed instructions block in {path}")
+                            }
+                            InstructionStatus::Modified => {
+                                outln!(
+                                    "Kept {path} instructions block: modified locally; delete the block and re-run `agent-store init` to add the current one"
+                                )
                             }
                             InstructionStatus::Missing => {}
                         }
@@ -1370,6 +1389,8 @@ fn write_crontab(content: &str) -> Result<(), String> {
 enum InstructionStatus {
     Added,
     Present,
+    Refreshed,
+    Modified,
     Missing,
 }
 
@@ -1378,14 +1399,23 @@ impl InstructionStatus {
         match self {
             Self::Added => "added",
             Self::Present => "present",
+            Self::Refreshed => "refreshed",
+            Self::Modified => "modified",
             Self::Missing => "missing",
         }
     }
 }
 
+#[derive(Debug, Default)]
+struct SkillInstall {
+    installed: Vec<String>,
+    refreshed: Vec<String>,
+    modified: Vec<String>,
+}
+
 struct InitSummary {
     already_initialized: bool,
-    skills_installed: Vec<String>,
+    skills: SkillInstall,
     instructions: Vec<(&'static str, InstructionStatus)>,
 }
 
@@ -1394,16 +1424,20 @@ fn init_store() -> io::Result<InitSummary> {
     let already_initialized = Path::new(STORE_DIR).is_dir();
     fs::create_dir_all(STORE_DIR)?;
     ensure_gitignore_rule(Path::new(GITIGNORE_PATH), GITIGNORE_RULE)?;
-    let mut skills_installed = install_builtin_skills(Path::new(AGENT_SKILLS_DIR))?;
-    skills_installed.extend(install_builtin_skills(Path::new(CLAUDE_SKILLS_DIR))?);
+    let mut skills = SkillInstall::default();
+    install_builtin_skills(Path::new(AGENT_SKILLS_DIR), &mut skills)?;
+    install_builtin_skills(Path::new(CLAUDE_SKILLS_DIR), &mut skills)?;
     let mut instructions = Vec::new();
     for instruction_file in INSTRUCTION_FILES {
-        let status = ensure_instruction_block(Path::new(instruction_file))?;
+        let status = ensure_instruction_block(
+            Path::new(instruction_file),
+            shipped_templates::SHIPPED_INSTRUCTION_BLOCKS,
+        )?;
         instructions.push((*instruction_file, status));
     }
     Ok(InitSummary {
         already_initialized,
-        skills_installed,
+        skills,
         instructions,
     })
 }
@@ -1885,17 +1919,46 @@ fn ensure_gitignore_rule(path: &Path, rule: &str) -> io::Result<()> {
     Ok(())
 }
 
-fn install_builtin_skills(root: &Path) -> io::Result<Vec<String>> {
-    let mut installed = Vec::new();
+/// Installs missing builtin skills and refreshes ones whose content is an
+/// unmodified earlier builtin version; locally modified files are kept.
+fn install_builtin_skills(root: &Path, report: &mut SkillInstall) -> io::Result<()> {
     for skill in BUILTIN_SKILLS {
         let skill_dir = root.join(skill.name);
         fs::create_dir_all(&skill_dir)?;
         let skill_path = skill_dir.join("SKILL.md");
+        let display = skill_path.display().to_string();
         if write_file_if_absent(&skill_path, skill.content)? {
-            installed.push(skill_path.display().to_string());
+            report.installed.push(display);
+            continue;
+        }
+        let shipped = shipped_templates::shipped_skill_hashes(skill.name);
+        match classify_installed(&fs::read(&skill_path)?, skill.content, &shipped) {
+            TemplateState::Current => {}
+            TemplateState::Shipped => {
+                fs::write(&skill_path, skill.content)?;
+                report.refreshed.push(display);
+            }
+            TemplateState::Modified => report.modified.push(display),
         }
     }
-    Ok(installed)
+    Ok(())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TemplateState {
+    Current,
+    Shipped,
+    Modified,
+}
+
+fn classify_installed(installed: &[u8], current: &str, shipped: &[u64]) -> TemplateState {
+    if installed == current.as_bytes() {
+        TemplateState::Current
+    } else if shipped.contains(&shipped_templates::fnv1a64(installed)) {
+        TemplateState::Shipped
+    } else {
+        TemplateState::Modified
+    }
 }
 
 fn write_file_if_absent(path: &Path, contents: &str) -> io::Result<bool> {
@@ -1906,7 +1969,7 @@ fn write_file_if_absent(path: &Path, contents: &str) -> io::Result<bool> {
     }
 }
 
-fn ensure_instruction_block(path: &Path) -> io::Result<InstructionStatus> {
+fn ensure_instruction_block(path: &Path, shipped: &[u64]) -> io::Result<InstructionStatus> {
     let existing = match fs::read_to_string(path) {
         Ok(contents) => contents,
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
@@ -1915,8 +1978,25 @@ fn ensure_instruction_block(path: &Path) -> io::Result<InstructionStatus> {
         Err(error) => return Err(error),
     };
 
-    if existing.contains(INSTRUCTIONS_START) {
-        return Ok(InstructionStatus::Present);
+    if let Some(start) = existing.find(INSTRUCTIONS_START) {
+        let Some(end) = existing[start..]
+            .find(INSTRUCTIONS_END)
+            .map(|offset| start + offset + INSTRUCTIONS_END.len())
+        else {
+            return Ok(InstructionStatus::Modified);
+        };
+        let current = INSTRUCTIONS_BLOCK.trim_end_matches('\n');
+        return match classify_installed(&existing.as_bytes()[start..end], current, shipped) {
+            TemplateState::Current => Ok(InstructionStatus::Present),
+            TemplateState::Shipped => {
+                fs::write(
+                    path,
+                    format!("{}{current}{}", &existing[..start], &existing[end..]),
+                )?;
+                Ok(InstructionStatus::Refreshed)
+            }
+            TemplateState::Modified => Ok(InstructionStatus::Modified),
+        };
     }
 
     let mut file = OpenOptions::new().append(true).open(path)?;
@@ -1978,13 +2058,19 @@ mod tests {
             .expect("custom skill dir should be created");
         fs::write(&custom_skill, "custom skill\n").expect("custom skill should be written");
 
-        let installed = install_builtin_skills(&skills_root).expect("skills should install");
+        let mut report = SkillInstall::default();
+        install_builtin_skills(&skills_root, &mut report).expect("skills should install");
 
-        // The pre-existing skill file is preserved and not reported as installed.
-        assert_eq!(installed.len(), BUILTIN_SKILLS.len() - 1);
-        assert!(!installed
+        // The pre-existing skill file is preserved, reported as modified, and
+        // not reported as installed.
+        assert_eq!(report.installed.len(), BUILTIN_SKILLS.len() - 1);
+        assert!(!report
+            .installed
             .iter()
             .any(|path| path.ends_with("agent-store/SKILL.md")));
+        assert!(report.refreshed.is_empty());
+        assert_eq!(report.modified.len(), 1);
+        assert!(report.modified[0].ends_with("agent-store/SKILL.md"));
         assert_eq!(
             fs::read_to_string(&custom_skill).expect("custom skill should remain readable"),
             "custom skill\n"
@@ -1996,14 +2082,82 @@ mod tests {
     }
 
     #[test]
+    fn builtin_skill_install_refreshes_shipped_versions_only() {
+        let root = temp_dir("skills-refresh");
+        let skills_root = root.join(".claude/skills");
+        let old_skill = skills_root.join("agent-store/SKILL.md");
+        fs::create_dir_all(old_skill.parent().expect("old skill parent"))
+            .expect("old skill dir should be created");
+        let old_text = include_str!("../tests/facts/fixtures/v0.1.0-skills/agent-store/SKILL.md");
+        fs::write(&old_skill, old_text).expect("old skill should be written");
+
+        let mut first = SkillInstall::default();
+        install_builtin_skills(&skills_root, &mut first).expect("skills should install");
+        assert_eq!(first.refreshed.len(), 1);
+        assert!(first.refreshed[0].ends_with("agent-store/SKILL.md"));
+        assert_eq!(first.installed.len(), BUILTIN_SKILLS.len() - 1);
+        assert!(first.modified.is_empty());
+        assert_eq!(
+            fs::read_to_string(&old_skill).expect("refreshed skill should be readable"),
+            BUILTIN_SKILLS[0].content
+        );
+
+        let mut second = SkillInstall::default();
+        install_builtin_skills(&skills_root, &mut second).expect("skills should install");
+        assert!(second.installed.is_empty());
+        assert!(second.refreshed.is_empty());
+        assert!(second.modified.is_empty());
+
+        fs::remove_dir_all(root).expect("test temp dir should be removed");
+    }
+
+    #[test]
+    fn instruction_block_refreshes_only_shipped_blocks() {
+        let root = temp_dir("instructions-refresh");
+        let agents = root.join("AGENTS.md");
+        let old_block = "<!-- agent-store:start -->\nold wording\n<!-- agent-store:end -->";
+        let original = format!("# project\n\n{old_block}\n\nuser line after\n");
+        fs::write(&agents, &original).expect("instructions file should be written");
+
+        // Not a known shipped block: kept as is.
+        let status = ensure_instruction_block(&agents, &[]).expect("modified block should be kept");
+        assert_eq!(status, InstructionStatus::Modified);
+        assert_eq!(fs::read_to_string(&agents).expect("readable"), original);
+
+        // A known shipped block: replaced in place, surrounding text preserved.
+        let shipped = [shipped_templates::fnv1a64(old_block.as_bytes())];
+        let status =
+            ensure_instruction_block(&agents, &shipped).expect("shipped block should refresh");
+        assert_eq!(status, InstructionStatus::Refreshed);
+        assert_eq!(
+            fs::read_to_string(&agents).expect("readable"),
+            format!("# project\n\n{INSTRUCTIONS_BLOCK}\nuser line after\n")
+        );
+        let status = ensure_instruction_block(&agents, &shipped).expect("current block is kept");
+        assert_eq!(status, InstructionStatus::Present);
+
+        // A start marker without an end marker is never rewritten.
+        let unterminated = "<!-- agent-store:start -->\nno end marker\n";
+        fs::write(&agents, unterminated).expect("instructions file should be written");
+        let status =
+            ensure_instruction_block(&agents, &shipped).expect("unterminated block is kept");
+        assert_eq!(status, InstructionStatus::Modified);
+        assert_eq!(fs::read_to_string(&agents).expect("readable"), unterminated);
+
+        fs::remove_dir_all(root).expect("test temp dir should be removed");
+    }
+
+    #[test]
     fn instruction_block_is_appended_once_to_existing_files() {
         let root = temp_dir("instructions");
         let agents = root.join("AGENTS.md");
         fs::write(&agents, "user-authored line").expect("instructions file should be written");
 
-        let first = ensure_instruction_block(&agents).expect("instruction block should append");
-        let second =
-            ensure_instruction_block(&agents).expect("instruction block should not duplicate");
+        let shipped = shipped_templates::SHIPPED_INSTRUCTION_BLOCKS;
+        let first =
+            ensure_instruction_block(&agents, shipped).expect("instruction block should append");
+        let second = ensure_instruction_block(&agents, shipped)
+            .expect("instruction block should not duplicate");
         assert_eq!(first, InstructionStatus::Added);
         assert_eq!(second, InstructionStatus::Present);
 
@@ -2020,7 +2174,8 @@ mod tests {
         let root = temp_dir("missing-instructions");
         let missing = root.join("CLAUDE.md");
 
-        let status = ensure_instruction_block(&missing).expect("missing instructions are skipped");
+        let status =
+            ensure_instruction_block(&missing, &[]).expect("missing instructions are skipped");
 
         assert_eq!(status, InstructionStatus::Missing);
         assert!(!missing.exists());

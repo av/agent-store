@@ -367,12 +367,16 @@ pub fn print_json(value: Value) {
 pub fn init_json(
     already_initialized: bool,
     skills_installed: &[String],
+    skills_refreshed: &[String],
+    skills_modified: &[String],
     instructions: &[(&str, &str)],
 ) -> Value {
     json!({
         "status": if already_initialized { "already-initialized" } else { "initialized" },
         "store_dir": agent_store::store::STORE_DIR,
         "skills_installed": skills_installed,
+        "skills_refreshed": skills_refreshed,
+        "skills_modified": skills_modified,
         "instructions": instructions
             .iter()
             .map(|(path, status)| json!({ "path": path, "status": status }))
