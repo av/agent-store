@@ -4,10 +4,10 @@
   <a href="https://github.com/av/agent-store/actions/workflows/ci.yml"><img src="https://github.com/av/agent-store/actions/workflows/ci.yml/badge.svg?branch=master" alt="CI"></a>
   <a href="https://github.com/av/agent-store/releases/latest"><img src="https://img.shields.io/github/v/release/av/agent-store" alt="Latest release"></a>
   <a href="https://av.github.io/agent-store/"><img src="https://img.shields.io/badge/docs-av.github.io-1a7f37" alt="Documentation"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
+  <a href="https://github.com/av/agent-store/blob/master/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
 </p>
 
-<p align="center"><b>Persistent, queryable memory for coding agents</b> — one binary, one SQLite file in your repo, no server.</p>
+<p align="center"><b>Persistent, queryable memory for coding agents</b>: one binary, one SQLite file in your repo, no server.</p>
 
 **Your coding agent forgets everything when the session ends.** Decisions made, dead ends explored, conventions discovered — all re-derived (or contradicted) next time, burning context on rediscovery. `agent-store` gives agents persistent memory that lives inside the repo, as a CLI any agent can already use:
 

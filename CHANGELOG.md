@@ -50,11 +50,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   also shows `set`, and demo GIFs no longer open on a blank typing frame —
   the first command is rendered instantly, so the payoff is visible from
   frame 0.
-- One canonical tagline — "Persistent, queryable memory for coding agents
-  — one binary, one SQLite file in your repo, no server" — now appears
-  consistently across the README, `--help`, the man page, Cargo.toml /
-  crates.io, docs.rs, the docs site description, `install.sh`, and the
-  social preview card.
+- One canonical tagline — "Persistent, queryable memory for coding agents:
+  one binary, one SQLite file in your repo, no server." — now appears
+  consistently in the README, `--help`, the man page description,
+  Cargo.toml, the crate docs, the docs site description, and the
+  `install.sh` header. The man page NAME line and the social preview card
+  use its short form, "Persistent, queryable memory for coding agents".
 - README Install section is agent-first: it opens with a one-line prompt to
   hand a coding agent, then a single non-interactive `curl | sh` block
   (checksum-verified, no sudo, ends in `agent-store init`); Homebrew, Nix,
@@ -69,10 +70,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - README logo switches between light/dark variants via a GitHub-native
   `<picture>` element; the docs site keys the hero logo and header/favicon
   off its own color scheme.
-- The crates.io package now ships only an allowlist of files (`src/`,
+- The package manifest now ships only an allowlist of files (`src/`,
   `Cargo.toml`, licenses, `README.md`, `CHANGELOG.md`) instead of the full
-  repo tree; README image links use absolute URLs so they render on
-  crates.io.
+  repo tree; README image links use absolute URLs so they would render on
+  crates.io once the crate is published.
 
 ### Fixed
 
@@ -144,7 +145,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Homebrew install instructions (`brew install av/tap/agent-store`) in the
   README.
 - Release automation: crates.io publish and Homebrew tap formula bump jobs
-  in the release workflow (each skipped when its secret is absent), plus a
+  in the release workflow (each skipped when its secret is absent; the
+  secrets were not set, so neither ran for v0.1.1 or v0.1.2 and the tap
+  formula was not bumped), plus a
   release-notes template (`.github/RELEASE_TEMPLATE.md`) and categories
   config for auto-generated release notes (`.github/release.yml`).
 - Crate-level rustdoc in `src/lib.rs` and fuller Cargo.toml metadata
@@ -157,9 +160,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- The crate is published on crates.io as `agent-store-cli` (the bare
-  `agent-store` name is taken by an unrelated crate); the binary and
-  library keep the `agent-store` name.
+- The package is named `agent-store-cli` (the bare `agent-store` name is
+  taken on crates.io by an unrelated crate); the binary and library keep
+  the `agent-store` name. It has not been published to crates.io; install from
+  the GitHub release archives or with `cargo install --git`.
 - `--json` mode now reports runtime errors as a structured
   `{"error":"<message>"}` object on stderr with exit codes unchanged;
   usage errors from argument parsing stay plain text.
