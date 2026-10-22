@@ -70,6 +70,27 @@ $ agent-store get ov --timestamps
 ovlkqa task priority=2 status=in-progress title='Migrate HTTP client to reqwest' created_at=2026-07-03T22:07:01.990Z updated_at=2026-07-03T22:07:09.945Z
 ```
 
+`unset` takes the names of the fields to remove. `rm` deletes the record
+along with its fields and links (records on the other end of a link are
+kept); after that, `get` fails and exits 1:
+
+```sh
+$ agent-store create note text="try ureq instead?" status=draft
+o2co2e
+
+$ agent-store unset o2c status
+Updated o2co2e
+
+$ agent-store get o2c
+o2co2e note text='try ureq instead?'
+
+$ agent-store rm o2c
+Removed o2co2e
+
+$ agent-store get o2co2e
+error: failed to get record: record 'o2co2e' was not found
+```
+
 Field values are stored as the text you typed, but they are **typed by
 their shape** when compared: numbers compare numerically, dates and
 timestamps on one timeline, everything else as text. Two names are
@@ -93,6 +114,17 @@ out implements q2n3rt
 
 $ agent-store links q2n3rt
 in implements ovlkqa
+```
+
+`unlink` takes the same three arguments and removes that one edge, for
+example a link made with the wrong relation:
+
+```sh
+$ agent-store link ovlkqa blocks q2n3rt
+Linked ovlkqa blocks q2n3rt
+
+$ agent-store unlink ovlkqa blocks q2n3rt
+Unlinked ovlkqa blocks q2n3rt
 ```
 
 Links let one record reference another without duplicating its fields —
