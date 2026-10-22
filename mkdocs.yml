@@ -9,7 +9,7 @@
 #   .github/workflows/docs.yml has the staging commands (the "Stage docs" step)
 #   mkdocs build   # or: mkdocs serve
 site_name: agent-store
-site_description: Persistent, queryable memory for coding agents: one binary, one SQLite file in your repo, no server. Records, links, hooks, and compact context via one CLI.
+site_description: "Persistent, queryable memory for coding agents: one binary, one SQLite file in your repo, no server. Records, links, hooks, and compact context via one CLI."
 site_url: https://av.github.io/agent-store/
 repo_url: https://github.com/av/agent-store
 repo_name: av/agent-store
