@@ -20,6 +20,12 @@
 
           nativeBuildInputs = [ pkgs.installShellFiles ];
 
+          # These two tests shell out to bash and cargo, which the build sandbox lacks.
+          checkFlags = [
+            "--skip=hook_recursion_depth_capped"
+            "--skip=hook_failure_prints_mutation_output"
+          ];
+
           postInstall = ''
             installManPage man/agent-store.1
             installShellCompletion \
