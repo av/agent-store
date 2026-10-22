@@ -1286,7 +1286,7 @@ fn enable_schedule_cron(store: &Store) -> Result<(), String> {
             skip_next = false;
             continue;
         }
-        if line.starts_with(&marker) {
+        if line == marker {
             skip_next = true;
             continue;
         }
@@ -1320,7 +1320,7 @@ fn disable_schedule_cron(store: &Store) -> Result<bool, String> {
             removed = true;
             continue;
         }
-        if line.starts_with(&marker) {
+        if line == marker {
             skip_next = true;
             removed = true;
             continue;

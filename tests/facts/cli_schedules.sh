@@ -11,6 +11,45 @@ run_agent_store() {
   CARGO_TARGET_DIR="$target_dir" cargo run --quiet --manifest-path "$repo/Cargo.toml" -- "$@"
 }
 
+build_agent_store() {
+  CARGO_TARGET_DIR="$target_dir" cargo build --quiet --manifest-path "$repo/Cargo.toml"
+  bin="$target_dir/debug/agent-store"
+}
+
+# Puts a fake `crontab` first on PATH that keeps the table in $FAKE_CRONTAB,
+# so facts never read or write the developer's real crontab. Setting
+# FAKE_CRONTAB_LIST_ERROR makes `crontab -l` fail with that message.
+use_fake_crontab() {
+  mkdir -p "$tmp/fakebin"
+  export FAKE_CRONTAB="$tmp/crontab.txt"
+  cat >"$tmp/fakebin/crontab" <<'EOF'
+#!/bin/sh
+case "$1" in
+  -l)
+    if [ -n "${FAKE_CRONTAB_LIST_ERROR:-}" ]; then
+      echo "$FAKE_CRONTAB_LIST_ERROR" >&2
+      exit 1
+    fi
+    if [ -f "$FAKE_CRONTAB" ]; then
+      cat "$FAKE_CRONTAB"
+    else
+      echo "no crontab for $(id -un)" >&2
+      exit 1
+    fi
+    ;;
+  -) cat >"$FAKE_CRONTAB" ;;
+  *) echo "fake crontab: unsupported arguments: $*" >&2; exit 2 ;;
+esac
+EOF
+  chmod +x "$tmp/fakebin/crontab"
+  export PATH="$tmp/fakebin:$PATH"
+}
+
+# Prints the fake crontab line that follows the exact marker line $1.
+entry_after() {
+  M="$1" awk 'found { print; exit } $0 == ENVIRON["M"] { found = 1 }' "$FAKE_CRONTAB"
+}
+
 case "$case_name" in
   schedule_add_list_remove)
     cd "$tmp"
@@ -113,19 +152,43 @@ case "$case_name" in
     ;;
 
   schedule_enable_disable)
-    cd "$tmp"
-    run_agent_store init >"$tmp"/init.out
+    use_fake_crontab
+    build_agent_store
+    root="$(cd "$tmp" && pwd -P)"
+    mkdir "$tmp/proj" "$tmp/proj2"
+    (cd "$tmp/proj" && "$bin" init >/dev/null)
+    (cd "$tmp/proj2" && "$bin" init >/dev/null)
+    printf '%s\n' '# user-custom-entry' '0 3 * * * /bin/true' >"$FAKE_CRONTAB"
 
-    enable_out=$(run_agent_store schedule enable)
-    echo "$enable_out" | grep -q "Enabled"
+    out=$(cd "$tmp/proj2" && "$bin" schedule enable)
+    test "$out" = "Enabled: crontab entry installed for schedule tick"
+    out=$(cd "$tmp/proj" && "$bin" schedule enable)
+    test "$out" = "Enabled: crontab entry installed for schedule tick"
+    (cd "$tmp/proj" && "$bin" schedule enable >/dev/null)
 
-    crontab -l | grep -q "agent-store:tick:$tmp"
-    crontab -l | grep -q "schedule tick"
+    # proj's root is a prefix of proj2's: each keeps exactly one entry.
+    for p in proj proj2; do
+      test "$(grep -cFx "# agent-store:tick:$root/$p" "$FAKE_CRONTAB")" -eq 1
+      entry_after "# agent-store:tick:$root/$p" | grep -Eq '^\* \* \* \* \* .*schedule tick'
+    done
+    test "$(grep -c 'schedule tick' "$FAKE_CRONTAB")" -eq 2
+    grep -Fxq '# user-custom-entry' "$FAKE_CRONTAB"
 
-    disable_out=$(run_agent_store schedule disable)
-    echo "$disable_out" | grep -q "Disabled"
+    out=$(cd "$tmp/proj" && "$bin" schedule disable)
+    test "$out" = "Disabled: crontab entry removed"
+    if grep -Fxq "# agent-store:tick:$root/proj" "$FAKE_CRONTAB"; then exit 1; fi
+    entry_after "# agent-store:tick:$root/proj2" | grep -q 'schedule tick'
+    test "$(grep -c 'schedule tick' "$FAKE_CRONTAB")" -eq 1
 
-    if crontab -l 2>/dev/null | grep -q "agent-store:tick:$tmp"; then exit 1; fi
+    # proj is no longer enabled; proj2's entry must not be taken for it.
+    out=$(cd "$tmp/proj" && "$bin" schedule disable)
+    test "$out" = "No crontab entry found for this project"
+    entry_after "# agent-store:tick:$root/proj2" | grep -q 'schedule tick'
+
+    out=$(cd "$tmp/proj2" && "$bin" schedule disable)
+    test "$out" = "Disabled: crontab entry removed"
+    if grep -q 'agent-store:tick' "$FAKE_CRONTAB"; then exit 1; fi
+    test "$(cat "$FAKE_CRONTAB")" = "$(printf '%s\n' '# user-custom-entry' '0 3 * * * /bin/true')"
     ;;
 
   schedule_disable_missing_crontab)

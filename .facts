@@ -406,7 +406,8 @@
 - label: agent-store schedule runs lists recent runs newest first with summary; schedule runs <run-id> shows full detail including captured stdout/stderr
   command: bash tests/facts/cli_schedules.sh schedule_runs_detail
   tags: [implemented]
-- label: agent-store schedule enable installs a per-minute crontab entry for tick; schedule disable removes it cleanly
+- label: agent-store schedule enable installs a '# agent-store:tick:<project-root>' marker line followed by a per-minute crontab entry for tick, replacing only the entry whose marker matches this project root exactly and keeping other projects' and user entries; schedule disable removes only those two lines and reports no entry when this exact project root was never enabled
+  id: ki4
   command: bash tests/facts/cli_schedules.sh schedule_enable_disable
   tags: [implemented]
 - label: agent-store ctx and ctx --json include schedule_summary with active/completed counts and next_run_at when schedules exist
