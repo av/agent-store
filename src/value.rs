@@ -251,7 +251,7 @@ fn civil_from_days(days: i64) -> (i64, i64, i64) {
 }
 
 pub fn parse_duration_seconds(input: &str) -> Option<i64> {
-    if input.len() < 2 {
+    if input.len() < 2 || !input.is_char_boundary(input.len() - 1) {
         return None;
     }
     let (digits, suffix) = input.split_at(input.len() - 1);
@@ -314,6 +314,7 @@ mod tests {
         assert_eq!(parse_duration_seconds("1x"), None);
         assert_eq!(parse_duration_seconds("abc"), None);
         assert_eq!(parse_duration_seconds("1"), None);
+        assert_eq!(parse_duration_seconds("5é"), None);
     }
 
     #[test]

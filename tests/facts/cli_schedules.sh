@@ -303,7 +303,7 @@ case "$case_name" in
     "$bin" init >"$tmp"/init.out
 
     for bad in 2026-13-45 2026-02-30 2025-02-29 2026-07-10T25:99:00Z \
-      2026-07-10T12:60:00Z 2026-07-10T12:00:00+25:00 2026-07-10Tnoon 2026-07-10T12:00:00Zjunk; do
+      2026-07-10T12:60:00Z 2026-07-10T12:00:00+25:00 2026-07-10Tnoon 2026-07-10T12:00:00Zjunk 5é; do
       status=0
       "$bin" schedule add at "$bad" -- true >"$tmp/bad.out" 2>"$tmp/bad.err" || status=$?
       test "$status" -eq 2
