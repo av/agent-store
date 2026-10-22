@@ -54,7 +54,7 @@ use std::fs::{self, OpenOptions};
 use std::io::{self, Read, Write};
 #[cfg(unix)]
 use std::os::unix::process::{CommandExt, ExitStatusExt};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{self, Command};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -1271,10 +1271,10 @@ fn enable_schedule_cron(store: &Store) -> Result<(), String> {
         .canonicalize()
         .map_err(|e| format!("failed to resolve project root: {e}"))?;
     let project_root_str = project_root.display().to_string();
-    let binary_path = env::current_exe()
-        .and_then(|p| p.canonicalize())
-        .map_err(|e| format!("failed to resolve agent-store binary path: {e}"))?;
-    let binary_path_str = binary_path.display().to_string();
+    let binary_path_str = cron_binary_path()?.display().to_string();
+    if project_root_str.contains('\n') || binary_path_str.contains('\n') {
+        return Err("cannot install a crontab entry for a path containing a newline".to_owned());
+    }
 
     let existing = read_crontab()?;
     let marker = format!("{CRON_MARKER_PREFIX}{project_root_str}");
@@ -1295,7 +1295,9 @@ fn enable_schedule_cron(store: &Store) -> Result<(), String> {
 
     new_lines.push(marker);
     new_lines.push(format!(
-        "* * * * * cd {project_root_str} && {binary_path_str} schedule tick >/dev/null 2>&1"
+        "* * * * * cd {} && {} schedule tick >/dev/null 2>&1",
+        cron_shell_quote(&project_root_str),
+        cron_shell_quote(&binary_path_str)
     ));
 
     write_crontab(&new_lines.join("\n"))
@@ -1333,6 +1335,38 @@ fn disable_schedule_cron(store: &Store) -> Result<bool, String> {
     }
 
     Ok(removed)
+}
+
+/// Quotes `value` as one sh word inside a crontab command line: single
+/// quotes for sh, and `\%` because cron turns a bare `%` into a newline.
+fn cron_shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', r"'\''").replace('%', r"\%"))
+}
+
+/// The binary path for the crontab entry: the path agent-store was invoked
+/// by (as given, or found on PATH) when it is the running executable, so a
+/// Homebrew or Nix symlink keeps working across upgrades; otherwise the
+/// resolved executable path.
+fn cron_binary_path() -> Result<PathBuf, String> {
+    let exe = env::current_exe()
+        .and_then(|p| p.canonicalize())
+        .map_err(|e| format!("failed to resolve agent-store binary path: {e}"))?;
+    let is_exe = |path: &Path| path.is_absolute() && path.canonicalize().is_ok_and(|p| p == exe);
+
+    let invoked = env::args_os().next().map(PathBuf::from);
+    let candidate = invoked.and_then(|arg0| {
+        if arg0.components().count() > 1 {
+            env::current_dir().ok().map(|cwd| cwd.join(&arg0))
+        } else {
+            env::var_os("PATH").and_then(|paths| {
+                env::split_paths(&paths)
+                    .map(|dir| dir.join(&arg0))
+                    .find(|path| is_exe(path))
+            })
+        }
+    });
+
+    Ok(candidate.filter(|path| is_exe(path)).unwrap_or(exe))
 }
 
 /// Reads the current user's crontab. A crontab binary that cannot be

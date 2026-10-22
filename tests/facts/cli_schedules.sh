@@ -191,6 +191,38 @@ case "$case_name" in
     test "$(cat "$FAKE_CRONTAB")" = "$(printf '%s\n' '# user-custom-entry' '0 3 * * * /bin/true')"
     ;;
 
+  schedule_enable_cron_line)
+    use_fake_crontab
+    build_agent_store
+    root="$(cd "$tmp" && pwd -P)"
+    project="$root/it's my proj 100%"
+    mkdir "$project" "$tmp/brew bin"
+    ln -s "$bin" "$tmp/brew bin/agent-store"
+    cd "$project"
+    "$bin" init >/dev/null
+    "$bin" schedule add at 2020-01-01T00:00:00Z -- "touch '$root/fired'" >/dev/null
+
+    # Invoked through a PATH symlink (Homebrew/Nix layout): the entry keeps
+    # the symlink, not the resolved versioned target.
+    PATH="$tmp/brew bin:$PATH" agent-store schedule enable >/dev/null
+    line=$(entry_after "# agent-store:tick:$project")
+    printf '%s\n' "$line" | grep -Fq "brew bin/agent-store'"
+    if printf '%s\n' "$line" | grep -Fq "debug/agent-store"; then exit 1; fi
+    "$tmp/brew bin/agent-store" schedule enable >/dev/null
+    test "$(entry_after "# agent-store:tick:$project")" = "$line"
+
+    # cron turns an unescaped % into a newline and \% into %, then runs the
+    # rest with sh.
+    cmd=${line#\* \* \* \* \* }
+    test "$cmd" != "$line"
+    if printf '%s' "$cmd" | sed 's/\\%//g' | grep -q '%'; then exit 1; fi
+    cmd=$(printf '%s' "$cmd" | sed 's/\\%/%/g')
+    cd /
+    env -i HOME="$HOME" PATH=/usr/bin:/bin sh -c "$cmd"
+    test -f "$root/fired"
+    (cd "$project" && "$bin" schedule runs) | grep -q "exit=0"
+    ;;
+
   schedule_disable_missing_crontab)
     CARGO_TARGET_DIR="$target_dir" cargo build --quiet --manifest-path "$repo/Cargo.toml"
     bin="$target_dir/debug/agent-store"
