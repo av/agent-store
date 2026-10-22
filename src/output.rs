@@ -14,8 +14,7 @@ const QUICK_CONTEXT_FIELD_VALUE_ELLIPSIS: &str = "...";
 pub const USAGE: &str = "\
 Usage: agent-store [OPTIONS] <COMMAND>
 
-Persistent, queryable memory for coding agents — records, links, hooks, and
-compact context in one SQLite file in your repo.
+Persistent, queryable memory for coding agents: one binary, one SQLite file in your repo, no server.
 
 Options:
   -h, --help    Print help

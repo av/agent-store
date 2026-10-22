@@ -4,7 +4,7 @@ version = "0.1.2"
 edition = "2021"
 # Validated: `cargo +1.78 check --locked` passes; 1.77 cannot parse the v4 lockfile.
 rust-version = "1.78"
-description = "Persistent, queryable memory for coding agents: one binary, one SQLite file in your repo, no server"
+description = "Persistent, queryable memory for coding agents: one binary, one SQLite file in your repo, no server."
 license = "MIT"
 repository = "https://github.com/av/agent-store"
 homepage = "https://av.github.io/agent-store/"

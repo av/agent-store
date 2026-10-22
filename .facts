@@ -191,6 +191,10 @@
 - label: hook --help documents the AGENT_STORE_ID, AGENT_STORE_KIND, and AGENT_STORE_EVENT environment variables passed to Hook commands, and the installed agent-store skill docs describe them
   command: repo=$PWD && CARGO_TARGET_DIR="$repo/target/facts-bin" cargo build --quiet --manifest-path "$repo/Cargo.toml" && export PATH="$repo/target/facts-bin/debug:$PATH" && d=$(mktemp -d) && cd $d && agent-store hook --help | grep -q AGENT_STORE_ID && agent-store hook --help | grep -q AGENT_STORE_EVENT && agent-store init >/dev/null && grep -rq AGENT_STORE_ID .agents/skills/agent-store/
   tags: [implemented]
+- label: agent-store --help prints the canonical tagline sentence, and the same sentence is the Cargo.toml description, the man page DESCRIPTION, and the mkdocs site_description
+  id: tg1
+  command: repo=$PWD && CARGO_TARGET_DIR="$repo/target/facts-bin" cargo build --quiet --manifest-path "$repo/Cargo.toml" && t="Persistent, queryable memory for coding agents: one binary, one SQLite file in your repo, no server." && "$repo/target/facts-bin/debug/agent-store" --help | grep -qF "$t" && grep -qF "$t" "$repo/man/agent-store.1" && grep -qF "$t" "$repo/mkdocs.yml" && grep -qF "description = \"$t\"" "$repo/Cargo.toml"
+  tags: [implemented]
 
 # domain
 - label: a Store is a project-local SQLite-backed database under .agent-store

@@ -1,5 +1,6 @@
-//! Core library behind the [`agent-store`](https://github.com/av/agent-store) CLI —
-//! persistent, queryable memory for coding agents, backed by a single SQLite file in the repo.
+//! Core library behind the [`agent-store`](https://github.com/av/agent-store) CLI.
+//!
+//! Persistent, queryable memory for coding agents: one binary, one SQLite file in your repo, no server.
 //!
 //! `agent-store` gives agents (and humans) a durable, queryable scratchpad inside a
 //! repository: typed records with arbitrary fields, directional links between records,
