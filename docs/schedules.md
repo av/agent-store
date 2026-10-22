@@ -24,9 +24,14 @@ agent-store schedule rm <schedule-id>
 Two kinds:
 
 - `at <time>` — a **one-shot** schedule. `<time>` is an absolute
-  timestamp (`2026-07-10`, `2026-07-10T15:00:00Z` — ISO 8601 with a `T`
-  separator; a date-only value means midnight UTC) or a relative
-  duration (`5m`, `1h`, `2d`) meaning "from now".
+  timestamp (`2026-07-10`, `2026-07-10T15:00:00Z`,
+  `2026-07-10T17:00:00+02:00` — ISO 8601 with a `T` separator, seconds
+  and fraction optional; a date-only value means midnight UTC and a
+  time without `Z` or an offset is read as UTC) or a relative duration
+  (`5m`, `1h`, `2d`) meaning "from now". The time is stored as its UTC
+  instant (`+02:00` above becomes `next=2026-07-10T15:00:00.000Z`), and
+  anything that is not a real date and time, such as `2026-02-30` or
+  `25:00`, is rejected with exit code 2.
 - `every <interval>` — a **recurring** schedule. `<interval>` is a
   duration: `Ns`, `Nm`, `Nh`, or `Nd` (seconds, minutes, hours, days).
   The first run is due one interval after creation.
