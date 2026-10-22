@@ -36,20 +36,21 @@ curl -fsSL https://raw.githubusercontent.com/av/agent-store/master/install.sh | 
 ```
 
 Also available via `brew install av/tap/agent-store`, `nix run github:av/agent-store`,
-`cargo binstall --git https://github.com/av/agent-store agent-store`, or the
+`cargo binstall --git https://github.com/av/agent-store agent-store-cli`, or the
 prebuilt archives below — see the [install matrix](https://github.com/av/agent-store#install).
 
 ## Verifying downloads
 
-Each asset has a matching `.sha256` file and a signed [build provenance
+Each archive has a matching `.sha256` file (named after the target) and a signed [build provenance
 attestation](https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations):
 
 ```sh
 tag=vX.Y.Z
-asset=agent-store-$tag-x86_64-unknown-linux-gnu.tar.gz
+target=x86_64-unknown-linux-gnu
+asset=agent-store-$tag-$target.tar.gz
 curl -fsSLO "https://github.com/av/agent-store/releases/download/$tag/$asset"
-curl -fsSLO "https://github.com/av/agent-store/releases/download/$tag/$asset.sha256"
-sha256sum -c "$asset.sha256"   # macOS: shasum -a 256 -c "$asset.sha256"
+curl -fsSLO "https://github.com/av/agent-store/releases/download/$tag/agent-store-$tag-$target.sha256"
+sha256sum -c "agent-store-$tag-$target.sha256"   # macOS: shasum -a 256 -c ...
 gh attestation verify "$asset" --repo av/agent-store
 ```
 
