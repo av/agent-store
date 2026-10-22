@@ -7,11 +7,13 @@
 3. Appends a managed agent-store instructions block to `AGENTS.md` and
    `CLAUDE.md` when those files already exist.
 
-The output enumerates each step: every installed skill path, whether the
-instructions block was added or was already present per file, and — when
-neither `AGENTS.md` nor `CLAUDE.md` exists — a hint to create one and re-run
-`agent-store init` (which then adds the block). `--json` reports the same
-summary as `skills_installed` and `instructions` arrays.
+The output enumerates each step: every installed or refreshed skill path,
+every skill file kept because you edited it, the instructions block status
+per file (added, already present, refreshed, or kept because you edited
+it), and — when neither `AGENTS.md` nor `CLAUDE.md` exists — a hint to
+create one and re-run `agent-store init` (which then adds the block).
+`--json` reports the same summary as `skills_installed`,
+`skills_refreshed`, `skills_modified`, and `instructions` arrays.
 
 The result: coding agents working in the project discover the store on
 their own — no per-session prompting.
@@ -56,18 +58,20 @@ The skills use these by convention (kinds are free-form — anything goes):
 
 ## Updating
 
-Re-running `agent-store init` is safe: it adds whatever is missing and never
-touches your records, a skill file you edited, or the rest of `AGENTS.md` /
-`CLAUDE.md`. To get the current skills after upgrading the binary, delete
-the installed ones and re-run `init`:
+After upgrading the binary, re-run `agent-store init` to bring the skills
+up to date. A skill file that is still exactly what an earlier release
+installed is replaced with the current version (`Refreshed <path>`), and an
+unedited instructions block is updated in place. Your records and the rest
+of `AGENTS.md` / `CLAUDE.md` are never touched.
+
+A skill file or block you edited is kept as is and reported
+(`Kept <path>: modified locally; ...`). To replace it with the current
+version, delete it and re-run `init`:
 
 ```bash
-rm -r .agents/skills/agent-store* .claude/skills/agent-store*
+rm .agents/skills/agent-store/SKILL.md .claude/skills/agent-store/SKILL.md
 agent-store init
 ```
-
-To get the current instructions block, delete it (markers included) and
-re-run `init`.
 
 See also: [Claude Code tutorial](claude-code.md) — a full
 walkthrough of what these skills enable; [FAQ](faq.md) — data format,

@@ -48,8 +48,9 @@ they work from any subdirectory of the project.
 ## The CLAUDE.md block
 
 `init` manages this block between `<!-- agent-store:start/end -->`
-markers and never touches the rest of the file (to get the current wording
-after an upgrade, delete the block and re-run `init`):
+markers and never touches the rest of the file. Re-running `init` after an
+upgrade updates the block if you have not edited it; an edited block is
+kept and reported (delete it and re-run `init` to get the current wording):
 
 ```markdown
 <!-- agent-store:start -->
