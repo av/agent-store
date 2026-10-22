@@ -1369,21 +1369,35 @@ fn cron_binary_path() -> Result<PathBuf, String> {
     Ok(candidate.filter(|path| is_exe(path)).unwrap_or(exe))
 }
 
-/// Reads the current user's crontab. A crontab binary that cannot be
-/// executed is an error; a working crontab with no entries for this user
-/// (non-zero exit from `crontab -l`) reads as empty.
+/// Reads the current user's crontab. Only `crontab -l` reporting that the
+/// user has no crontab reads as empty; a crontab binary that cannot be
+/// executed or any other failure is an error, so callers never rewrite a
+/// crontab they could not read.
 fn read_crontab() -> Result<String, String> {
     let output = Command::new("crontab")
         .arg("-l")
+        .env("LC_ALL", "C")
         .stdout(process::Stdio::piped())
         .stderr(process::Stdio::piped())
         .output()
         .map_err(|e| format!("failed to run crontab: {e}"))?;
 
     if output.status.success() {
-        Ok(String::from_utf8_lossy(&output.stdout).into_owned())
-    } else {
+        return Ok(String::from_utf8_lossy(&output.stdout).into_owned());
+    }
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stderr = stderr.trim();
+    // cronie, Debian cron and macOS say "no crontab for <user>"; BusyBox says
+    // "can't open '<user>': No such file or directory".
+    let no_crontab = stderr.contains("no crontab for")
+        || (stderr.contains("can't open '") && stderr.ends_with("': No such file or directory"));
+    if no_crontab {
         Ok(String::new())
+    } else if stderr.is_empty() {
+        Err(format!("crontab -l failed: {}", output.status))
+    } else {
+        Err(format!("crontab -l failed: {stderr}"))
     }
 }
 

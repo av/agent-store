@@ -244,9 +244,27 @@ case "$case_name" in
     grep -Fq "failed to run crontab" "$tmp"/disable.err
     test ! -s "$tmp"/disable.out
 
-    # With a working crontab and no entry for this project, disable stays rc=0.
+    # With no crontab for the user, disable reports no entry and stays rc=0.
+    use_fake_crontab
     disable_out=$("$bin" schedule disable)
     echo "$disable_out" | grep -q "No crontab entry found for this project"
+
+    # Any other `crontab -l` failure is an error and leaves the crontab as is.
+    printf '%s\n' '# user-custom-entry' '0 3 * * * /bin/true' >"$FAKE_CRONTAB"
+    cp "$FAKE_CRONTAB" "$tmp/crontab.before"
+    export FAKE_CRONTAB_LIST_ERROR="crontab: cannot open spool file: Permission denied"
+    set +e
+    "$bin" schedule enable >"$tmp"/enable.out 2>"$tmp"/enable.err
+    enable_status=$?
+    "$bin" schedule disable >"$tmp"/disable.out 2>"$tmp"/disable.err
+    disable_status=$?
+    set -e
+    test "$enable_status" -eq 1
+    test "$disable_status" -eq 1
+    grep -Fq "Permission denied" "$tmp"/enable.err
+    grep -Fq "Permission denied" "$tmp"/disable.err
+    test ! -s "$tmp"/enable.out
+    cmp "$tmp/crontab.before" "$FAKE_CRONTAB"
     ;;
 
   schedule_ctx_integration)

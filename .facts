@@ -419,7 +419,8 @@
 - label: a Schedule is a stored time-triggered rule with a generated ID, kind (at or every), expression, optional interval_seconds, optional query, bash command, next_run_at, status, and created_at; a ScheduleRun persists one execution result
   command: cargo test --quiet schedule_add_list_delete_lifecycle && cargo test --quiet schedule_runs_are_recorded_and_retrieved
   tags: [implemented]
-- label: agent-store schedule enable and disable exit 1 with a clear error when the crontab binary cannot be executed, while disable with a working crontab and no entry for the project still reports no entry and exits 0
+- label: agent-store schedule enable and disable exit 1 with a clear error and leave the crontab unchanged when the crontab binary cannot be executed or crontab -l fails for any reason other than 'no crontab for <user>'; with no crontab installed, disable reports no entry and exits 0
+  id: lbb
   command: bash tests/facts/cli_schedules.sh schedule_disable_missing_crontab
   tags: [implemented]
 - label: the crontab entry written by agent-store schedule enable shell-quotes the project root and binary path and escapes % for cron, so a project path containing spaces, quotes and % still runs schedule tick; the binary path is the one agent-store was invoked by (PATH entry or symlink) rather than its resolved target, so a Homebrew or Nix upgrade keeps the entry working
