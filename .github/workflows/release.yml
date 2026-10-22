@@ -34,7 +34,7 @@ jobs:
           - target: x86_64-pc-windows-msvc
             os: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
       # Cross toolchain for targets that differ from the host (linux musl).
@@ -49,10 +49,11 @@ jobs:
           archive: agent-store-$tag-$target
           include: LICENSE,THIRD-PARTY-LICENSES.md,README.md,completions,man
           checksum: sha256
+          locked: true
           token: ${{ secrets.GITHUB_TOKEN }}
       # Signed build provenance for the release archive, verifiable with:
       #   gh attestation verify <asset> --repo av/agent-store
-      - uses: actions/attest-build-provenance@v2
+      - uses: actions/attest-build-provenance@v4
         with:
           subject-path: |
             agent-store-*-${{ matrix.target }}.tar.gz
@@ -70,7 +71,7 @@ jobs:
     env:
       CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - name: Check for registry token
@@ -80,7 +81,8 @@ jobs:
             echo "present=true" >> "$GITHUB_OUTPUT"
           else
             echo "present=false" >> "$GITHUB_OUTPUT"
-            echo "CARGO_REGISTRY_TOKEN not set; skipping crates.io publish." >> "$GITHUB_STEP_SUMMARY"
+            echo "::notice title=crates.io publish skipped::skipped: CARGO_REGISTRY_TOKEN not set"
+            echo "skipped: CARGO_REGISTRY_TOKEN not set; crates.io publish did not run." >> "$GITHUB_STEP_SUMMARY"
           fi
       - name: cargo publish
         if: steps.token.outputs.present == 'true'
@@ -106,11 +108,12 @@ jobs:
             echo "present=true" >> "$GITHUB_OUTPUT"
           else
             echo "present=false" >> "$GITHUB_OUTPUT"
-            echo "HOMEBREW_TAP_TOKEN not set; skipping Homebrew tap bump." >> "$GITHUB_STEP_SUMMARY"
+            echo "::notice title=Homebrew tap bump skipped::skipped: HOMEBREW_TAP_TOKEN not set"
+            echo "skipped: HOMEBREW_TAP_TOKEN not set; Homebrew tap bump did not run." >> "$GITHUB_STEP_SUMMARY"
           fi
       - name: Checkout tap
         if: steps.token.outputs.present == 'true'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: av/homebrew-tap
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
