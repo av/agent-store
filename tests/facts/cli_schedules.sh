@@ -297,6 +297,50 @@ case "$case_name" in
     echo "$add_help" | grep -q "every"
     ;;
 
+  schedule_at_timestamp_validation)
+    cd "$tmp"
+    build_agent_store
+    "$bin" init >"$tmp"/init.out
+
+    for bad in 2026-13-45 2026-02-30 2025-02-29 2026-07-10T25:99:00Z \
+      2026-07-10T12:60:00Z 2026-07-10T12:00:00+25:00 2026-07-10Tnoon 2026-07-10T12:00:00Zjunk; do
+      status=0
+      "$bin" schedule add at "$bad" -- true >"$tmp/bad.out" 2>"$tmp/bad.err" || status=$?
+      test "$status" -eq 2
+      grep -qF "invalid time '$bad'" "$tmp/bad.err"
+    done
+    test "$("$bin" --json schedule ls | jq '.schedules | length')" -eq 0
+
+    next_of() {
+      "$bin" --json schedule ls | jq -r --arg id "$1" '.schedules[] | select(.id == $id) | .next_run_at'
+    }
+    leap_id=$("$bin" schedule add at 2028-02-29 -- true)
+    offset_id=$("$bin" schedule add at 2026-11-01T10:00:00+02:00 -- true)
+    west_id=$("$bin" schedule add at 2026-12-31T23:30:00-01:00 -- true)
+    zulu_id=$("$bin" schedule add at 2026-12-31T23:59:59Z -- true)
+    test "$(next_of "$leap_id")" = 2028-02-29T00:00:00.000Z
+    test "$(next_of "$offset_id")" = 2026-11-01T08:00:00.000Z
+    test "$(next_of "$west_id")" = 2027-01-01T00:30:00.000Z
+    test "$(next_of "$zulu_id")" = 2026-12-31T23:59:59.000Z
+    "$bin" schedule ls | grep -q "^$offset_id at 2026-11-01T10:00:00+02:00 next=2026-11-01T08:00:00.000Z "
+    for id in "$leap_id" "$offset_id" "$west_id" "$zulu_id"; do
+      "$bin" schedule rm "$id" >/dev/null
+    done
+
+    # An instant 2 minutes ago written with a +03:00 offset is due now; one
+    # 2 hours ahead written with a -03:00 offset is not.
+    past=$(date -u -d '-2 minutes' +%Y-%m-%dT%H:%M:%SZ)
+    future=$(date -u -d '+2 hours' +%Y-%m-%dT%H:%M:%SZ)
+    past_east=$(date -u -d "$past +3 hours" +%Y-%m-%dT%H:%M:%S)+03:00
+    future_west=$(date -u -d "$future -3 hours" +%Y-%m-%dT%H:%M:%S)-03:00
+    due_id=$("$bin" schedule add at "$past_east" -- 'echo due')
+    later_id=$("$bin" schedule add at "$future_west" -- 'echo later')
+    tick=$("$bin" --json schedule tick)
+    echo "$tick" | jq -e --arg id "$due_id" '.ticked == 1 and .schedule_runs[0].schedule_id == $id'
+    "$bin" schedule ls | grep -q "^$due_id .* status=completed"
+    "$bin" schedule ls | grep -q "^$later_id .* status=active"
+    ;;
+
   *)
     echo "unknown case: $case_name" >&2
     exit 1

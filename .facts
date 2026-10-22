@@ -430,6 +430,10 @@
 - label: the crontab entry written by agent-store schedule enable shell-quotes the project root and binary path and escapes % for cron, so a project path containing spaces, quotes and % still runs schedule tick; the binary path is the one agent-store was invoked by (PATH entry or symlink) rather than its resolved target, so a Homebrew or Nix upgrade keeps the entry working
   command: bash tests/facts/cli_schedules.sh schedule_enable_cron_line
   tags: [implemented]
+- label: agent-store schedule add at accepts a date (midnight UTC) or a date-time with optional seconds and fraction and a Z or ±HH:MM offset (no offset means UTC), rejects anything that is not a real calendar instant (month 13, February 30 or 29 outside leap years, hour 25, minute 60, offset beyond 23:59, trailing text) with exit 2 and an "invalid time" error without storing a Schedule, and stores next_run_at as the UTC instant in YYYY-MM-DDTHH:MM:SS.sssZ form (2026-11-01T10:00:00+02:00 -> 2026-11-01T08:00:00.000Z) so tick fires it at that instant
+  id: e6u
+  command: bash tests/facts/cli_schedules.sh schedule_at_timestamp_validation
+  tags: [implemented]
 
 # query
 - label: agent-store find <Query> supports boolean expressions with and, or, not, parentheses, and comparison operators =, !=, <, <=, >, and >= over Record kind and Field text values

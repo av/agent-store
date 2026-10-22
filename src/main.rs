@@ -1104,19 +1104,14 @@ fn resolve_schedule_time(
         );
     }
 
-    let parsed = FieldValue::parse(expression);
-    match parsed {
-        FieldValue::Date(date) => {
-            let timestamp = format!("{date}T00:00:00.000Z");
-            (timestamp, None)
-        }
-        FieldValue::Timestamp(ts) => (ts, None),
-        _ => {
+    match value::utc_instant(expression) {
+        Some(timestamp) => (timestamp, None),
+        None => {
             fail(
                 json_output,
                 2,
                 format!(
-                    "invalid time '{expression}'; expected a duration (5m, 1h, 2d) or timestamp"
+                    "invalid time '{expression}'; expected a duration (5m, 1h, 2d), a date (2026-07-10) or a timestamp (2026-07-10T15:00:00Z, 2026-07-10T17:00:00+02:00)"
                 ),
             );
         }
