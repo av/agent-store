@@ -190,7 +190,8 @@ recalled IDs from `ctx` output are cheap to reuse.
   delete `.agent-store/`) before running mutation commands. See
   [SECURITY.md](../SECURITY.md).
 
-See also: [Concepts](concepts.md) — the mental model behind records,
+See also: [Claude Code, Codex and Cursor](agents.md) — which files
+each agent reads and the fresh-repo step; [Concepts](concepts.md) — the mental model behind records,
 links, queries, and `ctx`; [Skills and agent integration](skills.md) —
 what `init` installs; [Hooks](hooks.md) — store-mutation hooks in depth;
 [FAQ](faq.md) — data format, concurrency, privacy, and limits.

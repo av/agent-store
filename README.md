@@ -212,11 +212,12 @@ Scripting behaves the way a shell expects: results on stdout, errors on stderr, 
 
 ## Skills
 
-`init` installs three agent-facing skill docs (`agent-store`, `agent-store-patterns`, `agent-store-pipelines`) into `.agents/skills/` and `.claude/skills/`, so coding agents pick up the store without prompting. They're written for agents but double as concise usage docs — worth a read even for human use. What each covers: [Skills and agent integration](docs/skills.md).
+`init` installs three agent-facing skill docs (`agent-store`, `agent-store-patterns`, `agent-store-pipelines`) into `.agents/skills/` and `.claude/skills/`, so coding agents pick up the store without prompting. They're written for agents but double as concise usage docs — worth a read even for human use. What each covers: [Skills and agent integration](docs/skills.md). Which agent reads which files: [Claude Code, Codex and Cursor](docs/agents.md).
 
 ## Documentation
 
 - [Install details](docs/install.md) — verifying downloads, completions and man page, upgrade/uninstall
+- [Using with Claude Code, Codex and Cursor](docs/agents.md) — what `init` writes, which files each agent reads, the fresh-repo step
 - [Using agent-store with Claude Code](docs/claude-code.md) — setup, CLAUDE.md conventions, session-start context injection, a worked two-session example
 - [Concepts](docs/concepts.md) — the mental model: stores, records, links, queries, hooks, and the `ctx` budget, each with a verified example
 - [Query language](docs/queries.md) — operators, value types, combinators, quoting, timestamps, links, sorting
