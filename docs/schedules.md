@@ -102,9 +102,13 @@ preceded by a marker comment (`# agent-store:tick:<project-root>`) and
 scoped to the project root directory, so multiple projects keep
 independent entries and `disable` removes only its own two lines,
 preserving the rest of your crontab. `enable` is idempotent — running it
-twice does not duplicate the entry. It records the absolute path of the
-current `agent-store` binary, so re-run `enable` after moving the
-binary.
+twice does not duplicate the entry. Project paths with spaces, quotes
+or `%` are quoted for cron. It records the absolute path you ran
+`agent-store` by — for a Homebrew or Nix install, the stable link on
+your `PATH`, so upgrades keep the entry working — so re-run `enable`
+only after moving the binary. If `crontab -l` fails for any reason
+other than "no crontab", `enable` and `disable` exit 1 and leave your
+crontab untouched.
 
 `disable` removes the entry but keeps the schedules themselves; with no
 entry installed it prints `No crontab entry found for this project` and
