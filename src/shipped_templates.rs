@@ -13,12 +13,16 @@ pub(crate) const SHIPPED_SKILLS: &[(&str, u64)] = &[
     ("agent-store", 0xc2027b6cd5277a1c),           // v0.1.1 - v0.1.2
     ("agent-store-patterns", 0x8e2d9ac99129f99d),  // v0.1.0 - v0.1.2
     ("agent-store-pipelines", 0x0a0f3a891ce76026), // v0.1.0 - v0.1.2
+    ("agent-store", 0x94e528b146a6428a),           // next release
+    ("agent-store-patterns", 0xf2c8ce83219db817),  // next release
+    ("agent-store-pipelines", 0x53823223a43e3abd), // next release
 ];
 
 /// `fnv1a64` of the managed block from the start marker through the end
 /// marker, without the trailing newline.
 pub(crate) const SHIPPED_INSTRUCTION_BLOCKS: &[u64] = &[
     0xc956e7887fe38863, // v0.1.0 - v0.1.2
+    0x0d1844d7aeca62da, // next release
 ];
 
 pub(crate) fn shipped_skill_hashes(name: &str) -> Vec<u64> {
