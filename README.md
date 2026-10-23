@@ -104,7 +104,7 @@ IDs are short and prefix-resolvable: any unambiguous prefix works wherever a com
 
 ## How agents use it
 
-You run `init` once, with `AGENTS.md` and `CLAUDE.md` in place. From then on the agent finds the store itself: the installed skills teach it the commands and conventions, and the `AGENTS.md`/`CLAUDE.md` block points it at `ctx` and the skills. That makes the store available, not mandatory: to have every session open with `ctx` and record decisions as a habit, add a `SessionStart` hook and a few lines of convention to `CLAUDE.md`/`AGENTS.md` (`init` does not write these; the tutorial linked below has both). As it works, the agent records what matters:
+After `init` (with `AGENTS.md` and `CLAUDE.md` in place), the agent finds the store itself: the skills teach it the commands, and the instructions block points it at `ctx`. That makes the store available, not mandatory; a `SessionStart` hook and a few lines of convention make it a habit (`init` does not write these; see the tutorial below). As it works, the agent records what matters:
 
 ```sh
 # Session 1 — the reqwest decision from the top of this page, plus the follow-up work:
@@ -143,10 +143,10 @@ For the full walkthrough — Claude Code setup, `SessionStart` hook that injects
 
 You already have something that sort of works. Here's an honest comparison:
 
-- **...a `MEMORY.md` / `TODO.md`?** Genuinely the better tool while the list is short and a human co-edits it. It stops working when the agent has to re-read and re-parse a growing file on every turn: notes files can't answer `find kind=task status=pending --sort created_at --limit 5`, carry no timestamps or links, and grow without a cap — while `ctx` stays the same fixed size no matter how many records accumulate. And you don't have to start over: `jq -R -c '{kind:"note",fields:{text:.}}' MEMORY.md | agent-store create --stdin` imports the file you already have, turning each line into a record ([examples/import-memory-md.sh](examples/import-memory-md.sh) also shows a structured variant that keeps your headings queryable).
+- **...a `MEMORY.md` / `TODO.md`?** The better tool while the list is short and a human co-edits it. It stops working when the agent re-reads a growing file every turn: notes can't answer `find kind=task status=pending --sort created_at --limit 5`, and they grow while `ctx` stays a fixed size. `jq -R -c '{kind:"note",fields:{text:.}}' MEMORY.md | agent-store create --stdin` imports the file you already have, one record per line ([a structured variant](examples/import-memory-md.sh) keeps headings queryable).
 - **..."my agent greps the repo"?** Grep finds what the code *says*, not what you *decided* — the rejected alternative, the dead end that cost an afternoon, the convention that isn't written anywhere. Those live only in the transcript, and the transcript is gone. (The store itself is grep-friendly: one record per line.)
-- **...a vector-memory MCP server?** Different problem. That's semantic similarity — "notes vaguely about auth" — with embeddings, ranking, and a server to integrate per harness. This is exact, deterministic recall (`find kind=decision area=auth`) from a plain CLI, so the same query returns the same records every time, with no protocol integration and nothing running in the background. If you need fuzzy semantic search, a vector store is the right tool; most agent memory turns out to be "what's pending and what did we decide," which isn't.
-- **...git history?** Commits record what changed, not the decisions, findings, and open tasks around the change — and querying prose with `git log --grep` is archaeology, not recall. The store is a gitignored file next to the repo, so it's untouched by branch switches; note that a separate `git worktree` is a separate directory and gets its own store unless you link it ([FAQ](docs/faq.md#does-the-store-follow-worktrees-fresh-clones-ci-or-cloud-agents)).
+- **...a vector-memory MCP server?** Different problem: semantic similarity ("notes vaguely about auth") with embeddings and a server per harness. This is exact, deterministic recall (`find kind=decision area=auth`) from a plain CLI. For fuzzy search use a vector store; most agent memory is "what's pending and what did we decide".
+- **...git history?** Commits record what changed, not the decisions, findings, and open tasks around the change — and querying prose with `git log --grep` is archaeology, not recall. The store is untouched by branch switches; a `git worktree` gets its own store unless you [link it](docs/faq.md#does-the-store-follow-worktrees-fresh-clones-ci-or-cloud-agents).
 
 The [FAQ](docs/faq.md) has the longer versions, including why not raw `sqlite3` + `jq`.
 
@@ -215,25 +215,25 @@ Scripting behaves the way a shell expects: results on stdout, errors on stderr, 
 
 ## Skills
 
-`init` installs three agent-facing skill docs (`agent-store`, `agent-store-patterns`, `agent-store-pipelines`) into `.agents/skills/` and `.claude/skills/`, so coding agents pick up the store without prompting. They're written for agents but double as concise usage docs — worth a read even for human use. What each covers: [Skills and agent integration](docs/skills.md). Which agent reads which files: [Claude Code, Codex and Cursor](docs/agents.md).
+`init` installs three agent-facing skill docs (`agent-store`, `agent-store-patterns`, `agent-store-pipelines`) into `.agents/skills/` and `.claude/skills/`, so coding agents pick up the store without prompting. They double as concise usage docs for humans. Details: [Skills and agent integration](docs/skills.md), [Claude Code, Codex and Cursor](docs/agents.md).
 
 ## Documentation
 
-- [Install details](docs/install.md) — verifying downloads, completions and man page, upgrade/uninstall
-- [Claude Code, Codex and Cursor](docs/agents.md) — what `init` writes, which files each agent reads, the fresh-repo step
-- [Claude Code tutorial](docs/claude-code.md) — setup, CLAUDE.md conventions, session-start context injection, a worked two-session example
-- [Concepts](docs/concepts.md) — the mental model: stores, records, links, queries, hooks, and the `ctx` budget, each with a verified example
-- [Query language](docs/queries.md) — operators, value types, combinators, quoting, timestamps, links, sorting
-- [Hooks](docs/hooks.md) — events, environment variables, limits, inspecting runs
-- [Schedules](docs/schedules.md) — one-shot and recurring commands, ticking, crontab integration
-- [JSON output and import](docs/json.md) — `--json` shapes, `create --stdin`, pipeline recipes
-- [Skills and agent integration](docs/skills.md) — what `init` installs and the conventions agents pick up
-- [FAQ](docs/faq.md) — why not markdown/jq/a vector DB/git history, data format and inspection, concurrency, privacy, measured limits
-- [Examples](examples/README.md) — runnable scripts: task tracker, decision log, session handoff, MEMORY.md import, JSONL pipelines, audit hooks, linked memory graph
+- [Install details](docs/install.md) — verification, completions, upgrade, uninstall
+- [Claude Code, Codex and Cursor](docs/agents.md) — what `init` writes and which agent reads what
+- [Claude Code tutorial](docs/claude-code.md) — setup, conventions, `SessionStart` hook, two-session example
+- [Concepts](docs/concepts.md) — the mental model, with real examples
+- [Query language](docs/queries.md) — operators, types, quoting, links, sorting
+- [Hooks](docs/hooks.md) — events, variables, limits, runs
+- [Schedules](docs/schedules.md) — one-shot and recurring commands, crontab
+- [JSON output and import](docs/json.md) — `--json` shapes, `create --stdin`, recipes
+- [Skills and agent integration](docs/skills.md) — what agents are taught
+- [FAQ](docs/faq.md) — alternatives, data format, worktrees, concurrency, privacy, limits
+- [Examples](examples/README.md) — seven runnable scripts
 
 ## Stability
 
-agent-store is v0.1.x — early, but the data layer is the part treated as stable. The store is a plain SQLite file with a versioned, checksummed schema; upgrades apply migrations automatically on open, so existing records, links, and hook history survive new releases (covered by [tests that open old-schema stores](https://github.com/av/agent-store/blob/master/tests/upgrade.rs)). Pre-1.0, CLI flags, output wording, and `--json` shapes may still change between minor versions — pin a version if you script against exact output, and check the [CHANGELOG](CHANGELOG.md) before upgrading. Worst case, nothing is locked in: `.agent-store/store.sqlite` is a normal SQLite file readable by stock `sqlite3` or any SQLite tool, with every record, link and hook run in it, and `find --json` exports every record (one `jq -c '.records[]'` away from JSONL that `create --stdin` re-imports; that round-trip keeps kinds and fields but not links or IDs).
+agent-store is v0.1.x — early, but the data layer is the part treated as stable. The store is a plain SQLite file with a versioned, checksummed schema; upgrades apply migrations automatically on open, so existing records, links, and hook history survive new releases (covered by [tests that open old-schema stores](https://github.com/av/agent-store/blob/master/tests/upgrade.rs)). Pre-1.0, CLI flags, output wording, and `--json` shapes may still change between minor versions — pin a version if you script against exact output, and check the [CHANGELOG](CHANGELOG.md) before upgrading. Worst case, nothing is locked in: `.agent-store/store.sqlite` is a normal SQLite file with every record, link and hook run, and `find --json` exports the records as JSONL that `create --stdin` re-imports (without links, under new IDs).
 
 ## Contributing
 
