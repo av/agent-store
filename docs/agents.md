@@ -61,12 +61,12 @@ session and recalling it in the next through the store:
 | Cursor (`cursor-agent`) | `.claude/skills/` | `AGENTS.md` and `CLAUDE.md` |
 
 The two skill directories cover all three agents. Claude Code is the one
-that depends on the instructions block: in a repo with the skills but no
-`CLAUDE.md`, it saw the skills but wrote the decision into a new
-`CLAUDE.md` (and once into its own memory) instead of the store, in
-both runs. Codex and Cursor
-used the store from the skills alone, and all three used it once the
-block was in place.
+that benefits most from the instructions block: in a repo with the skills
+but no `CLAUDE.md`, it used the store in 8 of 12 test runs; in the other
+4 it saw the skills but wrote the decision into a new `CLAUDE.md` (once
+into its own memory) instead. Codex and Cursor used the store from the
+skills alone, and all three used it every time once the block was in
+place.
 
 ## Fresh repo: create the instruction files, then re-run `init`
 
