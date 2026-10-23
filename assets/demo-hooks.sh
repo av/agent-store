@@ -2,9 +2,9 @@
 # Source script for the README hooks/links demo GIF.
 #
 # Render with:
-#   asciinema rec --overwrite --cols 70 --rows 26 -c "bash assets/demo-hooks.sh" demo-hooks.cast
+#   asciinema rec --overwrite --cols 70 --rows 22 -c "bash assets/demo-hooks.sh" demo-hooks.cast
 #   agg --font-size 20 --last-frame-duration 4 \
-#     --theme 0d1117,f0f6fc,484f58,ff7b72,3fb950,d29922,58a6ff,bc8cff,39c5cf,b1bac4,6e7681,ffa198,56d364,e3b341,79c0ff,d2a8ff,56d4dd,f0f6fc \
+#     --theme 161b22,f0f6fc,484f58,ff7b72,3fb950,d29922,58a6ff,bc8cff,39c5cf,b1bac4,6e7681,ffa198,56d364,e3b341,79c0ff,d2a8ff,56d4dd,f0f6fc \
 #     demo-hooks.cast assets/demo-hooks.gif
 #
 # Same 70-column limit as demo.sh: keep every line within 70 characters and
@@ -70,5 +70,4 @@ run "agent-store set $tid status=done" 1.0
 sleep 0.6 # let the hook finish
 run 'agent-store hook runs' 1.4
 run 'agent-store find kind=event' 1.6
-run "agent-store links $tid" 1.4
-run 'agent-store ctx' 3
+run "agent-store links $tid" 3

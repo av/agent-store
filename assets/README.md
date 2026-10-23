@@ -32,13 +32,13 @@ The three SVGs are the source of truth; every raster asset is generated from the
 | `favicon.png` | 128x128 raster of the mark with the theme-neutral favicon palette baked in (see below). | Fallback for contexts that need a raster favicon |
 | `favicon.ico` | Multi-size 16/32/48, same theme-neutral palette. | Served at `/assets/favicon.ico` on the docs site for older browsers |
 | `social-preview.svg` / `social-preview.png` | 1280x640 dark card: lockup (dark palette baked in) + the canonical tagline in two lines ("Persistent, queryable memory for coding agents" / "one binary, one SQLite file in your repo, no server") on `#0d1117`. The SVG is the source (tagline text as paths, no font dependency); the PNG is its raster. | GitHub Settings > General > Social preview (manual upload — not read from the repo); also used by link unfurls (Slack/Discord/X) |
-| `demo.sh` / `demo.gif` | Scripted README demo recording (init/create/find/set/ctx basics). 70 columns so it stays legible at phone width. | `README.md` header |
-| `demo-hooks.sh` / `demo-hooks.gif` | Scripted demo of links, a hook firing on `set` (`hook runs`, the event record it created), and `ctx`. Recipe in the script header (same asciinema + agg theme as `demo.sh`). | `README.md` Hooks section |
+| `demo.sh` / `demo.gif` | Scripted README demo recording (touch AGENTS.md CLAUDE.md, init, create/find/set/ctx basics). 70x22 so it stays legible at phone width without a mostly empty frame. | `README.md` header |
+| `demo-hooks.sh` / `demo-hooks.gif` | Scripted demo of links, a hook firing on `set` (`hook runs`, the event record it created), and `links`; short enough that the last frame shows the whole run. Recipe in the script header (same asciinema + agg theme as `demo.sh`). | `README.md` Hooks section |
 
 ## Design notes
 
 - Mark: square brackets (record syntax) enclosing a green two-node link.
-- Palette: GitHub light/dark — ink `#1f2328`/`#f0f6fc`, soft gray `#59636e`/`#9198a1`, accent green `#1a7f37`/`#3fb950`; dark canvas `#0d1117` (social card, demo-GIF background) and muted `#6e7681` (social-card second line). The dark values live in a `@media (prefers-color-scheme: dark)` block inside each themed SVG; keep those classes when editing (generic SVG minifiers strip them — see below).
+- Palette: GitHub light/dark — ink `#1f2328`/`#f0f6fc`, soft gray `#59636e`/`#9198a1`, accent green `#1a7f37`/`#3fb950`; dark canvas `#0d1117` (social card), demo-GIF background `#161b22` (GitHub's dark code-block color, so the GIF stays framed on a `#0d1117` page) and muted `#6e7681` (social-card second line). The dark values live in a `@media (prefers-color-scheme: dark)` block inside each themed SVG; keep those classes when editing (generic SVG minifiers strip them — see below).
 - Wordmark: Noto Sans Mono wght=600, converted to paths with fontTools (no font dependency). The hyphen is a separate accent-green path.
 
 ## Regeneration

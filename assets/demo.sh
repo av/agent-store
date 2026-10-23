@@ -2,9 +2,9 @@
 # Source script for the README demo GIF.
 #
 # Render with:
-#   asciinema rec --overwrite --cols 70 --rows 26 -c "bash assets/demo.sh" demo.cast
+#   asciinema rec --overwrite --cols 70 --rows 22 -c "bash assets/demo.sh" demo.cast
 #   agg --font-size 20 --last-frame-duration 4 \
-#     --theme 0d1117,f0f6fc,484f58,ff7b72,3fb950,d29922,58a6ff,bc8cff,39c5cf,b1bac4,6e7681,ffa198,56d364,e3b341,79c0ff,d2a8ff,56d4dd,f0f6fc \
+#     --theme 161b22,f0f6fc,484f58,ff7b72,3fb950,d29922,58a6ff,bc8cff,39c5cf,b1bac4,6e7681,ffa198,56d364,e3b341,79c0ff,d2a8ff,56d4dd,f0f6fc \
 #     demo.cast assets/demo.gif
 #
 # 70 columns keep the text readable when GitHub scales the GIF to a phone's
@@ -15,7 +15,6 @@
 set -euo pipefail
 
 cd "$(mktemp -d)"
-touch AGENTS.md # so init demonstrates the instructions block install
 
 PROMPT=$'\033[1;32m$\033[0m '
 PS2_PROMPT=$'\033[90m>\033[0m '
@@ -44,7 +43,7 @@ run() {
   sleep "${2:-0.8}"
 }
 
-# First command and its output appear instantly: the GIF's opening frame must
+# First commands and their output appear instantly: the GIF's opening frame must
 # show content, not a blank screen with a typing lead-in (GIFs autoplay in the
 # README, and viewers who turn autoplay off only see this frame).
 run_instant() {
@@ -53,6 +52,7 @@ run_instant() {
   sleep "${2:-0.8}"
 }
 
+run_instant 'touch AGENTS.md CLAUDE.md' 0
 run_instant 'agent-store init'
 run 'agent-store create decision area=http choice=reqwest \
   reason="no openssl dep"' 0.6

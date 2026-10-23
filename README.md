@@ -20,7 +20,7 @@ $ agent-store find kind=decision area=http
 w4054s decision area=http choice=reqwest reason='no openssl dep'
 ```
 
-![agent-store demo: init, create records, query with the find language, update with set, ctx summary](https://raw.githubusercontent.com/av/agent-store/master/assets/demo.gif)
+![agent-store demo: create AGENTS.md and CLAUDE.md, init, create records, query with the find language, update with set, ctx summary](https://raw.githubusercontent.com/av/agent-store/master/assets/demo.gif)
 
 It is deliberately not a "memory platform":
 
@@ -182,7 +182,7 @@ Value types, quoting, precedence, and link predicates: [Query language](docs/que
 
 Hooks run a bash command whenever matching records mutate — useful for notifications, mirroring state into files, or nudging an agent.
 
-![agent-store demo: link a finding to a task, add a hook on task updates that creates an event record, trigger it with set, check hook runs, then see the event in find, links, and ctx](https://raw.githubusercontent.com/av/agent-store/master/assets/demo-hooks.gif)
+![agent-store demo: link a finding to a task, add a hook on task updates that creates an event record, trigger it with set, check hook runs, then see the event in find and the link in links](https://raw.githubusercontent.com/av/agent-store/master/assets/demo-hooks.gif)
 
 ```sh
 agent-store hook add set kind=task -- 'notify-send "task $AGENT_STORE_ID: $AGENT_STORE_NEW_VALUE"'
