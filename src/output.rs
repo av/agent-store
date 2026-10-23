@@ -265,8 +265,8 @@ Usage: agent-store schedule add at <time> [<Query>] -- <bash command>
 Add a time-based schedule.
 
   at <time>       One-shot schedule. <time> is an absolute timestamp
-                  (2026-07-10, 2026-07-10T15:00:00Z) or a relative duration
-                  (5m, 1h, 2d) meaning \"from now\".
+                  (2026-07-10, 2026-07-10T15:00:00Z, 2026-07-10T17:00:00+02:00)
+                  or a relative duration (5m, 1h, 2d) meaning \"from now\".
   every <interval> Recurring schedule. <interval> is a duration: Ns, Nm, Nh,
                   or Nd (seconds, minutes, hours, days).
 

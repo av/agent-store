@@ -295,6 +295,8 @@ case "$case_name" in
     add_help=$(run_agent_store schedule add --help)
     echo "$add_help" | grep -q "at"
     echo "$add_help" | grep -q "every"
+    echo "$add_help" | grep -qF "2026-07-10T15:00:00Z"
+    echo "$add_help" | grep -qF "2026-07-10T17:00:00+02:00"
     ;;
 
   schedule_at_timestamp_validation)

@@ -417,7 +417,8 @@
 - label: agent-store ctx and ctx --json include schedule_summary with active/completed counts and next_run_at when schedules exist
   command: bash tests/facts/cli_schedules.sh schedule_ctx_integration
   tags: [implemented]
-- label: agent-store schedule --help and schedule add --help document all subcommands including tick, enable, disable, at, and every
+- label: agent-store schedule --help and schedule add --help document all subcommands including tick, enable, disable, at, and every; schedule add --help lists the accepted at time forms: a date, a UTC timestamp and a timestamp with a ±HH:MM offset (2026-07-10, 2026-07-10T15:00:00Z, 2026-07-10T17:00:00+02:00)
+  id: 6t6
   command: bash tests/facts/cli_schedules.sh schedule_help
   tags: [implemented]
 - label: a Schedule is a stored time-triggered rule with a generated ID, kind (at or every), expression, optional interval_seconds, optional query, bash command, next_run_at, status, and created_at; a ScheduleRun persists one execution result
