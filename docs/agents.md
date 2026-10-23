@@ -42,9 +42,10 @@ never touches the rest of the file:
 ```markdown
 <!-- agent-store:start -->
 ## agent-store
-- Run `agent-store init` before using the project-local store.
-- Use `agent-store create <kind> key=value...` to store records and `agent-store find <query>` to retrieve them.
-- Use `agent-store ctx` for a compact project summary, and read the installed `agent-store` skills for workflow guidance.
+This project keeps its cross-session memory in agent-store, a queryable record store in `.agent-store/`.
+- At session start, run `agent-store ctx` to see recorded decisions, tasks and notes. Run `agent-store init` only if it reports that no store was found.
+- Record decisions, tasks and handoff notes in the store rather than in this file, e.g. `agent-store create decision area=<topic> choice=<what> reason=<why>` or `agent-store create task title=<what> status=pending`.
+- Look things up with `agent-store find <query>` (e.g. `agent-store find kind=decision area=auth`); the installed `agent-store` skills have the full workflow.
 <!-- agent-store:end -->
 ```
 
@@ -60,13 +61,12 @@ session and recalling it in the next through the store:
 | Codex | `.agents/skills/` | `AGENTS.md` |
 | Cursor (`cursor-agent`) | `.claude/skills/` | `AGENTS.md` and `CLAUDE.md` |
 
-The two skill directories cover all three agents. Claude Code is the one
-that benefits most from the instructions block: in a repo with the skills
-but no `CLAUDE.md`, it used the store in 8 of 12 test runs; in the other
-4 it saw the skills but wrote the decision into a new `CLAUDE.md` (once
-into its own memory) instead. Codex and Cursor used the store from the
-skills alone, and all three used it every time once the block was in
-place.
+The two skill directories cover all three agents. Each skill's
+`description` says when to use it (remembering a decision or task for
+later sessions, session start, handoff), so all three agents used the
+store from the skills alone, in a repo with no `AGENTS.md` or
+`CLAUDE.md`. The instructions block adds the session-start step: with
+it, agents run `agent-store ctx` before they start working.
 
 ## Fresh repo: create the instruction files, then re-run `init`
 
@@ -114,9 +114,10 @@ into whatever instructions file your agent reads.
 
 ## Making it a habit
 
-The block tells agents the store exists. To make them use it every
-session, add your own lines outside the managed block. They work in
-both `AGENTS.md` and `CLAUDE.md`:
+The block tells agents to run `ctx` at session start and to record
+decisions and tasks in the store. To make that stricter, add your own
+lines outside the managed block. They work in both `AGENTS.md` and
+`CLAUDE.md`:
 
 ```markdown
 ## Project memory

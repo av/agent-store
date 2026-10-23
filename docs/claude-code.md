@@ -55,15 +55,16 @@ kept and reported (delete it and re-run `init` to get the current wording):
 ```markdown
 <!-- agent-store:start -->
 ## agent-store
-- Run `agent-store init` before using the project-local store.
-- Use `agent-store create <kind> key=value...` to store records and `agent-store find <query>` to retrieve them.
-- Use `agent-store ctx` for a compact project summary, and read the installed `agent-store` skills for workflow guidance.
+This project keeps its cross-session memory in agent-store, a queryable record store in `.agent-store/`.
+- At session start, run `agent-store ctx` to see recorded decisions, tasks and notes. Run `agent-store init` only if it reports that no store was found.
+- Record decisions, tasks and handoff notes in the store rather than in this file, e.g. `agent-store create decision area=<topic> choice=<what> reason=<why>` or `agent-store create task title=<what> status=pending`.
+- Look things up with `agent-store find <query>` (e.g. `agent-store find kind=decision area=auth`); the installed `agent-store` skills have the full workflow.
 <!-- agent-store:end -->
 ```
 
-That is enough for the agent to use the store when it thinks of it. To
-make recording a habit rather than an option, add your own conventions
-outside the managed block:
+With it, the agent reads the store at session start and records
+decisions and tasks there. To make that stricter, add your own
+conventions outside the managed block:
 
 ```markdown
 ## Project memory
