@@ -47,11 +47,16 @@ line, plus these environment variables:
 | `AGENT_STORE_REL` | link/unlink | the link relation |
 | `AGENT_STORE_TARGET_ID` | link/unlink | the link target record ID |
 | `AGENT_STORE_FIELD` | set/unset of exactly one field | the field key |
-| `AGENT_STORE_KEY` | set/unset of exactly one field | same as `AGENT_STORE_FIELD` |
-| `AGENT_STORE_VALUE` | set/unset of exactly one field | the new value (the old value on unset) |
 | `AGENT_STORE_OLD_VALUE` | set/unset of exactly one field | the previous value (empty when the field did not exist) |
 | `AGENT_STORE_NEW_VALUE` | set/unset of exactly one field | the new value (empty on unset) |
 | `AGENT_STORE_HOOK_DEPTH` | always | hook nesting depth (`1` for a hook fired by a top-level command) |
+
+Two older names are still set for hooks written against them:
+`AGENT_STORE_KEY` is the same as `AGENT_STORE_FIELD`, and
+`AGENT_STORE_VALUE` is the new value on `set` but the removed value on
+`unset`. New hooks should use `AGENT_STORE_FIELD`,
+`AGENT_STORE_OLD_VALUE` and `AGENT_STORE_NEW_VALUE`, whose meaning does
+not change with the event.
 
 Example — log field transitions:
 
