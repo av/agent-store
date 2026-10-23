@@ -35,15 +35,15 @@ The optional query uses the [query language](queries.md) and scopes the
 schedule to matching records, exactly like a hook query.
 
 ```sh
-$ agent-store schedule add every 1h 'kind=task and status=open' -- 'echo "still open: $AGENT_STORE_ID"'
-p2yrj0
+$ agent-store schedule add every 1h 'kind=task and status=pending' -- 'echo "still open: $AGENT_STORE_ID"'
+9madjt
 
 $ agent-store schedule add at 5m -- 'echo one-shot'
-fxmtm9
+jrxm72
 
 $ agent-store schedule ls
-p2yrj0 every 1h next=2026-10-23T03:36:12.391Z status=active query='kind=task and status=open' -- 'echo "still open: $AGENT_STORE_ID"'
-fxmtm9 at 5m next=2026-10-23T02:41:12.405Z status=active -- 'echo one-shot'
+9madjt every 1h next=2026-10-23T06:41:10.454Z status=active query='kind=task and status=pending' -- 'echo "still open: $AGENT_STORE_ID"'
+jrxm72 at 5m next=2026-10-23T05:46:10.469Z status=active -- 'echo one-shot'
 ```
 
 `rm` accepts any unambiguous ID prefix, like record commands do.
@@ -81,11 +81,12 @@ overlapping ticks never run the same due schedule twice.
   empty.
 
 Tick prints one summary line per command run (nothing when nothing was
-due):
+due). Once the recurring schedule above is due, with one pending task in
+the store:
 
 ```sh
 $ agent-store schedule tick
-2 2026-07-12T13:30:51.069Z schedule=psed0g record=zn1wjl exit=0
+2 2026-10-23T05:41:11.780Z schedule=9madjt record=ybzveu exit=0
 ```
 
 ## Crontab integration
@@ -150,17 +151,17 @@ newest first (20 by default, `--limit <N>` to override);
 
 ```sh
 $ agent-store schedule runs
-2 2026-07-12T13:30:51.069Z schedule=psed0g record=zn1wjl exit=0
-1 2026-07-12T13:30:40.783Z schedule=u8clmz exit=0
+2 2026-10-23T05:41:11.780Z schedule=9madjt record=ybzveu exit=0
+1 2026-10-23T05:41:10.523Z schedule=jrxm72 exit=0
 
 $ agent-store schedule runs 2
 run: 2
-created_at: 2026-07-12T13:30:51.069Z
-schedule: psed0g
-record: zn1wjl
+created_at: 2026-10-23T05:41:11.780Z
+schedule: 9madjt
+record: ybzveu
 exit_status: 0
 stdout:
-still open: zn1wjl
+still open: ybzveu
 
 stderr:
 ```
