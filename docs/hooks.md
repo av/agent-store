@@ -83,7 +83,17 @@ never undoes it. The triggering command still prints its normal stdout
 output (the record ID, or the JSON envelope in `--json` mode), then
 reports the hook failure on stderr and exits non-zero (`1`). Scripts that
 capture stdout always get the ID; check the exit status and stderr to
-detect hook failures.
+detect hook failures:
+
+```sh
+$ agent-store create note text=hi
+orgj96
+error: failed to run hooks after Store mutation already committed for create orgj96: hook 8vz0lt command 'exit 3' failed with exit status 3; stderr: 
+```
+
+Exit 1 here does not mean the mutation failed: the record exists. Do not
+retry a `create` that printed an ID, or you get a second record; fix or
+remove the hook (`hook ls`, `hook rm`) instead.
 
 ## Inspecting runs
 
