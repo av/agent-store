@@ -12,12 +12,12 @@
 **Your coding agent forgets everything when the session ends.** Decisions made, dead ends explored, conventions discovered — all re-derived (or contradicted) next time, burning context on rediscovery. `agent-store` gives agents persistent memory that lives inside the repo, as a CLI any agent can already use:
 
 ```sh
-$ agent-store create decision area=http choice=reqwest reason="rustls default, no openssl build dep"
-9kuvgz
+$ agent-store create decision area=http choice=reqwest reason="no openssl dep"
+w4054s
 
 # ...weeks and many sessions later, before touching HTTP code:
 $ agent-store find kind=decision area=http
-9kuvgz decision area=http choice=reqwest reason='rustls default, no openssl build dep'
+w4054s decision area=http choice=reqwest reason='no openssl dep'
 ```
 
 ![agent-store demo: init, create records, query with the find language, update with set, ctx summary](https://raw.githubusercontent.com/av/agent-store/master/assets/demo.gif)
@@ -76,10 +76,10 @@ Installed .claude/skills/agent-store-pipelines/SKILL.md
 No AGENTS.md or CLAUDE.md found; create one and re-run `agent-store init` to add the instructions block
 
 $ agent-store create task title="ship v0.1" status=pending
-7f0owa
+fvyapu
 
-$ agent-store set 7f0owa status=done
-Updated 7f0owa
+$ agent-store set fvyapu status=done
+Updated fvyapu
 
 $ agent-store ctx
 Quick Context
@@ -90,9 +90,9 @@ Record kinds:
     status: done=1
 Hooks: 0
 Schedules: none
-Latest activity: 2026-08-02T19:10:30.437Z
+Latest activity: 2026-10-23T02:36:10.018Z
 Recent records:
-  7f0owa task status=done title='ship v0.1'
+  fvyapu task status=done title='ship v0.1'
 ```
 
 `init` creates `.agent-store/` (and gitignores it), installs the builtin skills into `.agents/skills/` and `.claude/skills/`, and adds managed agent-store instructions to existing `AGENTS.md` and `CLAUDE.md` files. `ctx` is what an agent runs at session start: the whole store, summarized, in one block that never outgrows its budget.
@@ -105,12 +105,12 @@ You run `init` once. From then on the agent finds everything itself: the install
 
 ```sh
 # Session 1 — the reqwest decision from the top of this page, plus the follow-up work:
-$ agent-store create decision area=http choice=reqwest reason="rustls default, no openssl build dep"
-9kuvgz
+$ agent-store create decision area=http choice=reqwest reason="no openssl dep"
+w4054s
 $ agent-store create task title="Migrate HTTP client to reqwest" status=pending
-wau740
-$ agent-store link wau740 implements 9kuvgz
-Linked wau740 implements 9kuvgz
+ff14fh
+$ agent-store link ff14fh implements w4054s
+Linked ff14fh implements w4054s
 ```
 
 The session ends. The context window is gone; the records are not. Days later, the next session opens with `ctx`:
@@ -128,11 +128,11 @@ Links: 1
   implements: 1
 ...
 Recent records:
-  wau740 task status=pending title='Migrate HTTP client to reqwest'
-  9kuvgz decision area=http choice=reqwest reason='rustls default, no openssl build dep'
+  ff14fh task status=pending title='Migrate HTTP client to reqwest'
+  w4054s decision area=http choice=reqwest reason='no openssl dep'
 ```
 
-The agent sees the pending migration and the reasoning behind it without being told, finishes the work, and runs `agent-store set wau740 status=done`. No re-discovery, no contradicted decisions.
+The agent sees the pending migration and the reasoning behind it without being told, finishes the work, and runs `agent-store set ff14fh status=done`. No re-discovery, no contradicted decisions.
 
 For the full walkthrough — Claude Code setup, `SessionStart` hook that injects `ctx` automatically, CLAUDE.md conventions — see [Using agent-store with Claude Code](docs/claude-code.md).
 
@@ -205,7 +205,7 @@ Every command supports `--json` for structured output, and exports round-trip �
 
 ```sh
 $ agent-store find kind=task --json
-{"records":[{"created_at":"2026-07-03T09:16:49.608Z","fields":{"status":"done","title":"ship v0.1"},"id":"7f0owa","kind":"task","updated_at":"2026-07-03T09:16:49.612Z"}]}
+{"records":[{"created_at":"2026-10-23T02:36:08.004Z","fields":{"status":"done","title":"ship v0.1"},"id":"fvyapu","kind":"task","updated_at":"2026-10-23T02:36:10.018Z"}]}
 ```
 
 Scripting behaves the way a shell expects: results on stdout, errors on stderr, nonzero exit on failure (a `get` on a missing ID exits 1; an empty `find` still exits 0 with `{"records":[]}`). Envelope shapes, import validation, and the linked-store caveat: [JSON output and import](docs/json.md).
