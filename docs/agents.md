@@ -136,10 +136,12 @@ To check what an agent recorded, run `agent-store ctx` or
 
 ## After upgrading agent-store
 
-Re-running `init` adds anything missing and never touches your records,
-a skill file you edited, or the rest of `AGENTS.md` / `CLAUDE.md`. To
-get the current skills or block after upgrading the binary, see
-[Skills and agent integration](skills.md#updating).
+Re-run `agent-store init` in each project after upgrading the binary. It
+adds anything missing and refreshes skill files and the instructions
+block you have not edited; your records, a skill file or block you
+edited, and the rest of `AGENTS.md` / `CLAUDE.md` are never touched. See
+[Skills and agent integration](skills.md#updating) for replacing an
+edited copy.
 
 See also: [Skills and agent integration](skills.md) for what each skill
 covers; [Concepts](concepts.md) for records, links, queries and `ctx`.

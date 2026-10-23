@@ -130,7 +130,9 @@ cargo install --force --git https://github.com/av/agent-store                   
 
 `agent-store --version` tells you what you're on. The Homebrew tap still
 ships v0.1.0, so `brew upgrade` does not reach the latest release yet. On
-Windows, re-run the PowerShell block above with the new tag.
+Windows, re-run the PowerShell block above with the new tag. Then re-run
+`agent-store init` in each project to refresh the skills and instructions
+block you have not edited ([details](skills.md#updating)).
 
 What lives where, for a clean uninstall. Do the first item before you
 remove the binary:
