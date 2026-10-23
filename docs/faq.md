@@ -127,7 +127,7 @@ Greppable: the default output is one line per record (`id kind key=value ...`),
 so `agent-store find | grep` works, and `find --json | jq` gives you the full
 structure. For portability, export everything as JSONL with
 `agent-store find --json | jq -c '.records[]'` and re-import into any store
-with `create --stdin` (see [docs/json.md](json.md)).
+with `create --stdin` (see [JSON output and import](json.md)).
 
 `init` adds `.agent-store/` to your `.gitignore` by default — the store is
 local working memory, not a committed artifact. Delete the directory and the
@@ -152,7 +152,7 @@ it can use the store. If it can't, agent-store won't work for you.
 
 ## What happens when multiple agents write at once?
 
-It works, within SQLite's model. Concretely (see `src/store.rs`):
+It works, within SQLite's model. Concretely:
 
 - The database runs in WAL mode, so readers never block on a writer.
 - Writers serialize; a 5-second busy timeout plus bounded open-retry with
@@ -161,7 +161,9 @@ It works, within SQLite's model. Concretely (see `src/store.rs`):
   persisted separately, so a slow or failing hook can't hold the write lock
   or roll back a committed mutation.
 
-This is tested, not aspirational: `concurrency.facts` pins a suite of
+This is tested, not aspirational: the repository's
+[concurrency spec](https://github.com/av/agent-store/blob/master/concurrency.facts)
+pins a suite of
 concurrent-race facts (parallel mutations with hooks, readers during
 mutation storms, hook add/rm churn, ID-prefix resolution races), each backed
 by a runnable stress test. A quick sanity check — 20 parallel `create`
@@ -177,7 +179,7 @@ that's outside scope (export/import via JSONL is the workaround).
 ## Is my data sent anywhere?
 
 No. There is no network code and no network-capable dependency. The complete
-dependency list (`Cargo.toml`): `libc`, `rand`, `rusqlite` (with bundled
+dependency list ([`Cargo.toml`](https://github.com/av/agent-store/blob/master/Cargo.toml)): `libc`, `rand`, `rusqlite` (with bundled
 SQLite), `serde_json`. No HTTP client, no telemetry, no analytics, no phoning
 home. Everything happens in one local file. The one caveat: hooks run
 arbitrary shell commands *you* register, so a hook can do whatever the shell
