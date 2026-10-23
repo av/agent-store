@@ -32,8 +32,8 @@ The three SVGs are the source of truth; every raster asset is generated from the
 | `favicon.png` | 128x128 raster of the mark with the theme-neutral favicon palette baked in (see below). | Fallback for contexts that need a raster favicon |
 | `favicon.ico` | Multi-size 16/32/48, same theme-neutral palette. | Served at `/assets/favicon.ico` on the docs site for older browsers |
 | `social-preview.svg` / `social-preview.png` | 1280x640 dark card: lockup (dark palette baked in) + tagline + feature line on `#0d1117`. The SVG is the source (tagline text as paths, no font dependency); the PNG is its raster. | GitHub Settings > General > Social preview (manual upload — not read from the repo); also used by link unfurls (Slack/Discord/X) |
-| `demo.sh` / `demo.gif` | Scripted README demo recording (init/create/find/set/ctx basics). | `README.md` header |
-| `demo-hooks.sh` / `demo-hooks.gif` | Scripted demo of links, hooks firing on `set`, and `ctx`. Recipe in the script header (same asciinema + agg theme as `demo.sh`). | `README.md` Hooks section |
+| `demo.sh` / `demo.gif` | Scripted README demo recording (init/create/find/set/ctx basics). 70 columns so it stays legible at phone width. | `README.md` header |
+| `demo-hooks.sh` / `demo-hooks.gif` | Scripted demo of links, a hook firing on `set` (`hook runs`, the event record it created), and `ctx`. Recipe in the script header (same asciinema + agg theme as `demo.sh`). | `README.md` Hooks section |
 
 ## Design notes
 
@@ -71,6 +71,8 @@ magick -density 96 assets/social-preview.svg assets/social-preview.png
 # agent-store silently changes the output. Both scripts print their first
 # command instantly (no typing lead-in) so the GIF's opening frame shows
 # content; keep that when editing, since README GIFs autoplay from frame 0.
+# Keep every line within the 70-column recording: GitHub scales the GIF to
+# the phone's width, so wider recordings become illegible on mobile.
 ```
 
 Note on minification: `svgo` inlines the theme classes and drops the dark-mode
