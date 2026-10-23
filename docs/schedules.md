@@ -36,14 +36,14 @@ schedule to matching records, exactly like a hook query.
 
 ```sh
 $ agent-store schedule add every 1h 'kind=task and status=open' -- 'echo "still open: $AGENT_STORE_ID"'
-npqxhk
+p2yrj0
 
 $ agent-store schedule add at 5m -- 'echo one-shot'
-237gj1
+fxmtm9
 
 $ agent-store schedule ls
-237gj1 at 5m next=2026-07-12T13:35:40.759Z status=active -- 'echo one-shot'
-npqxhk every 1h next=2026-07-12T14:30:40.760Z status=active query='kind=task and status=open' -- 'echo "still open: $AGENT_STORE_ID"'
+p2yrj0 every 1h next=2026-10-23T03:36:12.391Z status=active query='kind=task and status=open' -- 'echo "still open: $AGENT_STORE_ID"'
+fxmtm9 at 5m next=2026-10-23T02:41:12.405Z status=active -- 'echo one-shot'
 ```
 
 `rm` accepts any unambiguous ID prefix, like record commands do.

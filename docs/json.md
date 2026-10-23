@@ -9,18 +9,18 @@ Single-record commands (`get`, `create`, `set`, `unset`, `rm`) wrap the
 record in `{"record": ...}`; mutations add a `status`:
 
 ```sh
-$ agent-store --json get 7f0owa
-{"record":{"created_at":"2026-07-03T09:16:49.608Z","fields":{"status":"done","title":"ship v0.1"},"id":"7f0owa","kind":"task","updated_at":"2026-07-03T09:16:49.612Z"}}
+$ agent-store --json get fvyapu
+{"record":{"created_at":"2026-10-23T02:36:08.004Z","fields":{"status":"done","title":"ship v0.1"},"id":"fvyapu","kind":"task","updated_at":"2026-10-23T02:36:10.018Z"}}
 
-$ agent-store --json set 7f0owa status=done
-{"record":{...},"status":"updated"}      # "created" / "removed" for create / rm
+$ agent-store --json set fvyapu priority=1
+{"record":{...},"status":"updated"}      # "created" / "removed" for create / rm; "unchanged" when a set or unset changes nothing
 ```
 
 List commands wrap records in `{"records":[...]}`:
 
 ```sh
 $ agent-store --json find kind=task
-{"records":[{"created_at":"...","fields":{...},"id":"7f0owa","kind":"task","updated_at":"..."}]}
+{"records":[{"created_at":"...","fields":{...},"id":"fvyapu","kind":"task","updated_at":"..."}]}
 ```
 
 Other envelopes: `links <id>` emits `{"links":[{"direction","rel","record_id"}],"record_id"}`;
