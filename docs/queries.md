@@ -92,6 +92,16 @@ agent-store find 'link.out=blocks'    # m4n3mi
 agent-store find 'link.in=blocks'     # 1ztocm
 ```
 
+`link.out.<rel>=<id>` and `link.in.<rel>=<id>` also pin the record on the
+other end: records with a `<rel>` link to `<id>`, or from `<id>`. The ID
+must be the full record ID (prefixes do not resolve inside a query):
+
+```sh
+agent-store find 'link.out.blocks=1ztocm'   # m4n3mi: what blocks 1ztocm
+agent-store find 'link.in.blocks=m4n3mi'    # 1ztocm: what m4n3mi blocks
+agent-store find 'kind=bug and link.out.blocks=1ztocm'
+```
+
 ## Sorting and limits
 
 `find`/`ls` also take:
