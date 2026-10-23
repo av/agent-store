@@ -136,43 +136,44 @@ What lives where, for a clean uninstall. Do the first item before you
 remove the binary:
 
 - **Scheduled jobs** — if you ran `agent-store schedule enable` in a
-  project, it installed a crontab entry for that project (a
-  `# agent-store:tick:<project-root>` comment plus the line after it).
-  Run `agent-store schedule disable` in each such project first. If the
-  binary is already gone, delete those two lines with `crontab -e`.
+    project, it installed a crontab entry for that project (a
+    `# agent-store:tick:<project-root>` comment plus the line after it).
+    Run `agent-store schedule disable` in each such project first. If the
+    binary is already gone, delete those two lines with `crontab -e`.
 - **Binary** — the installer puts it at `~/.local/bin/agent-store` (or
-  `$AGENT_STORE_INSTALL_DIR`); `rm` it. Otherwise
-  `brew uninstall av/tap/agent-store`, `nix profile remove agent-store`,
-  or `cargo uninstall agent-store-cli` (the crate is `agent-store-cli`;
-  the binary is `agent-store`). On Windows, delete the install directory
-  and drop it from your user `PATH`:
+    `$AGENT_STORE_INSTALL_DIR`); `rm` it. Otherwise
+    `brew uninstall av/tap/agent-store`, `nix profile remove agent-store`,
+    or `cargo uninstall agent-store-cli` (the crate is `agent-store-cli`;
+    the binary is `agent-store`). On Windows, delete the install directory
+    and drop it from your user `PATH`:
 
-  ```powershell
-  $dir = "$env:LOCALAPPDATA\Programs\agent-store"
-  Remove-Item -Recurse -Force $dir
-  $path = ([Environment]::GetEnvironmentVariable("Path", "User") -split ';' | Where-Object { $_ -and $_ -ne $dir }) -join ';'
-  [Environment]::SetEnvironmentVariable("Path", $path, "User")
-  ```
+    ```powershell
+    $dir = "$env:LOCALAPPDATA\Programs\agent-store"
+    Remove-Item -Recurse -Force $dir
+    $path = ([Environment]::GetEnvironmentVariable("Path", "User") -split ';' | Where-Object { $_ -and $_ -ne $dir }) -join ';'
+    [Environment]::SetEnvironmentVariable("Path", $path, "User")
+    ```
+
 - **Man page and completions** — only present if you copied them per the
-  section above (or via Homebrew/Nix, which remove them with the
-  package). Delete the copied files from `~/.local/share/man/man1/` and
-  your completion directories.
+    section above (or via Homebrew/Nix, which remove them with the
+    package). Delete the copied files from `~/.local/share/man/man1/` and
+    your completion directories.
 - **Your data** — stores are per-project in each project's
-  `.agent-store/` directory (`init` adds an `.agent-store/` line to the
-  project's `.gitignore`, which you can delete). Apart from the crontab
-  entries above, there is no global state, config, or cache. Removing the
-  binary loses no data, and
-  deleting a project's `.agent-store/` deletes that project's records —
-  export first with `agent-store find --json | jq -c '.records[]'` if
-  you want a backup (see [JSON output and import](json.md)).
+    `.agent-store/` directory (`init` adds an `.agent-store/` line to the
+    project's `.gitignore`, which you can delete). Apart from the crontab
+    entries above, there is no global state, config, or cache. Removing the
+    binary loses no data, and
+    deleting a project's `.agent-store/` deletes that project's records —
+    export first with `agent-store find --json | jq -c '.records[]'` if
+    you want a backup (see [JSON output and import](json.md)).
 - **`init` artifacts** — in projects where you ran `init`: skill files
-  under `.agents/skills/` and `.claude/skills/` (the three
-  `agent-store*` directories in each), and a managed block in
-  `AGENTS.md`/`CLAUDE.md` between `<!-- agent-store:start -->` and
-  `<!-- agent-store:end -->` markers. Delete those skill directories and
-  the marked block to fully remove them; this leaves empty
-  `.agents/skills/` and `.claude/skills/` directories (and possibly
-  `.agents/` and `.claude/`), which you can remove too.
+    under `.agents/skills/` and `.claude/skills/` (the three
+    `agent-store*` directories in each), and a managed block in
+    `AGENTS.md`/`CLAUDE.md` between `<!-- agent-store:start -->` and
+    `<!-- agent-store:end -->` markers. Delete those skill directories and
+    the marked block to fully remove them; this leaves empty
+    `.agents/skills/` and `.claude/skills/` directories (and possibly
+    `.agents/` and `.claude/`), which you can remove too.
 
 Installed? Next: [Claude Code tutorial](claude-code.md) —
 the end-to-end workflow the install exists for.

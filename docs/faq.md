@@ -80,31 +80,32 @@ No. The store is a gitignored file in one checkout on one machine, and
 nothing syncs it anywhere.
 
 - **A `git worktree`** is a separate directory, so it starts without a
-  store (`no agent-store found`). To share the main checkout's store,
-  link it into the worktree, and keep the link out of `git status` (the
-  `.agent-store/` line in `.gitignore` only matches a directory):
+    store (`no agent-store found`). To share the main checkout's store,
+    link it into the worktree, and keep the link out of `git status` (the
+    `.agent-store/` line in `.gitignore` only matches a directory):
 
-  ```sh
-  ln -s /path/to/main-checkout/.agent-store .agent-store
-  echo .agent-store >> "$(git rev-parse --git-common-dir)/info/exclude"
-  ```
+    ```sh
+    ln -s /path/to/main-checkout/.agent-store .agent-store
+    echo .agent-store >> "$(git rev-parse --git-common-dir)/info/exclude"
+    ```
 
-  Both checkouts then read and write the same SQLite file, with the same
-  concurrency guarantees as agents in one directory.
+    Both checkouts then read and write the same SQLite file, with the same
+    concurrency guarantees as agents in one directory.
+
 - **A fresh clone, CI job, devcontainer or cloud sandbox** (Codex cloud
-  tasks, Cursor background agents, Claude Code on the web) starts from
-  the repository, so it has no store, and anything recorded there is lost
-  with the sandbox. To seed one, export the records to a file you commit
-  or copy in, and import them there:
+    tasks, Cursor background agents, Claude Code on the web) starts from
+    the repository, so it has no store, and anything recorded there is lost
+    with the sandbox. To seed one, export the records to a file you commit
+    or copy in, and import them there:
 
-  ```sh
-  agent-store find --json | jq -c '.records[]' > memory.jsonl
-  # in the clone or sandbox:
-  agent-store init && agent-store create --stdin < memory.jsonl
-  ```
+    ```sh
+    agent-store find --json | jq -c '.records[]' > memory.jsonl
+    # in the clone or sandbox:
+    agent-store init && agent-store create --stdin < memory.jsonl
+    ```
 
-  Imported records keep their kind and fields but get new IDs, and links
-  are not carried (see [JSON output and import](json.md)).
+    Imported records keep their kind and fields but get new IDs, and links
+    are not carried (see [JSON output and import](json.md)).
 
 ## Where is my data? Can I inspect it?
 
