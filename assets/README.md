@@ -32,8 +32,10 @@ The three SVGs are the source of truth; every raster asset is generated from the
 | `favicon.png` | 128x128 raster of the mark with the theme-neutral favicon palette baked in (see below). | Fallback for contexts that need a raster favicon |
 | `favicon.ico` | Multi-size 16/32/48, same theme-neutral palette. | Served at `/assets/favicon.ico` on the docs site for older browsers |
 | `social-preview.svg` / `social-preview.png` | 1280x640 dark card: lockup (dark palette baked in) + the canonical tagline in two lines ("Persistent, queryable memory for coding agents" / "one binary, one SQLite file in your repo, no server") on `#0d1117`. The SVG is the source (tagline text as paths, no font dependency); the PNG is its raster. | GitHub Settings > General > Social preview (manual upload — not read from the repo); also used by link unfurls (Slack/Discord/X) |
-| `demo.sh` / `demo.gif` | Scripted README demo recording (touch AGENTS.md CLAUDE.md, init, create/find/set/ctx basics). 70x22 so it stays legible at phone width without a mostly empty frame. | `README.md` header |
-| `demo-hooks.sh` / `demo-hooks.gif` | Scripted demo of links, a hook firing on `set` (`hook runs`, the event record it created), and `links`; short enough that the last frame shows the whole run. Recipe in the script header (same asciinema + agg theme as `demo.sh`). | `README.md` Hooks section |
+| `demo.sh` / `demo.gif` | Scripted README demo recording (touch AGENTS.md CLAUDE.md, init, create/find/set/ctx basics), 70x22. | `README.md` header, screens wider than 600 px |
+| `demo-phone.sh` / `demo-phone.gif` | The same flow in short form for phones (records, find, set, ctx), 50x19 with every line within 48 characters, so a 390 px phone shows ~14 px text lines; the opening frame already holds the records and queries. | `README.md` header, screens up to 600 px (`<picture>` `media="(max-width: 600px)"`) |
+| `demo-hooks.sh` / `demo-hooks.gif` | Scripted demo of links, a hook firing on `set` (`hook runs`, the event record it created), and `links`; short enough that the last frame shows the whole run. Recipe in the script header (same asciinema + agg theme as `demo.sh`). | `README.md` Hooks section, screens wider than 600 px |
+| `demo-hooks-phone.sh` / `demo-hooks-phone.gif` | The hooks demo in short form for phones (link, hook add, set, the event, links), 50x19; the opening frame holds the setup up to `hook add`. | `README.md` Hooks section, screens up to 600 px |
 
 ## Design notes
 
@@ -73,8 +75,14 @@ magick -density 96 assets/social-preview.svg assets/social-preview.png
 # agent-store silently changes the output. Both scripts print their first
 # command instantly (no typing lead-in) so the GIF's opening frame shows
 # content; keep that when editing, since README GIFs autoplay from frame 0.
-# Keep every line within the 70-column recording: GitHub scales the GIF to
-# the phone's width, so wider recordings become illegible on mobile.
+# Keep every line within the 70-column recording (48 characters in the
+# 50-column phone variants demo-phone.sh / demo-hooks-phone.sh): GitHub
+# scales a GIF to the page width, so wider recordings become illegible. The
+# README embeds each pair as <picture><source media="(max-width: 600px)"
+# srcset=...-phone.gif><img src=....gif></picture>; re-render both GIFs of a
+# pair when the flow or the CLI output changes. The phone scripts print their
+# opening commands in one write and agg renders from it (--select event:0..),
+# so frame 0 is mostly filled.
 ```
 
 Note on minification: `svgo` inlines the theme classes and drops the dark-mode

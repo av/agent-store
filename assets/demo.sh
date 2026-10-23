@@ -7,9 +7,10 @@
 #     --theme 161b22,f0f6fc,484f58,ff7b72,3fb950,d29922,58a6ff,bc8cff,39c5cf,b1bac4,6e7681,ffa198,56d364,e3b341,79c0ff,d2a8ff,56d4dd,f0f6fc \
 #     demo.cast assets/demo.gif
 #
-# 70 columns keep the text readable when GitHub scales the GIF to a phone's
-# width: keep every command and output line within 70 characters, and break
-# long commands at a word with a `\` continuation.
+# Keep every command and output line within 70 characters, and break long
+# commands at a word with a `\` continuation. Phones get demo-phone.gif
+# instead (demo-phone.sh, 50 columns): at a 390 px phone width this 70-column
+# GIF scales to ~7 px text.
 #
 # Requires `agent-store` on PATH. Runs in a temp directory.
 set -euo pipefail

@@ -8,7 +8,8 @@
 #     demo-hooks.cast assets/demo-hooks.gif
 #
 # Same 70-column limit as demo.sh: keep every line within 70 characters and
-# break long commands at a word with a `\` continuation.
+# break long commands at a word with a `\` continuation. Phones get
+# demo-hooks-phone.gif instead (demo-hooks-phone.sh, 50 columns).
 #
 # Requires `agent-store` on PATH. Runs in a temp directory.
 set -euo pipefail
