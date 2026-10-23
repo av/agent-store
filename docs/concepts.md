@@ -42,11 +42,11 @@ Kinds are just names you choose (`task`, `decision`, `note`, `finding`,
 anything), and each kind's fields are whatever you set on its records:
 
 ```sh
-$ agent-store create decision area=http choice=reqwest reason="rustls default, no openssl build dep"
-q2n3rt
+$ agent-store create decision area=http choice=reqwest reason="no openssl dep"
+z6wei1
 
 $ agent-store create task title="Migrate HTTP client to reqwest" status=pending priority=2
-ovlkqa
+krf5fg
 ```
 
 `create` prints the new record's ID. IDs are short and
@@ -54,8 +54,8 @@ ovlkqa
 takes an ID:
 
 ```sh
-$ agent-store get ov
-ovlkqa task priority=2 status=pending title='Migrate HTTP client to reqwest'
+$ agent-store get kr
+krf5fg task priority=2 status=pending title='Migrate HTTP client to reqwest'
 ```
 
 Records mutate atomically with `set` (add or change fields) and `unset`
@@ -63,11 +63,11 @@ Records mutate atomically with `set` (add or change fields) and `unset`
 timestamps maintained for you:
 
 ```sh
-$ agent-store set ov status=in-progress
-Updated ovlkqa
+$ agent-store set kr status=in-progress
+Updated krf5fg
 
-$ agent-store get ov --timestamps
-ovlkqa task priority=2 status=in-progress title='Migrate HTTP client to reqwest' created_at=2026-07-03T22:07:01.990Z updated_at=2026-07-03T22:07:09.945Z
+$ agent-store get kr --timestamps
+krf5fg task priority=2 status=in-progress title='Migrate HTTP client to reqwest' created_at=2026-10-23T02:36:10.097Z updated_at=2026-10-23T02:36:12.118Z
 ```
 
 `unset` takes the names of the fields to remove. `rm` deletes the record
@@ -76,19 +76,19 @@ kept); after that, `get` fails and exits 1:
 
 ```sh
 $ agent-store create note text="try ureq instead?" status=draft
-o2co2e
+swnpqx
 
-$ agent-store unset o2c status
-Updated o2co2e
+$ agent-store unset swn status
+Updated swnpqx
 
-$ agent-store get o2c
-o2co2e note text='try ureq instead?'
+$ agent-store get swn
+swnpqx note text='try ureq instead?'
 
-$ agent-store rm o2c
-Removed o2co2e
+$ agent-store rm swn
+Removed swnpqx
 
-$ agent-store get o2co2e
-error: failed to get record: record 'o2co2e' was not found
+$ agent-store get swnpqx
+error: failed to get record: record 'swnpqx' was not found
 ```
 
 Field values are stored as the text you typed, but they are **typed by
@@ -102,29 +102,29 @@ A link is a **directional, named edge** between two records:
 `<from> <relation> <to>`. Relations are free-form names, like kinds:
 
 ```sh
-$ agent-store link ovlkqa implements q2n3rt
-Linked ovlkqa implements q2n3rt
+$ agent-store link krf5fg implements z6wei1
+Linked krf5fg implements z6wei1
 ```
 
 Direction matters. Seen from each end:
 
 ```sh
-$ agent-store links ovlkqa
-out implements q2n3rt
+$ agent-store links krf5fg
+out implements z6wei1
 
-$ agent-store links q2n3rt
-in implements ovlkqa
+$ agent-store links z6wei1
+in implements krf5fg
 ```
 
 `unlink` takes the same three arguments and removes that one edge, for
 example a link made with the wrong relation:
 
 ```sh
-$ agent-store link ovlkqa blocks q2n3rt
-Linked ovlkqa blocks q2n3rt
+$ agent-store link krf5fg blocks z6wei1
+Linked krf5fg blocks z6wei1
 
-$ agent-store unlink ovlkqa blocks q2n3rt
-Unlinked ovlkqa blocks q2n3rt
+$ agent-store unlink krf5fg blocks z6wei1
+Unlinked krf5fg blocks z6wei1
 ```
 
 Links let one record reference another without duplicating its fields —
@@ -134,7 +134,7 @@ and `link.in=<rel>`:
 
 ```sh
 $ agent-store find 'link.in=implements'
-q2n3rt decision area=http choice=reqwest reason='rustls default, no openssl build dep'
+z6wei1 decision area=http choice=reqwest reason='no openssl dep'
 ```
 
 A record cannot link to itself — `link` rejects it with
@@ -158,10 +158,10 @@ The same language scopes hooks (below). The key ideas:
 
 ```sh
 $ agent-store find 'kind=task and status!=done' --sort priority
-ovlkqa task priority=2 status=in-progress title='Migrate HTTP client to reqwest'
+krf5fg task priority=2 status=in-progress title='Migrate HTTP client to reqwest'
 
 $ agent-store find 'reason~=openssl'
-q2n3rt decision area=http choice=reqwest reason='rustls default, no openssl build dep'
+z6wei1 decision area=http choice=reqwest reason='no openssl dep'
 
 $ agent-store find kind=task --count
 1
@@ -185,10 +185,10 @@ plus an optional query scoping it to matching records:
 
 ```sh
 $ agent-store hook add set kind=task -- 'echo "task $AGENT_STORE_ID $AGENT_STORE_FIELD: $AGENT_STORE_OLD_VALUE -> $AGENT_STORE_NEW_VALUE"'
-ufuqza
+wrzhpl
 
-$ agent-store set ov status=done
-Updated ovlkqa
+$ agent-store set kr status=done
+Updated krf5fg
 ```
 
 The mutation commits first; then the hook runs with the record on stdin
@@ -197,17 +197,17 @@ run is recorded and inspectable:
 
 ```sh
 $ agent-store hook runs
-1 2026-07-03T22:07:09.972Z hook=ufuqza event=set record=ovlkqa exit=0
+1 2026-10-23T02:36:12.263Z hook=wrzhpl event=set record=krf5fg exit=0
 
 $ agent-store hook runs 1
 run: 1
-created_at: 2026-07-03T22:07:09.972Z
-hook: ufuqza
+created_at: 2026-10-23T02:36:12.263Z
+hook: wrzhpl
 event: set
-record: ovlkqa
+record: krf5fg
 exit_status: 0
 stdout:
-task ovlkqa status: in-progress -> done
+task krf5fg status: in-progress -> done
 
 stderr:
 ```
@@ -227,12 +227,10 @@ session start — see [the tutorial](claude-code.md)):
 ```sh
 $ agent-store ctx
 Quick Context
-Records: 3
+Records: 2
 Record kinds:
   decision: 1
     fields: area, choice, reason
-  note: 1
-    fields: text
   task: 1
     fields: priority, status, title
     status: done=1
@@ -240,11 +238,10 @@ Links: 1
   implements: 1
 Hooks: 1
 Schedules: none
-Latest activity: 2026-07-03T22:07:09.952Z
+Latest activity: 2026-10-23T02:36:12.235Z
 Recent records:
-  ovlkqa task priority=2 status=done title='Migrate HTTP client to reqwest'
-  xuw2sr note text='CI builds the musl target'
-  q2n3rt decision area=http choice=reqwest reason='rustls default, no openssl build dep'
+  krf5fg task priority=2 status=done title='Migrate HTTP client to reqwest'
+  z6wei1 decision area=http choice=reqwest reason='no openssl dep'
 ```
 
 It shows record counts by kind, each kind's field inventory (with value

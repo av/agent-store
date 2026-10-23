@@ -114,14 +114,14 @@ ev9c7i
 the decision plus the follow-up work:
 
 ```sh
-$ agent-store create decision area=http choice=reqwest reason="rustls default, no openssl build dep"
-pcdk3i
+$ agent-store create decision area=http choice=reqwest reason="no openssl dep"
+8idetm
 
 $ agent-store create task title="Migrate HTTP client to reqwest" status=pending
-jycx1k
+jia3eg
 
-$ agent-store link jycx1k implements pcdk3i
-Linked jycx1k implements pcdk3i
+$ agent-store link jia3eg implements 8idetm
+Linked jia3eg implements 8idetm
 ```
 
 The session ends. The context window is gone; the records are not.
@@ -141,10 +141,11 @@ Record kinds:
 Links: 1
   implements: 1
 Hooks: 0
-Latest activity: 2026-07-03T22:03:44.379Z
+Schedules: none
+Latest activity: 2026-10-23T02:36:12.333Z
 Recent records:
-  jycx1k task status=pending title='Migrate HTTP client to reqwest'
-  pcdk3i decision area=http choice=reqwest reason='rustls default, no openssl build dep'
+  jia3eg task status=pending title='Migrate HTTP client to reqwest'
+  8idetm decision area=http choice=reqwest reason='no openssl dep'
 ```
 
 The agent sees pending work and the reasoning behind it without being
@@ -153,17 +154,17 @@ it can check prior art instead of re-litigating:
 
 ```sh
 $ agent-store find kind=decision area=http
-pcdk3i decision area=http choice=reqwest reason='rustls default, no openssl build dep'
+8idetm decision area=http choice=reqwest reason='no openssl dep'
 ```
 
 It finishes the migration and closes the loop:
 
 ```sh
-$ agent-store set jycx1k status=done
-Updated jycx1k
+$ agent-store set jia3eg status=done
+Updated jia3eg
 ```
 
-Any unambiguous ID prefix works (`agent-store set jyc status=done`), so
+Any unambiguous ID prefix works (`agent-store set jia status=done`), so
 recalled IDs from `ctx` output are cheap to reuse.
 
 ## Troubleshooting
