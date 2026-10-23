@@ -39,3 +39,10 @@
 .md-typeset .md-code__nav {
   background-color: var(--md-code-bg-color);
 }
+
+/* Keep identifiers in table cells whole (AGENT_STORE_EVENT, not
+   AGENT_STOR / E_EVENT on a phone); a too-wide table scrolls instead. */
+.md-typeset table:not([class]) code {
+  white-space: nowrap;
+  word-break: normal;
+}
