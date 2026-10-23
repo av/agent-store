@@ -13,7 +13,7 @@ pub(crate) const SHIPPED_SKILLS: &[(&str, u64)] = &[
     ("agent-store", 0xc2027b6cd5277a1c),           // v0.1.1 - v0.1.2
     ("agent-store-patterns", 0x8e2d9ac99129f99d),  // v0.1.0 - v0.1.2
     ("agent-store-pipelines", 0x0a0f3a891ce76026), // v0.1.0 - v0.1.2
-    ("agent-store", 0x94e528b146a6428a),           // next release
+    ("agent-store", 0x7dc0f399872c53cb),           // next release
     ("agent-store-patterns", 0xf2c8ce83219db817),  // next release
     ("agent-store-pipelines", 0x53823223a43e3abd), // next release
 ];

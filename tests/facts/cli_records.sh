@@ -1117,6 +1117,8 @@ PY
         printf "%s\n" "$core" | grep -Fq "$phrase"
       done
       grep -Fq "handoff" "$root/agent-store-patterns/SKILL.md"
+      grep -Fq "already committed" "$root/agent-store/SKILL.md"
+      grep -Fq "do not retry" "$root/agent-store/SKILL.md"
       grep -Eq "agent-store create decision area=[^ ]+ choice=.+ reason=" "$root/agent-store-patterns/SKILL.md"
       for command in create find get set unset rm link unlink links ctx; do
         cat "$root"/agent-store*/SKILL.md | grep -Eq "agent-store $command( |$)"

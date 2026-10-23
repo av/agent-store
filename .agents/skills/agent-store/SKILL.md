@@ -111,10 +111,15 @@ default-format record line, plus environment variables: `AGENT_STORE_EVENT`
 (create, set, unset, rm, link, or unlink), `AGENT_STORE_ID`, and
 `AGENT_STORE_KIND` are always set. `AGENT_STORE_REL` and
 `AGENT_STORE_TARGET_ID` are set on link/unlink. When a set or unset touches
-exactly one field, `AGENT_STORE_FIELD` and `AGENT_STORE_KEY` hold the field
-key, `AGENT_STORE_VALUE` the new value (the old value on unset), and
+exactly one field, `AGENT_STORE_FIELD` holds the field key and
 `AGENT_STORE_OLD_VALUE`/`AGENT_STORE_NEW_VALUE` the before/after values
-(empty when absent).
+(empty when absent); the older `AGENT_STORE_KEY` and `AGENT_STORE_VALUE` are
+still set for existing hooks.
+
+If a mutation prints its result and then exits 1 with `failed to run hooks
+after Store mutation already committed`, the change was saved and only a
+hook failed: do not retry it (a retried `create` makes a duplicate record).
+Check `agent-store hook runs` and report the failing hook instead.
 
 Schedules run bash commands on a time basis, complementing event-triggered
 hooks. Two kinds: `at` fires once at an absolute timestamp, `every` fires
@@ -126,7 +131,7 @@ match):
 ```bash
 agent-store schedule add every 5m -- 'echo heartbeat'
 agent-store schedule add at 2026-07-07T12:00:00Z -- 'cleanup.sh'
-agent-store schedule add every 1h 'kind=task and status=open' -- 'notify.sh'
+agent-store schedule add every 1h 'kind=task and status=pending' -- 'notify.sh'
 agent-store schedule ls
 agent-store schedule runs            # recent runs; `schedule runs <run-id>` for detail
 agent-store schedule rm <id>
