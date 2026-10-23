@@ -14,7 +14,7 @@ completions, the man page, and upgrade/uninstall.
 The `curl | sh` installer reads two environment variables:
 
 ```sh
-export AGENT_STORE_VERSION=v0.1.2           # this tag, not the latest release
+export AGENT_STORE_VERSION=v0.1.3           # this tag, not the latest release
 export AGENT_STORE_INSTALL_DIR="$HOME/bin"  # this directory, not ~/.local/bin
 curl -fsSL https://raw.githubusercontent.com/av/agent-store/master/install.sh | sh
 ```
@@ -31,7 +31,7 @@ Each release asset has a matching `.sha256` file. Download both into the
 same directory and check:
 
 ```sh
-tag=v0.1.2
+tag=v0.1.3
 target=x86_64-unknown-linux-gnu
 curl -fsSLO "https://github.com/av/agent-store/releases/download/$tag/agent-store-$tag-$target.tar.gz"
 curl -fsSLO "https://github.com/av/agent-store/releases/download/$tag/agent-store-$tag-$target.sha256"
@@ -65,7 +65,7 @@ downloads, verifies the SHA-256 checksum, and extracts (the zip has
 `README.md`, and unix-only `completions/` and `man/`):
 
 ```powershell
-$tag = "v0.1.2"; $base = "agent-store-$tag-x86_64-pc-windows-msvc"
+$tag = "v0.1.3"; $base = "agent-store-$tag-x86_64-pc-windows-msvc"
 $url = "https://github.com/av/agent-store/releases/download/$tag"
 Invoke-WebRequest "$url/$base.zip" -OutFile "$base.zip"
 Invoke-WebRequest "$url/$base.sha256" -OutFile "$base.sha256"

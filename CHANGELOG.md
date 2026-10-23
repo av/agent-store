@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-10-23
+
+Highlights:
+
+- Upgrading keeps agents current: re-running `agent-store init` refreshes
+  skill files and the `AGENTS.md`/`CLAUDE.md` block that are unedited
+  copies from an earlier release (v0.1.0 projects gain the schedules
+  section), and keeps the ones you edited.
+- Schedules are safer: `schedule enable` no longer touches another
+  project's crontab entry and keeps working across Homebrew and Nix
+  upgrades, and `schedule add at` rejects impossible times and fires
+  offset times on time.
+- Installing is fixed and documented end to end: Windows has a PowerShell
+  download-verify-install block, the checksum and attestation recipes work
+  as written, and the Nix flake builds again.
+- A rewritten README and docs site: an agent-first install, the
+  session-to-session memory loop, a Stability section, and a page on what
+  Claude Code, Codex and Cursor each read.
+
 ### Added
 
 - An upgrade test opens stores written by the released v0.1.0, v0.1.1 and
@@ -59,17 +78,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`2026-02-30`, `25:99`, trailing text) with exit 2 instead of storing a
   schedule that never fires correctly, stores timestamps with a UTC offset
   as their UTC instant so `tick` fires them on time, and no longer panics
-  on a duration ending in a non-ASCII character.
+  on a duration ending in a non-ASCII character. `schedule add --help`
+  lists the offset form.
 - The Nix flake builds again; it had failed since v0.1.2 (two
   sandbox-incompatible hook tests are now skipped in the Nix check phase),
   and the flake's package version comes from Cargo.toml instead of a stale
   hard-coded 0.1.1.
-- Install docs: the "Verifying release downloads" snippet fetched a
-  nonexistent `<archive>.sha256` (checksums are named after the target)
-  and the attestation command used an unset `$asset`; the `cargo
-  uninstall` name is `agent-store-cli`; the uninstall section covers
-  crontab entries and `init` leftovers. The release notes template's
-  verify snippet and binstall crate name are fixed too.
+- Install docs: the README's "Verifying release downloads" snippet
+  fetched a nonexistent `<archive>.sha256` (checksums are named after the
+  target), the uninstall steps named `cargo uninstall agent-store` instead
+  of `agent-store-cli`, and they now cover crontab entries and `init`
+  leftovers. The release notes template's verify snippet and binstall
+  crate name are fixed too.
 - Docs: sample outputs that differed from the binary are re-captured from
   real runs.
 
@@ -231,7 +251,8 @@ First public release.
   hook races covered by tests), graceful handling of broken stdout pipes, and
   an explicit error when commands run before `init`.
 
-[Unreleased]: https://github.com/av/agent-store/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/av/agent-store/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/av/agent-store/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/av/agent-store/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/av/agent-store/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/av/agent-store/releases/tag/v0.1.0
