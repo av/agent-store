@@ -59,6 +59,8 @@ For humans installing by hand, or platforms the script doesn't cover:
 - **Build from source** (needs [Rust](https://rustup.rs) 1.78+ and a C compiler — the bundled SQLite compiles from source, so `apt install gcc` first on a fresh machine): `cargo install --git https://github.com/av/agent-store`
 - **Prebuilt binaries** for Linux (x86_64 gnu/musl), macOS (x86_64/arm64), and Windows (x86_64) from [GitHub Releases](https://github.com/av/agent-store/releases) — each with a SHA-256 checksum and a signed build-provenance attestation
 
+There is no prebuilt Linux arm64 (aarch64) binary yet, so on Graviton or Ampere machines and in arm64 Linux containers (including devcontainers on Apple Silicon) the install script stops with `unsupported Linux architecture`: use Nix or build from source there.
+
 **Windows:** the install script is unix-only — the simplest paths are `cargo binstall` (prebuilt) or `cargo install` above, both of which work on Windows. Or download `agent-store-<tag>-x86_64-pc-windows-msvc.zip` from Releases (its checksum lives in the matching `...-msvc.sha256` asset), unzip — `agent-store.exe` sits at the archive root — and put it on your `PATH`; a copy-paste PowerShell download+verify+extract block is in [Install details](docs/install.md#windows). The core CLI works natively; [hooks](docs/hooks.md) run their commands via `bash -c`, so hooks require a `bash` on `PATH` (Git Bash or WSL) — everything else works without one. The bundled shell completions and man page are for unix shells.
 
 Manual checksum/attestation verification, shell completions, the man page, and upgrade/uninstall paths: [Install details](docs/install.md).
