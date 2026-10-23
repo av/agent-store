@@ -45,7 +45,7 @@ conclusion="$("$AGENT_STORE" create conclusion area=ci \
 
 echo
 echo "== Session 1: file the fix and link it to what it implements =="
-task="$("$AGENT_STORE" create task status=open \
+task="$("$AGENT_STORE" create task status=pending \
   title="replace sleep-based sync in test helper with channel signals" \
   --json | jq -r '.record.id')"
 "$AGENT_STORE" link "$task" implements "$conclusion"
@@ -73,7 +73,7 @@ echo "== Session 2: query the graph, not just fields =="
 echo "-- conclusions that have supporting evidence:"
 "$AGENT_STORE" find 'kind=conclusion and link.in=supports'
 echo "-- open work implementing this specific conclusion:"
-"$AGENT_STORE" find "kind=task and status=open and link.out.implements=$conclusion"
+"$AGENT_STORE" find "kind=task and status=pending and link.out.implements=$conclusion"
 echo "-- evidence for it (findings pointing at this record):"
 "$AGENT_STORE" find "kind=finding and link.out.supports=$conclusion"
 
