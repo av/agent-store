@@ -14,9 +14,13 @@ unchanged for GitHub and crates.io.
 Transcript blocks (lines starting with "$ ") get a data-copy attribute
 holding only their commands, which Material's copy button copies instead
 of the block text, so a pasted transcript runs without prompts or output.
+
+Relative links to shell scripts (examples/*.sh) point at the GitHub file
+view instead: the site serves .sh files as downloads.
 """
 
 from html import escape, unescape
+import posixpath
 import re
 
 _RAW_PREFIX = "https://raw.githubusercontent.com/av/agent-store/master/assets/"
@@ -28,6 +32,8 @@ _ATTR_RE = re.compile(r'(?<![\w-])(src|srcset)="([^"]*)"')
 # swallows the inner <code>.
 _CODE_RE = re.compile(r"<(pre|code)\b.*?</\1>", re.S | re.I)
 _PRE_RE = re.compile(r"<pre>(.*?)</pre>", re.S)
+_SH_HREF_RE = re.compile(r'href="(?![a-z]+:|/|#)([^"#?]+\.sh)"')
+_BLOB = "https://github.com/av/agent-store/blob/master/"
 _TAG_RE = re.compile(r"<[^>]+>")
 
 
@@ -59,6 +65,20 @@ def _add_copy_text(html_text):
     return _PRE_RE.sub(add, html_text)
 
 
+def _link_scripts_to_github(html_text, page_url):
+    # Static files keep their repo path in the site, so the link target's
+    # site path is its repo path.
+    page_dir = page_url
+    if page_url and not page_url.endswith("/"):
+        page_dir = posixpath.dirname(page_url) + "/"
+
+    def link(m):
+        path = posixpath.normpath(posixpath.join(page_dir, m.group(1)))
+        return f'href="{_BLOB}{path}"'
+
+    return _SH_HREF_RE.sub(link, html_text)
+
+
 def on_page_content(html, page, config, files):
     # Depth-aware relative prefix (README renders at the site root, so this
     # is just "assets/" there, but stays correct for any nested page).
@@ -78,4 +98,4 @@ def on_page_content(html, page, config, files):
         out.append(m.group(0))
         last = m.end()
     out.append(rewrite_attrs(html[last:]))
-    return _add_copy_text("".join(out))
+    return _link_scripts_to_github(_add_copy_text("".join(out)), page.url)

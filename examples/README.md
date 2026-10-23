@@ -6,9 +6,12 @@ is self-contained: it creates a throwaway store in a temp directory
 on failure (`set -euo pipefail`).
 
 Requirements: `agent-store` on your `PATH` (or point the `AGENT_STORE`
-environment variable at a binary) and `jq`.
+environment variable at a binary) and `jq`. The scripts live in this
+repository's `examples/` directory, so clone it and run them from the
+repository root:
 
 ```bash
+git clone https://github.com/av/agent-store && cd agent-store
 ./examples/task-tracker.sh
 # or, with a locally built binary:
 AGENT_STORE=target/release/agent-store ./examples/task-tracker.sh
