@@ -110,8 +110,9 @@ nix profile upgrade agent-store                                                 
 cargo install --force --git https://github.com/av/agent-store                        # cargo (source or binstall)
 ```
 
-`agent-store --version` tells you what you're on. On Windows, re-run the
-PowerShell block above with the new tag.
+`agent-store --version` tells you what you're on. The Homebrew tap still
+ships v0.1.0, so `brew upgrade` does not reach the latest release yet. On
+Windows, re-run the PowerShell block above with the new tag.
 
 What lives where, for a clean uninstall. Do the first item before you
 remove the binary:
