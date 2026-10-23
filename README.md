@@ -24,7 +24,7 @@ w4054s decision area=http choice=reqwest reason='no openssl dep'
 
 It is deliberately not a "memory platform":
 
-- **No server, no daemon, no config** — state is a single SQLite file in your project's `.agent-store/` (gitignored, yours to `sqlite3` open). It belongs to that checkout on that machine: a `git worktree`, a fresh clone or a cloud agent's sandbox starts without it unless you [link or seed it](docs/faq.md#does-the-store-follow-worktrees-fresh-clones-ci-or-cloud-agents). Concurrent agents in one checkout are safe — WAL mode, serialized transactional writes — and everything exports as JSONL, so there's no lock-in.
+- **No server, no daemon, no config** — state is a single SQLite file in your project's `.agent-store/` (gitignored, yours to `sqlite3` open). It belongs to that checkout on that machine: a `git worktree`, a fresh clone or a cloud agent's sandbox starts without it unless you [link or seed it](docs/faq.md#does-the-store-follow-worktrees-fresh-clones-ci-or-cloud-agents). Concurrent agents in one checkout are safe — WAL mode, serialized transactional writes — and nothing is locked in: the store is a plain SQLite file, and records export as JSONL (record fields only: links and IDs are not carried, see [JSON output](#json-output)).
 - **No embeddings, no API keys, no LLM in the binary** — exact, structured recall (`find kind=task status=pending`), not similarity search.
 - **No schema** — a record is a `kind` plus free-form `key=value` fields; links, mutation hooks, and schedules on top when you want them.
 - **Agent-native without a protocol** — works with Claude Code, Codex, Cursor, and anything that can run a shell command. `init` installs skills and an `AGENTS.md`/`CLAUDE.md` block so agents discover the store on their own, and `agent-store ctx` prints a byte-capped summary that starts the next session from memory instead of a blank slate.
@@ -204,7 +204,7 @@ Nothing runs in the background on its own: `schedule tick` executes what's due, 
 
 ## JSON output
 
-Every command supports `--json` for structured output, and exports round-trip — `create --stdin` bulk-imports the same JSONL that `find --json | jq -c '.records[]'` emits:
+Every command supports `--json` for structured output, and record exports round-trip — `create --stdin` bulk-imports the same JSONL that `find --json | jq -c '.records[]'` emits (kinds and fields; imported records get new IDs and links are not carried):
 
 ```sh
 $ agent-store find kind=task --json
@@ -233,7 +233,7 @@ Scripting behaves the way a shell expects: results on stdout, errors on stderr, 
 
 ## Stability
 
-agent-store is v0.1.x — early, but the data layer is the part treated as stable. The store is a plain SQLite file with a versioned, checksummed schema; upgrades apply migrations automatically on open, so existing records, links, and hook history survive new releases (covered by [tests that open old-schema stores](https://github.com/av/agent-store/blob/master/tests/upgrade.rs)). Pre-1.0, CLI flags, output wording, and `--json` shapes may still change between minor versions — pin a version if you script against exact output, and check the [CHANGELOG](CHANGELOG.md) before upgrading. Worst case, nothing is locked in: `find --json` exports every record (one `jq -c '.records[]'` away from JSONL that `create --stdin` re-imports), and `.agent-store/store.sqlite` is a normal SQLite file readable by stock `sqlite3` or any SQLite tool.
+agent-store is v0.1.x — early, but the data layer is the part treated as stable. The store is a plain SQLite file with a versioned, checksummed schema; upgrades apply migrations automatically on open, so existing records, links, and hook history survive new releases (covered by [tests that open old-schema stores](https://github.com/av/agent-store/blob/master/tests/upgrade.rs)). Pre-1.0, CLI flags, output wording, and `--json` shapes may still change between minor versions — pin a version if you script against exact output, and check the [CHANGELOG](CHANGELOG.md) before upgrading. Worst case, nothing is locked in: `.agent-store/store.sqlite` is a normal SQLite file readable by stock `sqlite3` or any SQLite tool, with every record, link and hook run in it, and `find --json` exports every record (one `jq -c '.records[]'` away from JSONL that `create --stdin` re-imports; that round-trip keeps kinds and fields but not links or IDs).
 
 ## Contributing
 
