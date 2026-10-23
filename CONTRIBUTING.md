@@ -11,7 +11,7 @@ cargo build
 cargo test
 ```
 
-CI gates every PR on exactly these four commands — run them before pushing:
+CI runs three jobs on every PR. The first is these four commands — run them before pushing:
 
 ```sh
 cargo fmt --check
@@ -20,24 +20,32 @@ cargo build --verbose
 cargo test --verbose
 ```
 
-Slow hook-timeout stress tests are `#[ignore]`d by default; run them with `cargo test --test hook_stress -- --ignored` if you touch hook execution.
+The second runs the slow hook-timeout stress tests, which are `#[ignore]`d by default; run them with `cargo test --test hook_stress -- --ignored` if you touch hook execution. The third is the fact suite (see [Spec workflow](#spec-workflow)): `facts lint && facts fmt --check`, then `facts check --no-agent`.
 
 ## Project layout
 
 ```
-src/main.rs    binary entry point, command dispatch, init
+src/main.rs    binary entry point, command dispatch, init and its skill
+               texts, hook and schedule execution, crontab integration
 src/cli.rs     hand-rolled argument parser (not clap)
 src/query.rs   find query language: parsing and evaluation
-src/store.rs   SQLite-backed store: records, links, hooks, ctx
+src/store.rs   SQLite-backed store: records, links, hooks, schedules, ctx,
+               schema migrations
 src/value.rs   typed field values and comparison semantics
 src/output.rs  text and --json rendering
-tests/         integration tests plus fact-check scripts in tests/facts/
-docs/          user-facing docs (tutorial, concepts, queries, hooks, json, skills, faq)
+*.facts        the spec: .facts, concurrency.facts, json-hooks.facts
+tests/         integration tests; tests/facts/ holds the shell scripts
+               that fact commands run
+docs/          user-facing docs (install, agents, Claude Code tutorial,
+               concepts, queries, hooks, schedules, json, skills, faq)
+examples/      runnable example scripts
 ```
 
 ## Spec workflow
 
-This project is fact-driven: `.facts` files in the repo root are the spec, and every behavior change starts with a fact. See [AGENTS.md](AGENTS.md) for the full workflow and the [facts](https://github.com/av/facts) tool it uses. In short: read the relevant section with `facts list`, add or sharpen a fact describing the new behavior, implement, verify with `facts check`, tag `@implemented`.
+This project is fact-driven: the `.facts` files in the repo root are the spec, and every behavior change starts with a fact. A fact is a one-line claim about behavior, usually with a command that checks it (often a function in a `tests/facts/` script). [facts](https://github.com/av/facts) is the CLI that lists, lints and checks them; install it with `curl -fsSL https://av.codes/facts.sh | sh` (or `npm install -g @avcodes/facts`, or `pipx install facts-cli`; CI pins v0.7.1).
+
+In short: read the relevant section with `facts list --section <name>`, add or sharpen a fact describing the new behavior, implement, verify with `facts check --tags <tag>` (the full suite is slow; scope it), and tag the fact `@implemented`. The full workflow is in [AGENTS.md](https://github.com/av/agent-store/blob/master/AGENTS.md).
 
 ## Pull requests
 
