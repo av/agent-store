@@ -46,3 +46,14 @@
   white-space: nowrap;
   word-break: normal;
 }
+
+/* Reserve a strip above the first line for the copy button, so no line
+   (however long) scrolls underneath it. */
+.md-typeset .highlight .md-code__nav {
+  padding: 0;
+  top: 0.15em;
+  right: 0.15em;
+}
+.md-typeset .highlight pre > code {
+  padding-top: 2.1em;
+}
