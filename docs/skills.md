@@ -69,6 +69,6 @@ agent-store init
 To get the current instructions block, delete it (markers included) and
 re-run `init`.
 
-See also: [Using agent-store with Claude Code](claude-code.md) — a full
+See also: [Claude Code tutorial](claude-code.md) — a full
 walkthrough of what these skills enable; [FAQ](faq.md) — data format,
 concurrency, privacy, and limits.

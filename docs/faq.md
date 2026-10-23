@@ -226,7 +226,7 @@ is the entire build process.
 
 ## See also
 
-- [Using agent-store with Claude Code](claude-code.md)
+- [Claude Code tutorial](claude-code.md)
 - [Concepts](concepts.md)
 - [Query language](queries.md)
 - [Hooks](hooks.md)

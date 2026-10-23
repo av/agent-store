@@ -1,4 +1,4 @@
-# Using agent-store with Claude Code
+# Claude Code tutorial
 
 Claude Code forgets everything when a session ends. Decisions made, dead
 ends explored, project conventions discovered — all of it is re-derived

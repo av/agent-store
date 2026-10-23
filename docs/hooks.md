@@ -138,6 +138,6 @@ there is no trust prompt. After cloning an untrusted repo, inspect
 [SECURITY.md](../SECURITY.md).
 
 See also: [Concepts](concepts.md) — where hooks fit in the overall
-model; [Using agent-store with Claude Code](claude-code.md) — how
+model; [Claude Code tutorial](claude-code.md) — how
 store hooks compose with Claude Code's own hook system; [FAQ](faq.md) —
 data format, concurrency, privacy, and limits.

@@ -1,4 +1,4 @@
-# Using with Claude Code, Codex and Cursor
+# Claude Code, Codex and Cursor
 
 agent-store is a CLI, so any agent that can run a shell command can use
 it. The work is getting the agent to *think of it* without being told
@@ -7,8 +7,8 @@ Cursor in one go. There is no per-agent mode or flag: the same files
 cover all three.
 
 For a full Claude Code walkthrough (conventions, a `SessionStart` hook,
-a two-session example), see
-[Using agent-store with Claude Code](claude-code.md).
+a two-session example), see the
+[Claude Code tutorial](claude-code.md).
 
 ## What `init` writes
 

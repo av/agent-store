@@ -21,7 +21,7 @@ nav:
   - Overview: README.md
   - Install: docs/install.md
   - Claude Code, Codex and Cursor: docs/agents.md
-  - Using with Claude Code: docs/claude-code.md
+  - Claude Code tutorial: docs/claude-code.md
   - Concepts: docs/concepts.md
   - Query language: docs/queries.md
   - Hooks: docs/hooks.md

@@ -174,5 +174,5 @@ remove the binary:
   `.agents/skills/` and `.claude/skills/` directories (and possibly
   `.agents/` and `.claude/`), which you can remove too.
 
-Installed? Next: [Using agent-store with Claude Code](claude-code.md) —
+Installed? Next: [Claude Code tutorial](claude-code.md) —
 the end-to-end workflow the install exists for.

@@ -137,7 +137,7 @@ Recent records:
 
 The agent sees the pending migration and the reasoning behind it without being told, finishes the work, and runs `agent-store set ff14fh status=done`. No re-discovery, no contradicted decisions.
 
-For the full walkthrough — Claude Code setup, `SessionStart` hook that injects `ctx` automatically, CLAUDE.md conventions — see [Using agent-store with Claude Code](docs/claude-code.md).
+For the full walkthrough — Claude Code setup, `SessionStart` hook that injects `ctx` automatically, CLAUDE.md conventions — see the [Claude Code tutorial](docs/claude-code.md).
 
 ## Why not just...?
 
@@ -220,8 +220,8 @@ Scripting behaves the way a shell expects: results on stdout, errors on stderr, 
 ## Documentation
 
 - [Install details](docs/install.md) — verifying downloads, completions and man page, upgrade/uninstall
-- [Using with Claude Code, Codex and Cursor](docs/agents.md) — what `init` writes, which files each agent reads, the fresh-repo step
-- [Using agent-store with Claude Code](docs/claude-code.md) — setup, CLAUDE.md conventions, session-start context injection, a worked two-session example
+- [Claude Code, Codex and Cursor](docs/agents.md) — what `init` writes, which files each agent reads, the fresh-repo step
+- [Claude Code tutorial](docs/claude-code.md) — setup, CLAUDE.md conventions, session-start context injection, a worked two-session example
 - [Concepts](docs/concepts.md) — the mental model: stores, records, links, queries, hooks, and the `ctx` budget, each with a verified example
 - [Query language](docs/queries.md) — operators, value types, combinators, quoting, timestamps, links, sorting
 - [Hooks](docs/hooks.md) — events, environment variables, limits, inspecting runs

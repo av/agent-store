@@ -4,8 +4,8 @@ agent-store is persistent, queryable memory for coding agents — one
 SQLite file in your repo, addressed through one CLI. This page is the
 mental model in one sitting: what a store is, what records, links, and
 hooks are, how queries address them, and what `ctx` summarizes. Read it
-after the README quickstart; for a hands-on workflow, see
-[Using agent-store with Claude Code](claude-code.md).
+after the README quickstart; for a hands-on workflow, see the
+[Claude Code tutorial](claude-code.md).
 
 Every output below is real, captured from a fresh store.
 
@@ -269,7 +269,7 @@ compresses the whole thing into a prompt-sized snapshot. An agent's loop
 is typically: read `ctx`, `find` what's relevant, do the work, `create`
 and `set` what was learned.
 
-See also: [Using agent-store with Claude Code](claude-code.md) — the
+See also: [Claude Code tutorial](claude-code.md) — the
 worked end-to-end workflow; [Query language](queries.md) — the full
 grammar; [Hooks](hooks.md) — events and environment in depth;
 [FAQ](faq.md) — data format, concurrency, privacy, and limits.
