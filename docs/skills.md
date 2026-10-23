@@ -20,12 +20,15 @@ their own — no per-session prompting.
 
 | Skill | Covers |
 | --- | --- |
-| `agent-store` | Core guide: init, creating records, the query language, `ctx`, hooks |
-| `agent-store-patterns` | Workflow recipes: scratchpad, task tracker, decision log, handoff memory |
+| `agent-store` | Core guide: `ctx` at session start, `create` / `find` / `get` / `set` / `unset` / `rm`, `link` / `unlink` / `links`, the query language, hooks, schedules |
+| `agent-store-patterns` | Workflow recipes: session start, decision log (`area` / `choice` / `reason`), task tracker, linked records, scratchpad, handoff note |
 | `agent-store-pipelines` | Shell composition: JSONL import/export, `jq` filtering, batch creation |
 
 Each is a single `SKILL.md` with YAML frontmatter (`name`, `description`),
 the format Claude Code and other skill-aware harnesses load automatically.
+The `description` says when to use the skill (remembering decisions and
+tasks across sessions, session start, handoff), which is what makes an
+agent reach for the store when asked to record something for later.
 The tracked sources live in this repo under
 [`.agents/skills/`](https://github.com/av/agent-store/tree/master/.agents/skills).
 
