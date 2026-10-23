@@ -4191,6 +4191,7 @@ EOF
 
     stop_file="$tmp/churn.stop"
     ready_file="$tmp/churn.ready"
+    pinned_file="$tmp/churn.pinned"
     python3 - \
       .agent-store/store.sqlite \
       "$source_one" \
@@ -4202,7 +4203,8 @@ EOF
       "$protected_hook" \
       "$tmp/churn.log" \
       "$stop_file" \
-      "$ready_file" <<'PY' >"$tmp/churn.out" 2>"$tmp/churn.err" &
+      "$ready_file" \
+      "$pinned_file" <<'PY' >"$tmp/churn.out" 2>"$tmp/churn.err" &
 import os
 import pathlib
 import sqlite3
@@ -4221,6 +4223,7 @@ import time
     log_path,
     stop_path,
     ready_path,
+    pinned_path,
 ) = sys.argv[1:]
 source_ids = [source_one, source_two]
 target_ids = [target_one, target_two]
@@ -4323,6 +4326,36 @@ with open(log_path, "w", encoding="utf-8") as log:
         cycle += 1
         time.sleep(0.008)
 
+    # Pinned phase: the random race above may never hit a given outcome (an unlink
+    # needs a link and an unlink inside the same ~10 ms window where exactly one
+    # source and one target exist), so every outcome is also exercised against
+    # states held still until the shell side has run its commands there.
+    def wait_for(path, what):
+        deadline = time.monotonic() + 300
+        while not os.path.exists(path):
+            if time.monotonic() > deadline:
+                raise SystemExit(f"timed out waiting for {what}")
+            time.sleep(0.005)
+
+    wait_for(stop_path, "the race workers to finish")
+    pinned_states = [
+        ("success", [source_one], [target_one], [hook_one]),
+        ("ambiguous", [source_one, source_two], [target_one, target_two], [hook_one, hook_two]),
+        ("not_found", [], [], []),
+    ]
+    for name, sources, targets, active_hooks in pinned_states:
+        con.execute("BEGIN IMMEDIATE")
+        replace_records(sources, targets, f"pinned-{name}")
+        replace_hooks(active_hooks)
+        con.execute("COMMIT")
+        log.write(
+            f"pinned-{name}:sources={','.join(sources) or '-'} "
+            f"targets={','.join(targets) or '-'} hooks={','.join(active_hooks) or '-'}\n"
+        )
+        log.flush()
+        pathlib.Path(f"{pinned_path}.{name}.ready").write_text("ready", encoding="utf-8")
+        wait_for(f"{pinned_path}.{name}.done", f"the pinned {name} commands")
+
     con.execute("BEGIN IMMEDIATE")
     replace_records([source_one], [target_one], "final")
     replace_hooks([hook_one])
@@ -4401,6 +4434,84 @@ PY
     done
 
     touch "$stop_file"
+
+    # Pinned phase: the churn writer holds one state still while every command
+    # below runs concurrently against it, so each command's outcome is known.
+    run_pinned_command() {
+      local state="$1"
+      local op="$2"
+      local worker="$3"
+      local prefix="$tmp/pinned-$state-$op-$worker"
+      set +e
+      case "$op" in
+        get)
+          "$agent_store_bin" --json get "$source_prefix" >"$prefix.out" 2>"$prefix.err"
+          ;;
+        link)
+          "$agent_store_bin" --json link "$source_prefix" blocks "$target_prefix" >"$prefix.out" 2>"$prefix.err"
+          ;;
+        unlink)
+          "$agent_store_bin" --json unlink "$source_prefix" blocks "$target_prefix" >"$prefix.out" 2>"$prefix.err"
+          ;;
+        links)
+          "$agent_store_bin" --json links "$source_prefix" >"$prefix.out" 2>"$prefix.err"
+          ;;
+        hook_rm)
+          "$agent_store_bin" hook rm "$hook_prefix" >"$prefix.out" 2>"$prefix.err"
+          ;;
+      esac
+      local code="$?"
+      set -e
+      printf "%s" "$code" >"$prefix.status"
+    }
+
+    run_pinned_step() {
+      local state="$1"
+      shift
+      local op
+      local worker
+      local step_pids=()
+      for op in "$@"; do
+        for worker in $(seq 1 "$worker_count"); do
+          (run_pinned_command "$state" "$op" "$worker") &
+          step_pids+=("$!")
+        done
+      done
+      for pid in "${step_pids[@]}"; do
+        wait "$pid"
+      done
+    }
+
+    wait_for_pinned_state() {
+      local state="$1"
+      local attempts=30000
+      while [ ! -f "$pinned_file.$state.ready" ]; do
+        attempts=$((attempts - 1))
+        if [ "$attempts" -le 0 ] || ! kill -0 "$churn_pid" 2>/dev/null; then
+          cat "$tmp/churn.err" >&2 || true
+          exit 1
+        fi
+        sleep 0.01
+      done
+    }
+
+    # One Source, one Target and one hk Hook: get, links and the idempotent link
+    # all succeed; then the concurrent unlinks remove that one Link (exactly one
+    # succeeds) and the concurrent hook rm calls remove that one Hook (exactly one
+    # succeeds).
+    wait_for_pinned_state success
+    run_pinned_step success get links link
+    run_pinned_step success unlink hook_rm
+    touch "$pinned_file.success.done"
+    # Two Sources, two Targets and two hk Hooks: every command is ambiguous.
+    wait_for_pinned_state ambiguous
+    run_pinned_step ambiguous get link unlink links hook_rm
+    touch "$pinned_file.ambiguous.done"
+    # No Sources, Targets or hk Hooks: every command is not found.
+    wait_for_pinned_state not_found
+    run_pinned_step not_found get link unlink links hook_rm
+    touch "$pinned_file.not_found.done"
+
     if ! wait "$churn_pid"; then
       cat "$tmp/churn.err" >&2
       exit 1
@@ -4443,10 +4554,15 @@ bad_fragments = [
     "constraint failed",
     "query returned no rows",
 ]
-counts = {
-    op: {"success": 0, "ambiguous": 0, "not_found": 0, "link_missing": 0}
-    for op in json_ops + ["hook_rm"]
-}
+outcomes = ["success", "ambiguous", "not_found", "link_missing"]
+all_ops = json_ops + ["hook_rm"]
+pinned_states = ["success", "ambiguous", "not_found"]
+
+def new_counts():
+    return {op: {outcome: 0 for outcome in outcomes} for op in all_ops}
+
+race_counts = new_counts()
+pinned_counts = {state: new_counts() for state in pinned_states}
 link_success_pairs = Counter()
 hook_success_ids = Counter()
 
@@ -4462,74 +4578,96 @@ def classify_error(err):
         return "link_missing"
     raise AssertionError(err)
 
+def check_command(op, base):
+    """Check one command's safety guarantees; return (outcome, entity it acted on)."""
+    status = read(base.with_suffix(".status")).strip()
+    out = read(base.with_suffix(".out"))
+    err = read(base.with_suffix(".err"))
+    combined = (out + "\n" + err).lower()
+    assert status, base
+    assert not any(fragment in combined for fragment in bad_fragments), (base.name, out, err)
+
+    if status != "0":
+        assert out == "", (base.name, out)
+        return classify_error(err), None
+
+    assert err == "", (base.name, err)
+    if op == "hook_rm":
+        match = re.fullmatch(r"Removed ([a-z0-9]{6})\n?", out)
+        assert match and match.group(1) in hook_ids, (base.name, out)
+        hook_success_ids[match.group(1)] += 1
+        return "success", match.group(1)
+
+    payload = json.loads(out)
+    if op == "get":
+        record = payload["record"]
+        assert record["id"] in source_ids, payload
+        assert record["kind"] == "task", payload
+        assert record["fields"]["role"] == "source", payload
+        return "success", record["id"]
+    if op in {"link", "unlink"}:
+        expected_status = "linked" if op == "link" else "unlinked"
+        assert payload["status"] == expected_status, payload
+        link = payload["link"]
+        assert link["from_record_id"] in source_ids, payload
+        assert link["rel"] == "blocks", payload
+        assert link["to_record_id"] in target_ids, payload
+        pair = (link["from_record_id"], link["rel"], link["to_record_id"])
+        if op == "link":
+            link_success_pairs[pair] += 1
+        return "success", pair
+    assert op == "links", op
+    assert payload["record_id"] in source_ids, payload
+    assert isinstance(payload["links"], list), payload
+    for edge in payload["links"]:
+        assert edge["direction"] in {"out", "in"}, payload
+        assert edge["rel"] == "blocks", payload
+        assert edge["record_id"] in all_record_ids, payload
+    return "success", payload["record_id"]
+
+# Race phase: commands racing the churn writer.
 for op in json_ops:
     for worker in range(1, worker_count + 1):
         for index in range(1, iterations + 1):
-            base = tmp / f"jsonprefix-{op}-{worker}-{index}"
-            status = read(base.with_suffix(".status")).strip()
-            out = read(base.with_suffix(".out"))
-            err = read(base.with_suffix(".err"))
-            combined = (out + "\n" + err).lower()
-            assert status, base
-            assert not any(fragment in combined for fragment in bad_fragments), (op, worker, index, out, err)
-
-            if status == "0":
-                assert err == "", (op, worker, index, err)
-                payload = json.loads(out)
-                counts[op]["success"] += 1
-                if op == "get":
-                    record = payload["record"]
-                    assert record["id"] in source_ids, payload
-                    assert record["kind"] == "task", payload
-                    assert record["fields"]["role"] == "source", payload
-                elif op in {"link", "unlink"}:
-                    expected_status = "linked" if op == "link" else "unlinked"
-                    assert payload["status"] == expected_status, payload
-                    link = payload["link"]
-                    assert link["from_record_id"] in source_ids, payload
-                    assert link["rel"] == "blocks", payload
-                    assert link["to_record_id"] in target_ids, payload
-                    if op == "link":
-                        link_success_pairs[
-                            (link["from_record_id"], link["rel"], link["to_record_id"])
-                        ] += 1
-                elif op == "links":
-                    assert payload["record_id"] in source_ids, payload
-                    assert isinstance(payload["links"], list), payload
-                    for edge in payload["links"]:
-                        assert edge["direction"] in {"out", "in"}, payload
-                        assert edge["rel"] == "blocks", payload
-                        assert edge["record_id"] in all_record_ids, payload
-            else:
-                assert out == "", (op, worker, index, out)
-                counts[op][classify_error(err)] += 1
+            outcome, _ = check_command(op, tmp / f"jsonprefix-{op}-{worker}-{index}")
+            race_counts[op][outcome] += 1
 
 for worker in range(1, worker_count + 1):
     for index in range(1, iterations + 1):
-        base = tmp / f"hookprefix-rm-{worker}-{index}"
-        status = read(base.with_suffix(".status")).strip()
-        out = read(base.with_suffix(".out"))
-        err = read(base.with_suffix(".err"))
-        combined = (out + "\n" + err).lower()
-        assert status, base
-        assert not any(fragment in combined for fragment in bad_fragments), (worker, index, out, err)
+        outcome, _ = check_command("hook_rm", tmp / f"hookprefix-rm-{worker}-{index}")
+        race_counts["hook_rm"][outcome] += 1
 
-        if status == "0":
-            assert err == "", (worker, index, err)
-            match = re.fullmatch(r"Removed ([a-z0-9]{6})\n?", out)
-            assert match and match.group(1) in hook_ids, (worker, index, out)
-            counts["hook_rm"]["success"] += 1
-            hook_success_ids[match.group(1)] += 1
-        else:
-            assert out == "", (worker, index, out)
-            counts["hook_rm"][classify_error(err)] += 1
+for op in all_ops:
+    total = sum(race_counts[op].values())
+    assert total == worker_count * iterations, (op, total, race_counts[op])
 
-for op in json_ops + ["hook_rm"]:
-    total = sum(counts[op].values())
-    assert total == worker_count * iterations, (op, total, counts[op])
-    assert counts[op]["success"] > 0, (op, counts[op])
-    assert counts[op]["ambiguous"] > 0, (op, counts[op])
-    assert counts[op]["not_found"] > 0, (op, counts[op])
+# Pinned phase: concurrent commands against states the churn writer held still.
+source_one = sorted(source_ids)[0]
+target_one = sorted(target_ids)[0]
+hook_one = sorted(hook_ids)[0]
+pinned_subjects = {
+    "get": source_one,
+    "links": source_one,
+    "link": (source_one, "blocks", target_one),
+    "unlink": (source_one, "blocks", target_one),
+    "hook_rm": hook_one,
+}
+for state in pinned_states:
+    for op in all_ops:
+        for worker in range(1, worker_count + 1):
+            outcome, subject = check_command(op, tmp / f"pinned-{state}-{op}-{worker}")
+            pinned_counts[state][op][outcome] += 1
+            if outcome == "success":
+                assert subject == pinned_subjects[op], (state, op, worker, subject)
+
+counts = {
+    op: {
+        outcome: race_counts[op][outcome]
+        + sum(pinned_counts[state][op][outcome] for state in pinned_states)
+        for outcome in outcomes
+    }
+    for op in all_ops
+}
 
 con = sqlite3.connect(db)
 record_ids = {row[0] for row in con.execute("SELECT id FROM records ORDER BY id")}
@@ -4599,19 +4737,44 @@ assert actual_hook_deletes == expected_hook_deletes, (
 final_hooks = {row[0] for row in con.execute("SELECT id FROM hooks ORDER BY id")}
 assert final_hooks == {sorted(hook_ids)[0], protected_hook}, final_hooks
 
-print(
-    " ".join(
-        f"{op}=success:{counts[op]['success']},ambiguous:{counts[op]['ambiguous']},not_found:{counts[op]['not_found']}"
-        for op in json_ops + ["hook_rm"]
+# Every outcome is exercised for every command: the pinned states make each one
+# certain, whatever the race phase happened to hit.
+expected_pinned = {
+    "success": {
+        "get": {"success": worker_count},
+        "links": {"success": worker_count},
+        "link": {"success": worker_count},
+        "unlink": {"success": 1, "link_missing": worker_count - 1},
+        "hook_rm": {"success": 1, "not_found": worker_count - 1},
+    },
+    "ambiguous": {op: {"ambiguous": worker_count} for op in all_ops},
+    "not_found": {op: {"not_found": worker_count} for op in all_ops},
+}
+for state in pinned_states:
+    for op in all_ops:
+        expected = {outcome: expected_pinned[state][op].get(outcome, 0) for outcome in outcomes}
+        assert pinned_counts[state][op] == expected, (state, op, pinned_counts[state][op], expected)
+
+for op in all_ops:
+    assert counts[op]["success"] > 0, (op, counts[op])
+    assert counts[op]["ambiguous"] > 0, (op, counts[op])
+    assert counts[op]["not_found"] > 0, (op, counts[op])
+
+def describe(per_op):
+    return " ".join(
+        f"{op}=" + ",".join(f"{outcome}:{per_op[op][outcome]}" for outcome in outcomes)
+        for op in all_ops
     )
-)
+
+print(f"race: {describe(race_counts)}")
+print(f"total: {describe(counts)}")
 print(f"events={event_counts} final_records={sorted(record_ids)} final_links={sorted(link_rows)} final_hooks={sorted(final_hooks)}")
 PY
 )"
 
     if [ -n "$evidence_root" ]; then
       find "$tmp" -maxdepth 1 -type f \
-        \( -name 'jsonprefix-*' -o -name 'hookprefix-*' -o -name 'churn.*' \) \
+        \( -name 'jsonprefix-*' -o -name 'hookprefix-*' -o -name 'pinned-*' -o -name 'churn.*' \) \
         -exec cp {} "$evidence_root/logs/" \;
       cp .agent-store/store.sqlite "$evidence_root/store.sqlite"
       cat > "$evidence_root/reports/concurrent-json-prefix-and-hook-rm-races.md" <<EOF
@@ -4625,6 +4788,7 @@ PY
 - hooks: $hook_one $hook_two
 - workers_per_command: $worker_count
 - iterations_per_worker: $iterations
+- pinned_states: success ambiguous not_found
 - $summary
 - database: $evidence_root/store.sqlite
 - logs: $evidence_root/logs
