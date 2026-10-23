@@ -31,7 +31,7 @@ proving each archive was built by this repository's release workflow.
 Verify with the [GitHub CLI](https://cli.github.com):
 
 ```sh
-gh attestation verify "$asset" --repo av/agent-store
+gh attestation verify "agent-store-$tag-$target.tar.gz" --repo av/agent-store
 ```
 
 The `curl | sh` installer performs the checksum verification
