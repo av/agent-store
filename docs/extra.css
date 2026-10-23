@@ -33,13 +33,6 @@
   --md-typeset-a-color: #3fb950;
 }
 
-/* The copy button sits over the first line of a block on a translucent
-   backing; make it opaque so a long line scrolls under the button instead
-   of showing through the icon. */
-.md-typeset .md-code__nav {
-  background-color: var(--md-code-bg-color);
-}
-
 /* Keep identifiers in table cells whole (AGENT_STORE_EVENT, not
    AGENT_STOR / E_EVENT on a phone); a too-wide table scrolls instead. */
 .md-typeset table:not([class]) code {
