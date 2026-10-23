@@ -43,10 +43,11 @@ Or hand it (or run yourself) this block — non-interactive, from the project ro
 curl -fsSL https://raw.githubusercontent.com/av/agent-store/master/install.sh | sh
 export PATH="$HOME/.local/bin:$PATH"
 agent-store --version
+touch AGENTS.md CLAUDE.md   # init adds its block only to files that exist
 agent-store init
 ```
 
-The installer detects OS/arch (Linux x86_64, macOS x86_64/arm64), downloads the latest release binary, **verifies its SHA-256 checksum**, and installs to `~/.local/bin` — no root, no prompts, nonzero exit on any failure (set `AGENT_STORE_INSTALL_DIR` to override the directory, `AGENT_STORE_VERSION` to pin a tag; only the `/usr/local/bin` fallback, used when `~/.local/bin` isn't writable, needs sudo). The `export PATH` line covers the current shell if `~/.local/bin` isn't already on your `PATH` — add it to your shell profile to make it stick (the installer prints the exact line when it's needed). `agent-store --version` confirms the binary works; `agent-store init` sets up the current project — store, agent skills, `AGENTS.md`/`CLAUDE.md` block (see [Quickstart](#quickstart)).
+The installer detects OS/arch (Linux x86_64, macOS x86_64/arm64), downloads the latest release binary, **verifies its SHA-256 checksum**, and installs to `~/.local/bin` — no root, no prompts, nonzero exit on any failure (set `AGENT_STORE_INSTALL_DIR` to override the directory, `AGENT_STORE_VERSION` to pin a tag; only the `/usr/local/bin` fallback, used when `~/.local/bin` isn't writable, needs sudo). The `export PATH` line covers the current shell if `~/.local/bin` isn't already on your `PATH` — add it to your shell profile to make it stick (the installer prints the exact line when it's needed). `agent-store --version` confirms the binary works. `touch` creates `AGENTS.md` and `CLAUDE.md` if they are missing (existing files are left as they are), because `agent-store init` adds its instructions block only to files that exist: Claude Code reads `CLAUDE.md`, Codex reads `AGENTS.md`, and the block is what reliably points them at the store (see [Claude Code, Codex and Cursor](docs/agents.md)). `init` then sets up the current project: store, agent skills, and the block in both files (see [Quickstart](#quickstart)).
 
 ### Other ways to install
 
@@ -65,6 +66,7 @@ Manual checksum/attestation verification, shell completions, the man page, and u
 ## Quickstart
 
 ```sh
+$ touch AGENTS.md CLAUDE.md
 $ agent-store init
 Initialized .agent-store/
 Installed .agents/skills/agent-store/SKILL.md
@@ -73,13 +75,14 @@ Installed .agents/skills/agent-store-pipelines/SKILL.md
 Installed .claude/skills/agent-store/SKILL.md
 Installed .claude/skills/agent-store-patterns/SKILL.md
 Installed .claude/skills/agent-store-pipelines/SKILL.md
-No AGENTS.md or CLAUDE.md found; create one and re-run `agent-store init` to add the instructions block
+Added instructions block to AGENTS.md
+Added instructions block to CLAUDE.md
 
 $ agent-store create task title="ship v0.1" status=pending
-fvyapu
+4juoi3
 
-$ agent-store set fvyapu status=done
-Updated fvyapu
+$ agent-store set 4juoi3 status=done
+Updated 4juoi3
 
 $ agent-store ctx
 Quick Context
@@ -90,18 +93,18 @@ Record kinds:
     status: done=1
 Hooks: 0
 Schedules: none
-Latest activity: 2026-10-23T02:36:10.018Z
+Latest activity: 2026-10-23T05:34:08.084Z
 Recent records:
-  fvyapu task status=done title='ship v0.1'
+  4juoi3 task status=done title='ship v0.1'
 ```
 
-`init` creates `.agent-store/` (and gitignores it), installs the builtin skills into `.agents/skills/` and `.claude/skills/`, and adds managed agent-store instructions to existing `AGENTS.md` and `CLAUDE.md` files. `ctx` is what an agent runs at session start: the whole store, summarized, in one block that never outgrows its budget.
+`init` creates `.agent-store/` (and gitignores it), installs the builtin skills into `.agents/skills/` and `.claude/skills/`, and adds managed agent-store instructions to `AGENTS.md` and `CLAUDE.md` (only to files that already exist, hence the `touch`). `ctx` is what an agent runs at session start: the whole store, summarized, in one block that never outgrows its budget.
 
 IDs are short and prefix-resolvable: any unambiguous prefix works wherever a command takes an ID (`get`, `set`, `unset`, `rm`, `link`, ...).
 
 ## How agents use it
 
-You run `init` once. From then on the agent finds everything itself: the installed skills teach it the commands and conventions, and the `AGENTS.md`/`CLAUDE.md` block points it at `ctx` and the skills (a one-line convention of your own, or a `SessionStart` hook, makes `ctx` automatic every session — see the link below). As it works, it records what matters:
+You run `init` once, with `AGENTS.md` and `CLAUDE.md` in place. From then on the agent finds everything itself: the installed skills teach it the commands and conventions, and the `AGENTS.md`/`CLAUDE.md` block points it at `ctx` and the skills (a one-line convention of your own, or a `SessionStart` hook, makes `ctx` automatic every session — see the link below). As it works, it records what matters:
 
 ```sh
 # Session 1 — the reqwest decision from the top of this page, plus the follow-up work:
@@ -205,7 +208,7 @@ Every command supports `--json` for structured output, and exports round-trip �
 
 ```sh
 $ agent-store find kind=task --json
-{"records":[{"created_at":"2026-10-23T02:36:08.004Z","fields":{"status":"done","title":"ship v0.1"},"id":"fvyapu","kind":"task","updated_at":"2026-10-23T02:36:10.018Z"}]}
+{"records":[{"created_at":"2026-10-23T05:34:06.775Z","fields":{"status":"done","title":"ship v0.1"},"id":"4juoi3","kind":"task","updated_at":"2026-10-23T05:34:08.084Z"}]}
 ```
 
 Scripting behaves the way a shell expects: results on stdout, errors on stderr, nonzero exit on failure (a `get` on a missing ID exits 1; an empty `find` still exits 0 with `{"records":[]}`). Envelope shapes, import validation, and the linked-store caveat: [JSON output and import](docs/json.md).

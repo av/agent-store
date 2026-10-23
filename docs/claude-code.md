@@ -13,9 +13,12 @@ two-session example.
 
 ## Setup
 
-Initialize a store at the project root:
+Initialize a store at the project root. `init` adds its instructions
+block only to a `CLAUDE.md` that already exists, so create one first if
+the project has none (`touch` leaves an existing file as it is):
 
 ```sh
+$ touch CLAUDE.md
 $ agent-store init
 Initialized .agent-store/
 Installed .agents/skills/agent-store/SKILL.md
@@ -33,9 +36,11 @@ Three things happened, all Claude Code-relevant:
 2. Three [skills](skills.md) were installed into `.claude/skills/`,
    where Claude Code discovers them automatically. They teach the agent
    how to create records, query, and read context — no prompting needed.
-3. If a `CLAUDE.md` existed, a managed instructions block was appended
-   (the last line reads `No AGENTS.md or CLAUDE.md found; ...` instead
-   when neither file exists — create one and re-run `init`).
+3. A managed instructions block was appended to `CLAUDE.md`. Without
+   the file, the last line reads `No AGENTS.md or CLAUDE.md found; ...`
+   instead: create it and re-run `init`. In a repo with skills but no
+   block, Claude Code may write what it learns into a new `CLAUDE.md`
+   instead of the store.
 
 Commands find the store by walking up from the current directory, so
 they work from any subdirectory of the project.

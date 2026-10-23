@@ -2,7 +2,8 @@
 
 The primary path is agent-first: a single non-interactive block —
 `curl | sh` installer (checksum-verified, no sudo), then
-`agent-store --version` and `agent-store init` — that you can hand to a
+`agent-store --version`, `touch AGENTS.md CLAUDE.md` and
+`agent-store init` — that you can hand to a
 coding agent or run yourself. That block, plus the secondary methods
 (Homebrew, Nix, cargo, prebuilt binaries), lives in the
 [README](../README.md#install). This page covers verification, shell
