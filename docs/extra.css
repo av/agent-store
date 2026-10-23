@@ -23,3 +23,12 @@
 [data-md-color-scheme="slate"] .md-typeset h1 img[alt="agent-store"] {
   content: url("../assets/logo-dark.svg");
 }
+
+/* Dark scheme: a dark header instead of Material's saturated green bar,
+   with links in the brand's dark-palette accent green (assets/README.md). */
+[data-md-color-scheme="slate"][data-md-color-primary="green"] {
+  --md-primary-fg-color: #161b22;
+  --md-primary-fg-color--light: #21262d;
+  --md-primary-fg-color--dark: #0d1117;
+  --md-typeset-a-color: #3fb950;
+}
