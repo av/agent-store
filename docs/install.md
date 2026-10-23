@@ -9,6 +9,22 @@ coding agent or run yourself. That block, plus the secondary methods
 [README](../README.md#install). This page covers verification, shell
 completions, the man page, and upgrade/uninstall.
 
+## Install script options
+
+The `curl | sh` installer reads two environment variables:
+
+```sh
+export AGENT_STORE_VERSION=v0.1.2           # this tag, not the latest release
+export AGENT_STORE_INSTALL_DIR="$HOME/bin"  # this directory, not ~/.local/bin
+curl -fsSL https://raw.githubusercontent.com/av/agent-store/master/install.sh | sh
+```
+
+Without `AGENT_STORE_INSTALL_DIR`, the binary goes to `~/.local/bin`. Only
+when that directory can't be created or written does the installer fall
+back to `/usr/local/bin`, and that fallback is the one step that runs
+`sudo`. When the install directory isn't on your `PATH`, the installer
+prints the `export PATH=...` line to add to your shell profile.
+
 ## Verifying release downloads
 
 Each release asset has a matching `.sha256` file. Download both into the
@@ -40,8 +56,9 @@ automatically.
 
 ## Windows
 
-The simplest Windows installs are `cargo binstall` (prebuilt) or
-`cargo install` from the README's install section — both work natively.
+The install script is unix-only. The simplest Windows installs are
+`cargo binstall` (prebuilt) or `cargo install` from the README's install
+section, which both work natively but need a Rust toolchain first.
 To install from the release zip instead, this PowerShell block
 downloads, verifies the SHA-256 checksum, and extracts (the zip has
 `agent-store.exe` at its root, plus `LICENSE`, `THIRD-PARTY-LICENSES.md`,
@@ -68,9 +85,10 @@ this once, not on every upgrade):
 [Environment]::SetEnvironmentVariable("Path", "$env:LOCALAPPDATA\Programs\agent-store;" + [Environment]::GetEnvironmentVariable("Path", "User"), "User")
 ```
 
-The core CLI works natively; [hooks](hooks.md) run their commands via
-`bash -c`, so hooks need a `bash` on `PATH` (Git Bash or WSL) —
-everything else works without one.
+The core CLI works natively; [hooks](hooks.md) and
+[schedules](schedules.md) run their commands via `bash -c`, so they need
+a `bash` on `PATH` (Git Bash or WSL) — everything else works without
+one. The bundled shell completions and man page are for unix shells.
 
 ## Shell completions and man page
 
