@@ -9,81 +9,69 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Example `examples/import-memory-md.sh`: migrating an existing MEMORY.md
-  into the store — the README one-liner plus a structured pass that turns
-  headings into a queryable `topic` field.
-- Brand: redesigned logo — a bracketed store enclosing a green link — with
-  a full variant set in `assets/` (light/dark lockups, mark-only, white-on-
-  green mark, favicon PNG/ICO) and an `assets/README.md` documenting the
-  palette, variants, and regeneration commands.
-- README: hooks/links demo GIF (`assets/demo-hooks.gif`) showing a hook
-  creating an event record, plus `links` and `ctx` reflecting it.
-- Social preview card (`assets/social-preview.{svg,png}`, 1280x640 dark
-  card with tagline), and Open Graph/Twitter card meta on the docs site.
-- README: a Stability section stating what is stable at v0.1.x (on-disk
-  data survives upgrades via automatic, checksummed schema migrations),
-  what may still change pre-1.0 (CLI flags, output wording, `--json`
-  shapes), and the escape hatches (`find --json` export, plain SQLite
-  file).
-- README: "How agents use it" section walking the session-to-session memory
-  loop, and a "Why not just...?" section answering MEMORY.md, grep, vector
-  memory, and git history head-on.
-- README: notes for scripters and evaluators — the stdout/stderr/exit-code
-  contract for `--json` mode, a one-line concurrency/durability summary
-  (WAL, serialized writes), and a tested one-liner for importing an
-  existing `MEMORY.md` via `jq` + `create --stdin`.
-- Docs: `docs/install.md` — verification and attestations, shell
-  completions and man page, upgrade/uninstall — split out of the README.
-- Docs: a Windows section in `docs/install.md` with a PowerShell
-  download-verify-install block (checksum compare, `Expand-Archive`, user
-  PATH), plus a README Windows paragraph that leads with `cargo binstall`
-  and names the real `.sha256` asset.
-- Docs: FAQ gained a "Why not just git history?" answer and measured
-  10k-record performance numbers; FAQ and Concepts now cover schedules and
-  the v3 schema.
-- Cargo.toml: declared `rust-version = "1.78"` (minimum supported Rust for
-  `cargo install`), and pointed `homepage`/`documentation` at the docs site.
+- An upgrade test opens stores written by the released v0.1.0, v0.1.1 and
+  v0.1.2 binaries and checks that every record, link, hook run and
+  schedule survives and schema migration 3 is applied.
+- Cargo.toml declares `rust-version = "1.78"` (minimum supported Rust for
+  `cargo install`), and `homepage`/`documentation` point at the docs site.
+- Docs: a "Claude Code, Codex and Cursor" page (`docs/agents.md`): what
+  `init` writes, which agent reads which file, and the step for a fresh
+  repo with no `AGENTS.md`/`CLAUDE.md` yet.
+- Docs: `docs/install.md` with download verification and attestations,
+  shell completions and the man page, installer options, upgrade and
+  uninstall per install channel, and a Windows PowerShell
+  download-verify-install block.
+- Docs: the README covers the session-to-session memory loop, "Why not
+  just...?" (MEMORY.md, grep, vector memory, git history) and a Stability
+  section; the FAQ covers git history, sharing a store with a worktree or
+  seeding a clone, and measured 10k-record performance.
+- Example `examples/import-memory-md.sh`: migrate an existing MEMORY.md
+  into the store.
+- Brand: a new logo with light/dark variants, a hooks/links demo GIF, and
+  a social preview card with Open Graph/Twitter meta on the docs site.
 
 ### Changed
 
-- README demo GIF re-rendered with the brand terminal theme; the demo now
-  also shows `set`, and demo GIFs no longer open on a blank typing frame —
-  the first command is rendered instantly, so the payoff is visible from
-  frame 0.
-- One canonical tagline — "Persistent, queryable memory for coding agents:
-  one binary, one SQLite file in your repo, no server." — now appears
-  consistently in the README, `--help`, the man page description,
-  Cargo.toml, the crate docs, the docs site description, and the
-  `install.sh` header. The man page NAME line and the social preview card
-  use its short form, "Persistent, queryable memory for coding agents".
-- README Install section is agent-first: it opens with a one-line prompt to
-  hand a coding agent, then a single non-interactive `curl | sh` block
-  (checksum-verified, no sudo, ends in `agent-store init`); Homebrew, Nix,
-  cargo, and prebuilt binaries are compacted into an "Other ways to
-  install" list, with verification/completions/upgrade depth in
-  `docs/install.md`.
-- README reordered for first-viewport clarity: tagline under the badges,
-  the hook paragraph and create/find sample above the demo GIF.
-- README back half condensed to teasers linking into the docs pages; the
-  Commands table now fits a 375px phone screen (hook/schedule subcommands
-  moved into the description column).
-- README logo switches between light/dark variants via a GitHub-native
-  `<picture>` element; the docs site keys the hero logo and header/favicon
-  off its own color scheme.
-- The package manifest now ships only an allowlist of files (`src/`,
-  `Cargo.toml`, licenses, `README.md`, `CHANGELOG.md`) instead of the full
-  repo tree; README image links use absolute URLs so they would render on
-  crates.io once the crate is published.
+- Re-running `agent-store init` refreshes builtin skill files and the
+  managed `AGENTS.md`/`CLAUDE.md` block that are unmodified copies from an
+  earlier release, so upgraded projects get current skills such as the
+  schedules section. Edited files are kept and reported with how to
+  replace them. `init --json` adds `skills_refreshed` and
+  `skills_modified`, and an instruction status may be `refreshed` or
+  `modified`.
+- `--help`, the man page and the crate description use one tagline:
+  "Persistent, queryable memory for coding agents: one binary, one SQLite
+  file in your repo, no server."
+- Release binaries are built with `--locked` from `Cargo.lock`, and the
+  release workflow flags a skipped crates.io publish or Homebrew tap bump
+  with a notice instead of skipping silently.
+- The package manifest ships only an allowlist of files (`src/`,
+  `Cargo.toml`, licenses, `README.md`, `CHANGELOG.md`).
 
 ### Fixed
 
-- Favicon was nearly invisible on dark browser tab bars: the docs site now
-  serves the dual-theme SVG mark, and the PNG/ICO fallbacks use a
-  theme-neutral palette legible on both light and dark.
-- The "Verifying release downloads" snippet in `docs/install.md` fetched a
-  nonexistent `<asset>.sha256` file (release checksums are named after the
-  target, e.g. `agent-store-v0.1.2-x86_64-unknown-linux-musl.sha256`, not
-  after the archive), so the documented verification always 404'd.
+- `schedule enable`/`disable` no longer touch another project's crontab
+  entry when one project root is a prefix of another, quote project and
+  binary paths (spaces, quotes, `%`) in the cron line, record the invoked
+  `agent-store` path so Homebrew/Nix upgrades keep the entry working, and
+  refuse to rewrite a crontab that `crontab -l` could not read.
+- `schedule add at` rejects dates and times that do not exist
+  (`2026-02-30`, `25:99`, trailing text) with exit 2 instead of storing a
+  schedule that never fires correctly, stores timestamps with a UTC offset
+  as their UTC instant so `tick` fires them on time, and no longer panics
+  on a duration ending in a non-ASCII character.
+- The Nix flake builds again; it had failed since v0.1.2 (two
+  sandbox-incompatible hook tests are now skipped in the Nix check phase),
+  and the flake's package version comes from Cargo.toml instead of a stale
+  hard-coded 0.1.1.
+- Install docs: the "Verifying release downloads" snippet fetched a
+  nonexistent `<archive>.sha256` (checksums are named after the target)
+  and the attestation command used an unset `$asset`; the `cargo
+  uninstall` name is `agent-store-cli`; the uninstall section covers
+  crontab entries and `init` leftovers. The release notes template's
+  verify snippet and binstall crate name are fixed too.
+- Docs: sample outputs that differed from the binary are re-captured from
+  real runs.
 
 ## [0.1.2] - 2026-07-13
 
