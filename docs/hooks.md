@@ -28,10 +28,10 @@ records; without one, the hook fires on every event of that type.
 
 ```sh
 $ agent-store hook add create kind=task -- 'echo "new task $AGENT_STORE_ID" >> tasks.log'
-5xwtto
+58gj0c
 
 $ agent-store hook ls
-5xwtto create query='kind=task' -- 'echo "new task $AGENT_STORE_ID" >> tasks.log'
+58gj0c create query='kind=task' -- 'echo "new task $AGENT_STORE_ID" >> tasks.log'
 ```
 
 ## What the command receives
@@ -83,19 +83,21 @@ detect hook failures.
 ## Inspecting runs
 
 Every execution is recorded. `hook runs` lists recent runs newest first;
-`hook runs <run-id>` shows one run's captured output:
+`hook runs <run-id>` shows one run's captured output. Here a task was
+created and then set to `status=done`, with the `create` hook above and
+the field-transition hook from the previous section:
 
 ```sh
 $ agent-store hook runs
-2 2026-07-03T09:52:18.030Z hook=oxnpm7 event=set record=0zgjrb exit=0
-1 2026-07-03T09:52:18.008Z hook=5xwtto event=create record=sc30ut exit=0
+2 2026-10-23T05:40:12.484Z hook=89etcd event=set record=c29g8e exit=0
+1 2026-10-23T05:40:12.448Z hook=58gj0c event=create record=c29g8e exit=0
 
 $ agent-store hook runs 2
 run: 2
-created_at: 2026-07-03T09:52:18.030Z
-hook: oxnpm7
+created_at: 2026-10-23T05:40:12.484Z
+hook: 89etcd
 event: set
-record: 0zgjrb
+record: c29g8e
 exit_status: 0
 stdout:
 status: pending -> done
