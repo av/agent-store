@@ -112,6 +112,16 @@
 - label: every command except init fails with exit code 1 and a no agent-store found; run 'agent-store init' first stderr message when no .agent-store/ exists in the current directory or any ancestor, creates no files or directories as a side effect, and works normally after agent-store init
   command: bash tests/facts/cli_records.sh uninitialized_store_errors
   tags: [implemented]
+- label: agent-store init installs skills whose frontmatter descriptions say when to use them (the core skill: remembering decisions, tasks and findings across sessions, session start, handing off work), and which between them show the create, find, get, set, unset, rm, link, unlink, links and ctx commands, a handoff recipe, one area/choice/reason field convention for decisions, and that a mutation reported as already committed when a hook fails must not be retried
+  id: 0ro
+  command: bash tests/facts/cli_records.sh init_skills_say_when_to_use
+  tags: [implemented]
+- label: the managed instructions block that agent-store init adds tells agents to run agent-store ctx at session start, to run agent-store init only when no store is found, and to record decisions, tasks and handoff notes in the store
+  command: bash tests/facts/cli_records.sh init_block_points_at_ctx
+  tags: [implemented]
+- label: the builtin skills tracked in the agent-store repository under .agents/skills are byte-identical to the SKILL.md files agent-store init installs under .agents/skills and .claude/skills
+  command: bash tests/facts/cli_records.sh tracked_skills_match_init
+  tags: [implemented]
 
 ## aliases
 - label: agent-store cr is a short alias for create with identical arguments, behavior, and output

@@ -91,9 +91,10 @@ const HOOK_ENV_KEYS: &[&str] = &[
 const INSTRUCTIONS_BLOCK: &str = "\
 <!-- agent-store:start -->
 ## agent-store
-- Run `agent-store init` before using the project-local store.
-- Use `agent-store create <kind> key=value...` to store records and `agent-store find <query>` to retrieve them.
-- Use `agent-store ctx` for a compact project summary, and read the installed `agent-store` skills for workflow guidance.
+This project keeps its cross-session memory in agent-store, a queryable record store in `.agent-store/`.
+- At session start, run `agent-store ctx` to see recorded decisions, tasks and notes. Run `agent-store init` only if it reports that no store was found.
+- Record decisions, tasks and handoff notes in the store rather than in this file, e.g. `agent-store create decision area=<topic> choice=<what> reason=<why>` or `agent-store create task title=<what> status=pending`.
+- Look things up with `agent-store find <query>` (e.g. `agent-store find kind=decision area=auth`); the installed `agent-store` skills have the full workflow.
 <!-- agent-store:end -->
 ";
 
@@ -108,31 +109,68 @@ const BUILTIN_SKILLS: &[BuiltinSkill] = &[
         content: r#"---
 name: agent-store
 description: >
-  Core agent-store guide for initializing stores, creating records, querying,
-  and reading compact project context.
+  Project memory that persists across sessions, stored in this repo's
+  .agent-store/. Use it whenever you are asked to remember, record, save or
+  note something for future sessions (a decision, task, convention or
+  finding), when you need to recall what earlier sessions decided or did, at
+  session start or resume (run `agent-store ctx`), and when handing off work.
+  Prefer it over writing notes into CLAUDE.md, AGENTS.md or your own memory
+  files.
+  Covers create, find, get, set, unset, rm, link, unlink, links, ctx, hooks
+  and schedules.
 ---
 
 # agent-store
 
-Use `agent-store init` once per project to create `.agent-store/`, install
-these skills, and add project instructions when `AGENTS.md` or `CLAUDE.md`
-already exists.
+agent-store is this project's memory across sessions: small records with a
+kind and `key=value` fields, kept in `.agent-store/` and queried with
+`agent-store find`. Anything a later session should know (decisions, open
+tasks, conventions, findings, handoff notes) belongs here.
+
+At session start or resume, read what earlier sessions recorded:
+
+```bash
+agent-store ctx
+```
+
+If it fails with `no agent-store found`, run `agent-store init` once (it
+creates `.agent-store/`, installs these skills, and adds the instructions
+block to `AGENTS.md` and `CLAUDE.md` when they exist), then continue.
+
+Record a decision and find it again (see `agent-store-patterns` for the
+field conventions):
+
+```bash
+agent-store create decision area=auth choice="session cookies" reason="no token refresh to manage"
+agent-store find kind=decision area=auth
+```
 
 Core loop:
 
 ```bash
-agent-store init
-agent-store create task title="Write tests" status=pending
+agent-store create task title="Write tests" status=pending   # prints the new ID
 agent-store find 'kind=task and status=pending'
 agent-store get <id>
-agent-store ctx
+agent-store set <id> status=done owner=me    # add or change fields
+agent-store unset <id> owner                 # remove fields
+agent-store rm <id>                          # delete the record
+```
+
+Links are directional, named edges between records:
+
+```bash
+agent-store link <from-id> implements <to-id>
+agent-store links <id>                       # outgoing and incoming links
+agent-store unlink <from-id> implements <to-id>
+agent-store find 'link.out=implements'       # records with an outgoing implements link
 ```
 
 Records have a kind plus arbitrary `key=value` fields. Use short IDs printed
-by mutation commands to retrieve or update specific records. Kinds and field
-names cannot contain whitespace, control characters, quotes, or `=`; `kind`
-and `id` are reserved field names (in queries, `kind` always addresses the
-record kind). Field values are unrestricted.
+by mutation commands to retrieve or update specific records; any unambiguous
+prefix works. Kinds and field names cannot contain whitespace, control
+characters, quotes, or `=`; `kind` and `id` are reserved field names (in
+queries, `kind` always addresses the record kind). Field values are
+unrestricted.
 
 Queries join comparisons with `and`, `or`, `not`, and parentheses. Multiple
 bare query arguments are joined with an implicit `and`, so
@@ -181,10 +219,15 @@ default-format record line, plus environment variables: `AGENT_STORE_EVENT`
 (create, set, unset, rm, link, or unlink), `AGENT_STORE_ID`, and
 `AGENT_STORE_KIND` are always set. `AGENT_STORE_REL` and
 `AGENT_STORE_TARGET_ID` are set on link/unlink. When a set or unset touches
-exactly one field, `AGENT_STORE_FIELD` and `AGENT_STORE_KEY` hold the field
-key, `AGENT_STORE_VALUE` the new value (the old value on unset), and
+exactly one field, `AGENT_STORE_FIELD` holds the field key and
 `AGENT_STORE_OLD_VALUE`/`AGENT_STORE_NEW_VALUE` the before/after values
-(empty when absent).
+(empty when absent); the older `AGENT_STORE_KEY` and `AGENT_STORE_VALUE` are
+still set for existing hooks.
+
+If a mutation prints its result and then exits 1 with `failed to run hooks
+after Store mutation already committed`, the change was saved and only a
+hook failed: do not retry it (a retried `create` makes a duplicate record).
+Check `agent-store hook runs` and report the failing hook instead.
 
 Schedules run bash commands on a time basis, complementing event-triggered
 hooks. Two kinds: `at` fires once at an absolute timestamp, `every` fires
@@ -196,7 +239,7 @@ match):
 ```bash
 agent-store schedule add every 5m -- 'echo heartbeat'
 agent-store schedule add at 2026-07-07T12:00:00Z -- 'cleanup.sh'
-agent-store schedule add every 1h 'kind=task and status=open' -- 'notify.sh'
+agent-store schedule add every 1h 'kind=task and status=pending' -- 'notify.sh'
 agent-store schedule ls
 agent-store schedule runs            # recent runs; `schedule runs <run-id>` for detail
 agent-store schedule rm <id>
@@ -222,19 +265,43 @@ Duration expressions: `Ns` (seconds), `Nm` (minutes), `Nh` (hours), `Nd`
         content: r#"---
 name: agent-store-patterns
 description: >
-  Workflow recipes for using agent-store as a scratchpad, task tracker,
-  decision log, and handoff memory.
+  Recipes for agent-store project memory: a decision log, tasks tracked
+  across sessions, scratch notes, linked records, and a handoff note for the
+  next session. Use when recording or looking up a project decision, when
+  tracking or resuming multi-session work, at session start, and at the end
+  of a session or when handing work to another agent.
 ---
 
 # agent-store-patterns
 
 Use records as small, queryable notes rather than long append-only logs.
+Keep one field convention per kind so later sessions can query it.
 
-Scratchpad:
+Session start (or resume): read the summary, then the open work and the
+latest handoff:
 
 ```bash
-agent-store create scratch task=refactor step=1 note="parsed current API"
-agent-store find 'kind=scratch and task=refactor'
+agent-store ctx
+agent-store find 'kind=task and status!=done'
+agent-store find kind=handoff --sort created_at --desc --limit 1
+```
+
+Decision log. Always use `area` (a short topic such as `auth`, `database` or
+`ci`), `choice` (what was decided) and `reason` (why), so
+`find kind=decision area=<topic>` finds every decision on a topic:
+
+```bash
+agent-store create decision area=auth choice="session cookies" reason="no token refresh to manage"
+agent-store find kind=decision area=auth
+agent-store find kind=decision --sort created_at --desc --limit 3 --timestamps   # latest decisions
+```
+
+When a decision is replaced, record the new one, link it to the old one, and
+mark the old one:
+
+```bash
+agent-store link <new-id> supersedes <old-id>
+agent-store set <old-id> status=superseded
 ```
 
 Task tracking:
@@ -245,15 +312,34 @@ agent-store find 'kind=task and status!=done'
 agent-store find kind=task status=pending --sort created_at --limit 5   # oldest open work first
 agent-store find 'kind=task and status!=done' --count
 agent-store set <id> status=done
+agent-store unset <id> priority     # drop a field that no longer applies
+agent-store rm <id>                 # delete a task created by mistake
 ```
 
-Decision log:
+Link related records, e.g. a task to the decision it implements:
 
 ```bash
-agent-store create decision area=storage choice=sqlite reason="single-file project-local store"
-agent-store find 'kind=decision and area=storage'
-agent-store find kind=decision --sort created_at --desc --limit 3 --timestamps   # latest decisions
+agent-store link <task-id> implements <decision-id>
+agent-store links <decision-id>
+agent-store unlink <task-id> implements <decision-id>
 ```
+
+Scratchpad:
+
+```bash
+agent-store create scratch task=refactor step=1 note="parsed current API"
+agent-store find 'kind=scratch and task=refactor'
+```
+
+Handoff, before ending a session or passing work on: update the tasks you
+touched, then leave one note saying where things stand:
+
+```bash
+agent-store set <task-id> status=in-progress next="wire the parser into main"
+agent-store create handoff summary="parser half done; tests pass" next="wire the parser into main"
+```
+
+The next session picks it up with the session-start commands above.
 
 Chronology is built in: listings default to creation order (oldest first),
 and the `created_at`/`updated_at` timestamps are sortable and queryable, so
@@ -265,8 +351,10 @@ records do not need a manual date field.
         content: r#"---
 name: agent-store-pipelines
 description: >
-  Shell composition patterns for importing, exporting, and transforming
-  agent-store records.
+  Shell composition patterns for agent-store records: JSONL export and
+  import, jq filtering, batch creation, and capturing command output. Use
+  when exporting, importing, backing up or moving project memory, or when
+  scripting over many records at once.
 ---
 
 # agent-store-pipelines
@@ -287,6 +375,14 @@ timestamps are ignored, so exports round-trip):
 
 ```bash
 agent-store find kind=task --json | jq -c '.records[]' | agent-store create --stdin
+```
+
+Export the whole store to a file and import it elsewhere (records get new
+IDs; links are not exported, so re-create them with `link`):
+
+```bash
+agent-store find --json | jq -c '.records[]' > memory.jsonl
+agent-store create --stdin < memory.jsonl
 ```
 
 Every line is validated before any record is created; an invalid line exits

@@ -1104,8 +1104,48 @@ PY
     grep -Fq "\"skills_refreshed\":[]" "$tmp"/agent-store-init-ref-4.out
     ;;
 
+  init_skills_say_when_to_use)
+    cd "$tmp"
+    run_agent_store init >"$tmp"/agent-store-init-when.out
+    for root in .agents/skills .claude/skills; do
+      for skill in agent-store agent-store-patterns agent-store-pipelines; do
+        description="$(sed -n '/^description:/,/^---$/p' "$root/$skill/SKILL.md" | tr -s '\n ' '  ')"
+        printf "%s\n" "$description" | grep -Eq "Use (it )?when"
+      done
+      core="$(sed -n '/^description:/,/^---$/p' "$root/agent-store/SKILL.md" | tr -s '\n ' '  ')"
+      for phrase in "across sessions" "remember" "session start" "handing off"; do
+        printf "%s\n" "$core" | grep -Fq "$phrase"
+      done
+      grep -Fq "handoff" "$root/agent-store-patterns/SKILL.md"
+      grep -Fq "already committed" "$root/agent-store/SKILL.md"
+      grep -Fq "do not retry" "$root/agent-store/SKILL.md"
+      grep -Eq "agent-store create decision area=[^ ]+ choice=.+ reason=" "$root/agent-store-patterns/SKILL.md"
+      for command in create find get set unset rm link unlink links ctx; do
+        cat "$root"/agent-store*/SKILL.md | grep -Eq "agent-store $command( |$)"
+      done
+    done
+    ;;
+
+  init_block_points_at_ctx)
+    cd "$tmp"
+    printf "# project\n" > AGENTS.md
+    run_agent_store init >"$tmp"/agent-store-init-block.out
+    block="$(sed -n '/<!-- agent-store:start -->/,/<!-- agent-store:end -->/p' AGENTS.md)"
+    printf "%s\n" "$block" | grep -Fq "At session start, run \`agent-store ctx\`"
+    printf "%s\n" "$block" | grep -Fq "Run \`agent-store init\` only if"
+    printf "%s\n" "$block" | grep -Fq "Record decisions, tasks and handoff notes in the store"
+    if printf "%s\n" "$block" | grep -Fq "before using the project-local store"; then exit 1; fi
+    ;;
+
+  tracked_skills_match_init)
+    cd "$tmp"
+    run_agent_store init >"$tmp"/agent-store-init-tracked.out
+    diff -r "$repo/.agents/skills" .agents/skills
+    diff -r .agents/skills .claude/skills
+    ;;
+
   *)
-    echo "usage: $0 {create_alias_matches_create|find_alias_matches_find|set_updates_fields|unset_removes_fields|find_filters_records|arbitrary_field_queries|query_boolean_syntax|query_contains_operator|query_argument_parity|query_typed_values|field_empty_null_unset_semantics|record_id_generation_contract|record_id_resolution_errors|json_output|json_error_envelope|uninitialized_store_errors|broken_pipe_exits_quietly|identifier_validation_rejects_unsafe_names|create_stdin_imports_jsonl|init_output_summary|init_refreshes_shipped_skills}" >&2
+    echo "usage: $0 {create_alias_matches_create|find_alias_matches_find|set_updates_fields|unset_removes_fields|find_filters_records|arbitrary_field_queries|query_boolean_syntax|query_contains_operator|query_argument_parity|query_typed_values|field_empty_null_unset_semantics|record_id_generation_contract|record_id_resolution_errors|json_output|json_error_envelope|uninitialized_store_errors|broken_pipe_exits_quietly|identifier_validation_rejects_unsafe_names|create_stdin_imports_jsonl|init_output_summary|init_refreshes_shipped_skills|init_skills_say_when_to_use|init_block_points_at_ctx|tracked_skills_match_init}" >&2
     exit 2
     ;;
 esac

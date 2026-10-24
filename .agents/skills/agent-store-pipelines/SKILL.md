@@ -1,8 +1,10 @@
 ---
 name: agent-store-pipelines
 description: >
-  Shell composition patterns for importing, exporting, and transforming
-  agent-store records.
+  Shell composition patterns for agent-store records: JSONL export and
+  import, jq filtering, batch creation, and capturing command output. Use
+  when exporting, importing, backing up or moving project memory, or when
+  scripting over many records at once.
 ---
 
 # agent-store-pipelines
@@ -23,6 +25,14 @@ timestamps are ignored, so exports round-trip):
 
 ```bash
 agent-store find kind=task --json | jq -c '.records[]' | agent-store create --stdin
+```
+
+Export the whole store to a file and import it elsewhere (records get new
+IDs; links are not exported, so re-create them with `link`):
+
+```bash
+agent-store find --json | jq -c '.records[]' > memory.jsonl
+agent-store create --stdin < memory.jsonl
 ```
 
 Every line is validated before any record is created; an invalid line exits
