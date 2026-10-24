@@ -128,8 +128,7 @@ nix profile upgrade agent-store                                                 
 cargo install --force --git https://github.com/av/agent-store                        # cargo (source or binstall)
 ```
 
-`agent-store --version` tells you what you're on. The Homebrew tap still
-ships v0.1.0, so `brew upgrade` does not reach the latest release yet. On
+`agent-store --version` tells you what you're on. On
 Windows, re-run the PowerShell block above with the new tag. Then re-run
 `agent-store init` in each project to refresh the skills and instructions
 block you have not edited ([details](skills.md#updating)).

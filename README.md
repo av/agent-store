@@ -53,7 +53,7 @@ The script picks the build for your OS and architecture (Linux x86_64, macOS x86
 
 For humans installing by hand, or platforms the script doesn't cover:
 
-- **Homebrew** (macOS and Linux; includes man page and completions): `brew install av/tap/agent-store`. The tap still ships v0.1.0 (no schedules, none of the later fixes): prefer the script or cargo-binstall until it catches up.
+- **Homebrew** (macOS and Linux; includes man page and completions): `brew install av/tap/agent-store`.
 - **Nix** (flakes; includes man page and completions): `nix profile install github:av/agent-store`, or `nix run github:av/agent-store` to try it without installing. `nix develop` gives a dev shell with the Rust toolchain, clippy, and rustfmt.
 - **cargo-binstall** (prebuilt, no compile): `cargo binstall --git https://github.com/av/agent-store agent-store-cli` (the crate is `agent-store-cli`; the binary is still `agent-store`)
 - **Build from source** (needs [Rust](https://rustup.rs) 1.78+ and a C compiler — the bundled SQLite compiles from source, so `apt install gcc` first on a fresh machine): `cargo install --git https://github.com/av/agent-store`
