@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Skills and the `AGENTS.md`/`CLAUDE.md` block now tell agents when to use
+  the store: skill descriptions name remembering decisions and tasks across
+  sessions, session start and handoff, so Claude Code uses the store from
+  the skills alone in a fresh repo; the block says to run `agent-store ctx`
+  at session start instead of re-running `init`; the skills cover `unset`,
+  `rm`, `link`/`unlink`/`links`, a handoff recipe, one
+  `area`/`choice`/`reason` decision convention, and not retrying a mutation
+  whose hook failed after it committed. Re-running `init` refreshes
+  unedited copies.
+
 ## [0.1.3] - 2026-10-24
 
 Highlights:
