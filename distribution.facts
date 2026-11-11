@@ -7,4 +7,4 @@
   tags: [implemented]
 
 ## release assets
-- every tagged release publishes Linux arm64 archives for aarch64-unknown-linux-gnu and aarch64-unknown-linux-musl, each with a .sha256 checksum asset and a build-provenance attestation, alongside the x86_64 Linux, macOS and Windows archives @spec
+- every tagged release publishes Linux arm64 archives for aarch64-unknown-linux-gnu and aarch64-unknown-linux-musl, each with a .sha256 checksum asset and a build-provenance attestation, alongside the x86_64 Linux, macOS and Windows archives @implemented
