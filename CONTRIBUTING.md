@@ -33,7 +33,8 @@ src/store.rs   SQLite-backed store: records, links, hooks, schedules, ctx,
                schema migrations
 src/value.rs   typed field values and comparison semantics
 src/output.rs  text and --json rendering
-*.facts        the spec: .facts, concurrency.facts, json-hooks.facts
+*.facts        the spec: .facts, concurrency.facts, json-hooks.facts,
+               distribution.facts
 tests/         integration tests; tests/facts/ holds the shell scripts
                that fact commands run
 docs/          user-facing docs (install, agents, Claude Code tutorial,
