@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-11-11
+
+Highlights:
+
+- Linux arm64 gets prebuilt binaries: the install script, Homebrew and
+  `cargo binstall` now work on Graviton and Ampere servers, Raspberry Pi
+  OS 64-bit and arm64 containers without a Rust toolchain.
+- Agents reach for the store on their own: the skills and the
+  `AGENTS.md`/`CLAUDE.md` block say when to use it and to start each
+  session with `agent-store ctx`. Re-run `agent-store init` after
+  upgrading to refresh unedited copies.
+
 ### Added
 
 - Prebuilt Linux arm64 binaries: releases now ship
@@ -272,7 +284,8 @@ First public release.
   hook races covered by tests), graceful handling of broken stdout pipes, and
   an explicit error when commands run before `init`.
 
-[Unreleased]: https://github.com/av/agent-store/compare/v0.1.3...HEAD
+[Unreleased]: https://github.com/av/agent-store/compare/v0.1.4...HEAD
+[0.1.4]: https://github.com/av/agent-store/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/av/agent-store/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/av/agent-store/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/av/agent-store/compare/v0.1.0...v0.1.1
