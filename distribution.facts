@@ -4,7 +4,7 @@
 ## install script
 - label: install.sh selects the aarch64-unknown-linux-musl release archive on Linux aarch64 or arm64 and the x86_64-unknown-linux-musl archive on Linux x86_64, and exits nonzero pointing at cargo install on other Linux architectures
   command: bash tests/facts/distribution.sh installer_targets
-  tags: [spec]
+  tags: [implemented]
 
 ## release assets
 - every tagged release publishes Linux arm64 archives for aarch64-unknown-linux-gnu and aarch64-unknown-linux-musl, each with a .sha256 checksum asset and a build-provenance attestation, alongside the x86_64 Linux, macOS and Windows archives @spec
