@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Prebuilt Linux arm64 binaries: releases now ship
+  `aarch64-unknown-linux-gnu` and `aarch64-unknown-linux-musl` archives,
+  each with a SHA-256 checksum and a build-provenance attestation, so
+  Graviton and Ampere servers, Raspberry Pi OS 64-bit and arm64 containers
+  install without a Rust toolchain. The install script picks the musl
+  build on Linux `aarch64`/`arm64`, and `cargo binstall` finds it too.
+
 ### Changed
 
 - Skills and the `AGENTS.md`/`CLAUDE.md` block now tell agents when to use

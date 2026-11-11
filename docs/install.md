@@ -27,7 +27,11 @@ prints the `export PATH=...` line to add to your shell profile.
 
 ## Verifying release downloads
 
-Each release asset has a matching `.sha256` file. Download both into the
+Each release asset has a matching `.sha256` file. The targets are
+`x86_64-unknown-linux-gnu`, `x86_64-unknown-linux-musl`,
+`aarch64-unknown-linux-gnu` and `aarch64-unknown-linux-musl` (Linux arm64,
+from v0.1.4), `x86_64-apple-darwin`, `aarch64-apple-darwin` and
+`x86_64-pc-windows-msvc`. Download an archive and its `.sha256` into the
 same directory and check:
 
 ```sh

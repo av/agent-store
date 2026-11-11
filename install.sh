@@ -29,7 +29,8 @@ detect_target() {
         Linux)
             case "$arch" in
                 x86_64 | amd64) echo "x86_64-unknown-linux-musl" ;;
-                *) err "unsupported Linux architecture: $arch (prebuilt binaries: x86_64 only; use 'cargo install --git https://github.com/$REPO')" ;;
+                aarch64 | arm64) echo "aarch64-unknown-linux-musl" ;;
+                *) err "unsupported Linux architecture: $arch (prebuilt binaries: x86_64 and aarch64 only; use 'cargo install --git https://github.com/$REPO')" ;;
             esac
             ;;
         Darwin)

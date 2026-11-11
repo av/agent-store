@@ -47,7 +47,7 @@ touch AGENTS.md CLAUDE.md   # init adds its block only to files that exist
 agent-store init
 ```
 
-The script picks the build for your OS and architecture (Linux x86_64, macOS x86_64/arm64), **verifies its SHA-256 checksum**, and installs to `~/.local/bin` without root or prompts; any failure exits nonzero. The `export PATH` line covers the current shell; the installer prints the line for your shell profile when `~/.local/bin` isn't on your `PATH`. `touch` makes sure `AGENTS.md` and `CLAUDE.md` exist (existing files keep their content): `init` adds its instructions block only to existing files, and that block is what reliably points Claude Code (`CLAUDE.md`) and Codex (`AGENTS.md`) at the store ([details](docs/agents.md)). Installer options: [Install details](docs/install.md#install-script-options).
+The script picks the build for your OS and architecture (Linux x86_64/arm64, macOS x86_64/arm64), **verifies its SHA-256 checksum**, and installs to `~/.local/bin` without root or prompts; any failure exits nonzero. The `export PATH` line covers the current shell; the installer prints the line for your shell profile when `~/.local/bin` isn't on your `PATH`. `touch` makes sure `AGENTS.md` and `CLAUDE.md` exist (existing files keep their content): `init` adds its instructions block only to existing files, and that block is what reliably points Claude Code (`CLAUDE.md`) and Codex (`AGENTS.md`) at the store ([details](docs/agents.md)). Installer options: [Install details](docs/install.md#install-script-options).
 
 ### Other ways to install
 
@@ -57,7 +57,7 @@ For humans installing by hand, or platforms the script doesn't cover:
 - **Nix** (flakes; includes man page and completions): `nix profile install github:av/agent-store`, or `nix run github:av/agent-store` to try it without installing. `nix develop` gives a dev shell with the Rust toolchain, clippy, and rustfmt.
 - **cargo-binstall** (prebuilt, no compile): `cargo binstall --git https://github.com/av/agent-store agent-store-cli` (the crate is `agent-store-cli`; the binary is still `agent-store`)
 - **Build from source** (needs [Rust](https://rustup.rs) 1.78+ and a C compiler — the bundled SQLite compiles from source, so `apt install gcc` first on a fresh machine): `cargo install --git https://github.com/av/agent-store`
-- **Prebuilt binaries** for Linux (x86_64 gnu/musl), macOS (x86_64/arm64), and Windows (x86_64) from [GitHub Releases](https://github.com/av/agent-store/releases) — each with a SHA-256 checksum and a signed build-provenance attestation. There is no Linux arm64 build yet (Graviton, Ampere, arm64 containers on Apple Silicon): use Nix or build from source there.
+- **Prebuilt binaries** for Linux (x86_64 and arm64, each gnu/musl), macOS (x86_64/arm64), and Windows (x86_64) from [GitHub Releases](https://github.com/av/agent-store/releases) — each with a SHA-256 checksum and a signed build-provenance attestation. The Linux arm64 build covers Graviton and Ampere servers, Raspberry Pi OS 64-bit, and arm64 containers on Apple Silicon.
 
 **Windows:** the install script is unix-only. Use `cargo binstall` or `cargo install` above, or the PowerShell download-and-verify block in [Install details](docs/install.md#windows). Hooks and schedules need a `bash` on `PATH` (Git Bash or WSL); everything else works natively.
 
